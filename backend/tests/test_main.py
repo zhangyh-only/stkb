@@ -24,6 +24,7 @@ def test_foundation_exposes_three_knowledge_forms() -> None:
         "pgvector_projection",
         "neo4j_projection",
     ]
+    assert {item["status"] for item in payload["knowledge_forms"]} == {"configured"}
 
 
 def test_knowledge_file_root_is_inside_project_workspace() -> None:

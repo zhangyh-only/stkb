@@ -6,7 +6,7 @@ type KnowledgeForm = {
   name: string
   technology: string
   role: string
-  status: 'foundation_ready' | 'capability_pending'
+  status: 'configured' | 'capability_pending'
 }
 
 type Foundation = {
@@ -69,7 +69,7 @@ onMounted(async () => {
           <h3>{{ item.name }}</h3>
           <p>{{ item.role }}</p>
           <span class="badge" :class="item.status">
-            {{ item.status === 'foundation_ready' ? '底座就绪' : '能力待实现' }}
+            {{ item.status === 'configured' ? '底座已配置' : '能力待实现' }}
           </span>
         </article>
       </div>

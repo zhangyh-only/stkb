@@ -18,7 +18,7 @@ class KnowledgeForm(BaseModel):
     name: str
     technology: str
     role: str
-    status: Literal["foundation_ready", "capability_pending"]
+    status: Literal["configured", "capability_pending"]
 
 
 class FoundationResponse(BaseModel):
@@ -41,21 +41,21 @@ def foundation() -> FoundationResponse:
                 name="正式知识文件",
                 technology="Markdown / local filesystem",
                 role="Agent 可直接阅读的规范知识内容",
-                status="capability_pending",
+                status="configured",
             ),
             KnowledgeForm(
                 key=KNOWLEDGE_FORM_VECTOR,
                 name="向量检索投影",
                 technology="PostgreSQL / pgvector",
                 role="从正式知识派生检索单元和 embedding",
-                status="foundation_ready",
+                status="configured",
             ),
             KnowledgeForm(
                 key=KNOWLEDGE_FORM_GRAPH,
                 name="知识图谱投影",
                 technology="Neo4j",
                 role="从正式对象和关系派生图查询结构",
-                status="foundation_ready",
+                status="configured",
             ),
         ],
     )
