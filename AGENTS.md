@@ -19,10 +19,10 @@
 
 ## 3. 目录约束
 
-- `backend/app/core/`：配置、日志、健康状态等基础能力。
-- `backend/app/api/`：HTTP 适配，不放领域判断。
-- `backend/app/features/<capability>/`：按验证能力放业务代码。
-- `frontend/src/features/<capability>/`：按验证能力放页面、状态和组件。
+- `services/app/core/`：配置、日志、健康状态等基础能力。
+- `services/app/api/`：HTTP 适配，不放领域判断。
+- `services/app/features/<capability>/`：按验证能力放业务代码。
+- `web/src/features/<capability>/`：按验证能力放页面、状态和组件。
 - `contracts/`：只放已由代码和样例验证、需要跨模块共享的合同。
 - `docs/current/`：当前领域方案；不再保存历史会议转写、旧原型和过程审计。
 - `workspace/`：本地运行输出，仅提交目录说明，不提交真实运行数据。

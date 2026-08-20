@@ -374,7 +374,7 @@ wheels = [
 ]
 
 [[package]]
-name = "stkb-backend"
+name = "stkb-services"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

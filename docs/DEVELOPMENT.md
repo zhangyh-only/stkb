@@ -20,11 +20,11 @@ make dev
 4. PostgreSQL、知识文件、pgvector、Neo4j 和页面分别承担什么；
 5. 哪些能力不在本次范围。
 
-验证代码放在 `backend/app/features/<capability>/`，页面放在 `frontend/src/features/<capability>/`。验证通过后，再决定是否把 Schema 或 API 纳入 `contracts/`。
+验证代码放在 `services/app/features/<capability>/`，页面放在 `web/src/features/<capability>/`。验证通过后，再决定是否把 Schema 或 API 纳入 `contracts/`。
 
 ## 配置
 
-- Python 配置统一从 `backend/app/core/config.py` 读取。
+- Python 配置统一从 `services/app/core/config.py` 读取。
 - 前端 API 地址统一使用 `VITE_API_BASE_URL`。
 - Docker Compose 变量统一来自根目录 `.env`。
 - 共享标识不得在多个模块重复写字面量。

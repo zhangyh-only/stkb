@@ -1,5 +1,5 @@
 [project]
-name = "stkb-backend"
+name = "stkb-services"
 version = "0.1.0"
 description = "STKB 方案验证服务底座"
 requires-python = ">=3.12,<3.13"

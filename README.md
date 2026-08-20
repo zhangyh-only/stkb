@@ -25,8 +25,8 @@ PostgreSQL 是业务登记和运行记录的事实主存。需要验证的三种
 ## 目录
 
 ```text
-backend/       Python 验证服务底座
-frontend/      Vue 验证工作台底座
+services/      Python 验证服务底座
+web/           Vue 验证工作台底座
 infra/         PostgreSQL/pgvector 与 Neo4j 本地环境
 contracts/     经过验证后冻结的跨模块合同
 docs/current/  当前领域方案、映射矩阵和决策台账
