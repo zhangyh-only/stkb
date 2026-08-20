@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${STKB_POSTGRES_DB}
+      POSTGRES_USER: ${STKB_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${STKB_POSTGRES_PASSWORD}
+    ports:
+      - "${STKB_POSTGRES_PORT}:5432"
+    volumes:
+      - stkb-postgres-data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${STKB_POSTGRES_USER} -d ${STKB_POSTGRES_DB}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  neo4j:
+    image: neo4j:5.26-community
+    environment:
+      NEO4J_AUTH: ${STKB_NEO4J_USER}/${STKB_NEO4J_PASSWORD}
+    ports:
+      - "${STKB_NEO4J_HTTP_PORT}:7474"
+      - "${STKB_NEO4J_BOLT_PORT}:7687"
+    volumes:
+      - stkb-neo4j-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7474"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  stkb-postgres-data:
+  stkb-neo4j-data:

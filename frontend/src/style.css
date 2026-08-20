@@ -1,0 +1,41 @@
+:root {
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: #18212f;
+  background: #f2f4f0;
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+
+.shell { width: min(1120px, calc(100% - 40px)); margin: 0 auto; padding: 72px 0; }
+.hero { max-width: 820px; }
+.eyebrow, .section-heading p { margin: 0 0 16px; color: #58705c; font-size: 12px; font-weight: 800; letter-spacing: .16em; }
+h1 { margin: 0; font-size: clamp(42px, 7vw, 78px); line-height: 1.02; letter-spacing: -.05em; }
+.summary { max-width: 680px; margin: 28px 0 0; color: #56606d; font-size: 18px; line-height: 1.8; }
+
+.status-bar { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin: 56px 0 80px; background: #cdd4cc; border: 1px solid #cdd4cc; }
+.status-bar div { display: grid; gap: 8px; padding: 22px; background: #fff; }
+.status-bar span { color: #748077; font-size: 12px; }
+.status-bar strong { font-size: 15px; }
+.is-ready { color: #317646; }
+.is-error { color: #a13838; }
+
+.section-heading h2 { margin: 0 0 24px; font-size: 30px; }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+article { min-height: 290px; padding: 26px; background: #fff; border: 1px solid #dce1da; }
+.index { color: #9da79f; font: 700 13px ui-monospace, monospace; }
+.technology { margin: 50px 0 10px; color: #58705c; font-size: 13px; }
+article h3 { margin: 0 0 14px; font-size: 23px; }
+article > p:last-of-type { min-height: 48px; color: #68716c; line-height: 1.6; }
+.badge { display: inline-block; margin-top: 24px; padding: 6px 10px; background: #edf1eb; color: #526b57; font-size: 12px; }
+.badge.capability_pending { background: #f2eee5; color: #7a6542; }
+.next-step { margin-top: 56px; padding: 28px 0; border-top: 1px solid #bcc5bc; color: #4f5b52; font-size: 17px; line-height: 1.8; }
+
+@media (max-width: 760px) {
+  .shell { width: min(100% - 28px, 1120px); padding: 40px 0; }
+  .status-bar, .grid { grid-template-columns: 1fr; }
+  .status-bar { margin: 40px 0 56px; }
+  article { min-height: auto; }
+  .technology { margin-top: 28px; }
+}
