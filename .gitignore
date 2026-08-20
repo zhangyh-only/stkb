@@ -1,0 +1,17 @@
+.DS_Store
+.idea/
+.vscode/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
+backend/.venv/
+node_modules/
+frontend/node_modules/
+frontend/dist/
+*.tsbuildinfo
+.env
+*.log
+workspace/*
+!workspace/README.md
