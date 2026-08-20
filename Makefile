@@ -10,9 +10,11 @@ infra:
 
 dev: infra
 	@set -a; . ./.env; set +a; \
-	trap 'kill 0' INT TERM EXIT; \
 	(cd backend && uv run uvicorn app.main:app --reload --host "$${STKB_API_HOST:-0.0.0.0}" --port "$${STKB_API_PORT:-8000}") & \
+	api_pid=$$!; \
 	(cd frontend && pnpm dev --host 0.0.0.0 --port "$${STKB_WEB_PORT:-5173}") & \
+	web_pid=$$!; \
+	trap 'kill $$api_pid $$web_pid 2>/dev/null || true' INT TERM EXIT; \
 	wait
 
 check:

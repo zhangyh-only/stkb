@@ -1,12 +1,15 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file="../.env",
+        env_file=PROJECT_ROOT / ".env",
         env_prefix="STKB_",
         extra="ignore",
     )
@@ -25,7 +28,12 @@ class Settings(BaseSettings):
     neo4j_host: str = "127.0.0.1"
     neo4j_user: str = "neo4j"
     neo4j_password: str = "stkb_local_password"
-    knowledge_file_root: Path = Path("../workspace/knowledge")
+    knowledge_file_root: Path = Path("workspace/knowledge")
+
+    @field_validator("knowledge_file_root")
+    @classmethod
+    def resolve_knowledge_file_root(cls, value: Path) -> Path:
+        return value if value.is_absolute() else PROJECT_ROOT / value
 
     @property
     def postgres_dsn(self) -> str:

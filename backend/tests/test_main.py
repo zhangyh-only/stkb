@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from app.core.config import get_settings
 from app.main import app
 
 client = TestClient(app)
@@ -23,3 +24,10 @@ def test_foundation_exposes_three_knowledge_forms() -> None:
         "pgvector_projection",
         "neo4j_projection",
     ]
+
+
+def test_knowledge_file_root_is_inside_project_workspace() -> None:
+    settings = get_settings()
+
+    assert settings.knowledge_file_root.parts[-2:] == ("workspace", "knowledge")
+    assert settings.knowledge_file_root.is_absolute()
