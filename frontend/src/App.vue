@@ -16,17 +16,20 @@ type Foundation = {
   knowledge_forms: KnowledgeForm[]
 }
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api'
 const foundation = ref<Foundation | null>(null)
 const error = ref('')
+const loading = ref(true)
 
 onMounted(async () => {
   try {
-    const response = await fetch(`${apiBaseUrl}/api/foundation`)
+    const response = await fetch(`${apiBaseUrl}/foundation`)
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     foundation.value = await response.json()
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : '无法读取 API 状态'
+  } finally {
+    loading.value = false
   }
 })
 </script>
@@ -52,7 +55,9 @@ onMounted(async () => {
       </div>
       <div>
         <span>API 状态</span>
-        <strong :class="error ? 'is-error' : 'is-ready'">{{ error || '可访问' }}</strong>
+        <strong :class="error ? 'is-error' : loading ? '' : 'is-ready'">
+          {{ loading ? '连接中' : error || '可访问' }}
+        </strong>
       </div>
     </section>
 
