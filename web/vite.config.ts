@@ -8,6 +8,7 @@ export default defineConfig(({ mode }) => {
   const apiPort = projectEnvironment.STKB_API_PORT || DEFAULT_API_PORT
 
   return {
+    envDir: '..',
     plugins: [vue()],
     server: {
       proxy: {
