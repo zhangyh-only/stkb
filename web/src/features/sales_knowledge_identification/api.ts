@@ -1,14 +1,17 @@
 import type { DocumentPackage, IdentificationResult, KnowledgeModule } from './types'
+import { resolveApiBaseUrl } from '../../core/api-base'
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api'
+export const apiBaseUrl = resolveApiBaseUrl(import.meta.env.VITE_API_BASE_URL)
 
 export class IdentificationApiError extends Error {
   readonly status: number
+  readonly endpoint: string
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, endpoint: string) {
     super(message)
     this.name = 'IdentificationApiError'
     this.status = status
+    this.endpoint = endpoint
   }
 }
 
@@ -25,7 +28,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : '网络请求失败'
-    throw new IdentificationApiError(`无法连接识别 API：${message}`, 0)
+    throw new IdentificationApiError(`无法连接识别 API：${message}`, 0, `${apiBaseUrl}${path}`)
   }
 
   if (!response.ok) {
@@ -36,7 +39,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     } catch {
       // The status line is enough when the server did not return JSON.
     }
-    throw new IdentificationApiError(detail, response.status)
+    throw new IdentificationApiError(detail, response.status, `${apiBaseUrl}${path}`)
   }
 
   return (await response.json()) as T

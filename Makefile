@@ -20,6 +20,7 @@ dev: infra
 check:
 	cd services && uv run ruff check .
 	cd services && uv run pytest
+	cd web && pnpm test
 	cd web && pnpm build
 
 clean-infra:
