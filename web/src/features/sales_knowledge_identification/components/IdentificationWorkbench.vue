@@ -1,5 +1,20 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import {
+  IconActivityHeartbeat,
+  IconAlertCircle,
+  IconBrain,
+  IconDatabase,
+  IconFileText,
+  IconFlask2,
+  IconGitBranch,
+  IconPlayerPlay,
+  IconRefresh,
+  IconSearch,
+  IconShieldCheck,
+  IconStack2,
+  IconTable,
+} from '@tabler/icons-vue'
+import { computed, onMounted, ref, type Component } from 'vue'
 
 import {
   apiBaseUrl,
@@ -28,6 +43,15 @@ import {
 } from '../types'
 
 type WorkbenchTab = 'overview' | 'source' | 'candidates' | 'coverage' | 'evaluation' | 'traces'
+
+const tabItems: { key: WorkbenchTab; label: string; icon: Component }[] = [
+  { key: 'overview', label: '运行总览', icon: IconActivityHeartbeat },
+  { key: 'source', label: '输入资料', icon: IconFileText },
+  { key: 'candidates', label: '候选与证据', icon: IconStack2 },
+  { key: 'coverage', label: '模块覆盖', icon: IconTable },
+  { key: 'evaluation', label: '代理评估', icon: IconShieldCheck },
+  { key: 'traces', label: '调用与阶段', icon: IconGitBranch },
+]
 
 const packageId = ref(defaultDocumentPackageId)
 const documentPackage = ref<DocumentPackage | null>(null)
@@ -258,41 +282,61 @@ onMounted(() => {
 </script>
 
 <template>
-  <main class="workbench-shell">
-    <div class="app-bar">
+  <main class="lab-layout">
+    <aside class="lab-sidebar" aria-label="STKB 能力验证导航">
       <div class="brand-lockup">
-        <span class="brand-mark">S</span>
-        <div><strong>STKB</strong><span>Validation Lab</span></div>
+        <span class="brand-mark">ST</span>
+        <div><strong>STKB</strong><span>能力验证实验室</span></div>
       </div>
+
+      <nav class="capability-nav">
+        <a class="nav-item muted-item" href="#" aria-disabled="true"><IconDatabase size="16" stroke="1.8" /> 三形态投影</a>
+        <a class="nav-item active" href="#"><IconBrain size="16" stroke="1.8" /> 销售知识识别</a>
+        <a class="nav-item muted-item" href="#" aria-disabled="true"><IconFlask2 size="16" stroke="1.8" /> 增量归并验证</a>
+      </nav>
+
+      <div class="sidebar-boundary">
+        <span>验证边界</span>
+        <strong>只生成候选</strong>
+        <p>本节点不写正式知识、pgvector 或 Neo4j。运行记录只进入 PostgreSQL 账本。</p>
+      </div>
+    </aside>
+
+    <section class="workbench-shell">
+      <div class="app-bar">
+        <div class="breadcrumb-line">
+          <span>STKB</span>
+          <span>方案验证</span>
+          <strong>销售知识识别</strong>
+        </div>
       <div class="service-state" :class="`service-${apiState}`">
         <span class="service-indicator"></span>
         <span>{{ apiState === 'ready' ? '识别服务已连接' : apiState === 'error' ? '识别服务异常' : '正在检查服务' }}</span>
         <code>{{ apiBaseUrl }}</code>
       </div>
-    </div>
+      </div>
 
     <header class="workbench-header">
       <div>
-        <p class="kicker">CAPABILITY 02 · SALES KNOWLEDGE IDENTIFICATION</p>
-        <h1>销售知识识别<span>调试台</span></h1>
+        <h1>销售知识识别调试台</h1>
         <p class="lede">
-          从可定位的 DocumentPackage 发起真实模型调用，检查候选知识、证据和 D1—D5 覆盖情况。
+          以可定位的 DocumentPackage 为输入，调用真实模型识别候选知识，并复核证据、D1-D5 覆盖和运行稳定性。
         </p>
       </div>
-      <div class="scope-card">
-        <span class="scope-index">验证边界</span>
-        <strong>只生成候选</strong>
-        <p>不写入正式知识、向量或图谱</p>
+      <div class="header-facts" aria-label="当前验证范围">
+        <div><span>输入</span><strong>DocumentPackage</strong></div>
+        <div><span>调用</span><strong>真实模型</strong></div>
+        <div><span>输出</span><strong>CandidateKnowledgeSet</strong></div>
       </div>
     </header>
 
     <section class="control-panel panel">
       <div class="control-heading">
         <div>
-          <p class="panel-label">RUN CONTROL</p>
+          <p class="panel-label">运行控制</p>
           <h2>选择资料并启动识别</h2>
         </div>
-        <span class="run-mode"><i></i>真实模型</span>
+        <span class="run-mode"><IconBrain size="14" stroke="2" /> 真实模型</span>
       </div>
       <div class="control-row">
         <label class="package-input">
@@ -300,10 +344,12 @@ onMounted(() => {
           <input v-model="packageId" type="text" placeholder="例如 DP-YXB-TRAINING-20260821" @keyup.enter="loadPackage" />
         </label>
         <button class="button button-quiet" type="button" :disabled="packageLoading || runLoading" @click="loadPackage">
+          <IconSearch size="16" stroke="2" />
           {{ packageLoading ? '读取中…' : '读取资料' }}
         </button>
         <button class="button button-primary" type="button" :disabled="runLoading || packageLoading" @click="executeRun">
-          <span class="button-dot" :class="{ spinning: runLoading }"></span>
+          <IconPlayerPlay v-if="!runLoading" size="16" stroke="2" />
+          <span v-else class="button-loader"></span>
           {{ runLoading ? '模型识别运行中…' : '执行真实模型识别' }}
         </button>
       </div>
@@ -316,13 +362,13 @@ onMounted(() => {
     </section>
 
     <div v-if="error" class="alert alert-error" role="alert">
-      <span class="alert-icon">!</span>
+      <span class="alert-icon"><IconAlertCircle size="18" stroke="2" /></span>
       <div class="alert-copy">
         <strong>当前请求未完成</strong>
         <span>{{ error }}</span>
         <code v-if="errorEndpoint">{{ errorEndpoint }}</code>
       </div>
-      <button type="button" class="alert-action" @click="probeApi">重新检查服务</button>
+      <button type="button" class="alert-action" @click="probeApi"><IconRefresh size="14" stroke="2" />重新检查服务</button>
     </div>
 
     <section v-if="documentPackage" class="package-strip panel">
@@ -343,10 +389,11 @@ onMounted(() => {
     </section>
 
     <nav class="workbench-tabs" aria-label="调试视图">
-      <button v-for="tab in (['overview', 'source', 'candidates', 'coverage', 'evaluation', 'traces'] as WorkbenchTab[])" :key="tab" type="button" :class="{ active: activeTab === tab }" @click="activeTab = tab">
-        {{ tab === 'overview' ? '运行总览' : tab === 'source' ? '输入资料' : tab === 'candidates' ? '候选与证据' : tab === 'coverage' ? `${moduleCount} 模块覆盖` : tab === 'evaluation' ? '代理评估' : '调用与阶段' }}
-        <span v-if="tab === 'candidates' && result" class="tab-count">{{ result.candidates.length }}</span>
-        <span v-if="tab === 'coverage' && result" class="tab-count">{{ coverageSummary.hit }}/{{ moduleCount }}</span>
+      <button v-for="tab in tabItems" :key="tab.key" type="button" :class="{ active: activeTab === tab.key }" @click="activeTab = tab.key">
+        <component :is="tab.icon" size="16" stroke="1.8" />
+        {{ tab.key === 'coverage' ? `${moduleCount} 模块覆盖` : tab.label }}
+        <span v-if="tab.key === 'candidates' && result" class="tab-count">{{ result.candidates.length }}</span>
+        <span v-if="tab.key === 'coverage' && result" class="tab-count">{{ coverageSummary.hit }}/{{ moduleCount }}</span>
       </button>
     </nav>
 
@@ -379,14 +426,14 @@ onMounted(() => {
             <span class="empty-index">02</span>
             <div>
               <h2>资料已就绪，等待一次真实识别</h2>
-              <p>点击“执行真实模型识别”后，后端将把全文、D1—D5目录和证据规则组装为模型请求。没有真实运行结果前，页面不会生成候选或模拟调用数据。</p>
+              <p>点击“执行真实模型识别”后，后端将把全文、D1-D5 目录和证据规则组装为模型请求。没有真实运行结果前，页面不会生成候选或模拟调用数据。</p>
             </div>
           </div>
 
           <div v-if="result" class="panel section-panel">
             <div class="section-title-row">
               <div><p class="eyebrow-small">PROCESSING TRACE</p><h2>识别处理阶段</h2></div>
-              <button class="link-button" type="button" :disabled="runLoading" @click="reloadRun">回读运行</button>
+              <button class="link-button" type="button" :disabled="runLoading" @click="reloadRun"><IconRefresh size="14" stroke="2" />回读运行</button>
             </div>
             <div class="stage-list">
               <div v-for="stage in result.processingStages" :key="stage.key" class="stage-item">
@@ -417,13 +464,13 @@ onMounted(() => {
             <dl class="detail-list">
               <div><dt>Provider</dt><dd>{{ result?.provider ?? '等待运行' }}</dd></div>
               <div><dt>Model</dt><dd>{{ result?.model ?? '配置后显示' }}</dd></div>
-              <div><dt>Prompt</dt><dd>{{ result?.promptVersion ?? '—' }}</dd></div>
-              <div><dt>Schema</dt><dd>{{ result?.schemaVersion ?? '—' }}</dd></div>
-              <div><dt>Catalog</dt><dd>{{ result?.catalogVersion ?? '—' }}</dd></div>
+              <div><dt>Prompt</dt><dd>{{ result?.promptVersion ?? '-' }}</dd></div>
+              <div><dt>Schema</dt><dd>{{ result?.schemaVersion ?? '-' }}</dd></div>
+              <div><dt>Catalog</dt><dd>{{ result?.catalogVersion ?? '-' }}</dd></div>
               <div><dt>分段阈值</dt><dd>{{ result?.modelConfiguration?.documentMaxChars ?? '旧运行未记录' }}</dd></div>
               <div><dt>并发上限</dt><dd>{{ result?.modelConfiguration?.maxConcurrency ?? '旧运行未记录' }}</dd></div>
               <div><dt>配置指纹</dt><dd class="mono">{{ result?.modelConfiguration?.fingerprint ?? '旧运行未记录' }}</dd></div>
-              <div><dt>Run ID</dt><dd class="mono">{{ result?.runId ?? '—' }}</dd></div>
+              <div><dt>Run ID</dt><dd class="mono">{{ result?.runId ?? '-' }}</dd></div>
             </dl>
           </div>
           <div class="panel side-panel">
@@ -502,6 +549,7 @@ onMounted(() => {
     </template>
     <section v-else class="panel empty-state initial-state"><span class="empty-index">01</span><div><h2>先读取一份 DocumentPackage</h2><p>默认 ID：{{ defaultDocumentPackageId || '尚未配置' }}。输入文档包 ID 后读取全文和来源锚点，再执行识别。</p></div></section>
 
-    <footer class="workbench-footer"><span>STKB · 方案验证切片</span><span>候选知识不等同于正式知识</span><span v-if="lastRunId" class="mono">{{ lastRunId }}</span></footer>
+    <footer class="workbench-footer"><span>STKB 方案验证切片</span><span>候选知识不等同于正式知识</span><span v-if="lastRunId" class="mono">{{ lastRunId }}</span></footer>
+    </section>
   </main>
 </template>
