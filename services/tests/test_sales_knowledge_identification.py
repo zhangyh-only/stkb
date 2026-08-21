@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from app.features.sales_knowledge_identification.models import (
     DocumentPackage,
     ModelCompletion,
@@ -8,6 +10,7 @@ from app.features.sales_knowledge_identification.models import (
 )
 from app.features.sales_knowledge_identification.segmenter import segment_document
 from app.features.sales_knowledge_identification.service import (
+    DocumentPackageUnavailable,
     SalesKnowledgeIdentificationService,
 )
 
@@ -220,6 +223,88 @@ def test_identification_accepts_only_candidates_with_valid_catalog_and_evidence(
     assert result.call_count == 1
     assert gateway.requests[0].document_package_id == "DP-TEST"
     assert "22个知识内容模块" in gateway.requests[0].system_prompt
+
+
+def test_identification_rejects_relations_to_a_rejected_candidate() -> None:
+    gateway = StubModelGateway(
+        {
+            "candidates": [
+                {
+                    "candidateId": "C1",
+                    "domain": "D1",
+                    "module": "D1.1",
+                    "objectType": "PRODUCT_FACT",
+                    "content": {"summary": "有效产品"},
+                    "entityMentions": [],
+                    "evidence": ["DP-REL#page-1"],
+                    "relations": [
+                        {
+                            "relationKind": "object",
+                            "relationType": "DEPENDS_ON",
+                            "sourceRef": "C1",
+                            "targetRef": "C2",
+                            "evidence": ["DP-REL#page-1"],
+                        }
+                    ],
+                },
+                {
+                    "candidateId": "C2",
+                    "domain": "D9",
+                    "module": "D9.1",
+                    "objectType": "UNKNOWN",
+                    "content": {"summary": "非法候选"},
+                    "entityMentions": [],
+                    "evidence": ["DP-REL#page-1"],
+                    "relations": [],
+                },
+            ],
+            "weakSignals": [],
+            "unresolvedItems": [],
+        }
+    )
+    service = SalesKnowledgeIdentificationService(gateway=gateway)
+    package = DocumentPackage(
+        document_package_id="DP-REL",
+        workspace_id="WS-TEST",
+        source_file_name="sample.pdf",
+        source_sha256="source-checksum",
+        full_markdown_path="workspace/documents/DP-REL/full.md",
+        full_markdown_sha256="markdown-checksum",
+        full_markdown="# 示例\n\n关系验证。",
+        processing_method="agent_assisted",
+        status="available",
+        anchors=[SourceAnchor(anchor_id="DP-REL#page-1", kind="page", page=1)],
+        quality_issues=[],
+    )
+
+    result = service.identify(package)
+
+    assert result.candidates == []
+    rejected_by_id = {item.candidate_id: item for item in result.rejected_candidates}
+    assert "relation references rejected or missing objects" in rejected_by_id[
+        "C1"
+    ].reasons[0]
+
+
+def test_identification_rejects_unavailable_packages_at_capability_boundary() -> None:
+    package = DocumentPackage(
+        document_package_id="DP-UNAVAILABLE",
+        workspace_id="WS-TEST",
+        source_file_name="sample.pdf",
+        source_sha256="source-checksum",
+        full_markdown_path="workspace/documents/DP-UNAVAILABLE/full.md",
+        full_markdown_sha256="markdown-checksum",
+        full_markdown="",
+        processing_method="agent_assisted",
+        status="unavailable",
+        anchors=[],
+        quality_issues=["不可用"],
+    )
+
+    with pytest.raises(DocumentPackageUnavailable):
+        SalesKnowledgeIdentificationService(
+            gateway=StubModelGateway({})
+        ).identify(package)
 
 
 def test_identification_canonicalizes_domain_when_model_repeats_module_code() -> None:

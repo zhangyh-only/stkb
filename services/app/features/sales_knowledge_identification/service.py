@@ -48,6 +48,10 @@ class SegmentIdentificationFailure(RuntimeError):
         self.model_calls = model_calls
 
 
+class DocumentPackageUnavailable(ValueError):
+    pass
+
+
 class SalesKnowledgeIdentificationService:
     def __init__(
         self,
@@ -70,6 +74,8 @@ class SalesKnowledgeIdentificationService:
         self.model_configuration = model_configuration
 
     def identify(self, document_package: DocumentPackage) -> IdentificationResult:
+        if document_package.status != "available":
+            raise DocumentPackageUnavailable(document_package.document_package_id)
         started_at = datetime.now(UTC)
         run_started = perf_counter()
         segments = segment_document(document_package, self.document_max_chars)
@@ -306,6 +312,8 @@ class SalesKnowledgeIdentificationService:
                 )
                 continue
             accepted.append(candidate)
+
+        accepted = _reject_dangling_relations(accepted, rejected)
 
         coverage = {module.code: "not_found" for module in KNOWLEDGE_MODULES}
         for candidate in accepted:
@@ -614,3 +622,51 @@ def _candidate_relation_refs(raw_candidate: dict[str, Any]) -> set[str]:
         if isinstance(mention, dict) and isinstance(mention.get("mentionId"), str):
             refs.add(mention["mentionId"])
     return refs
+
+
+def _reject_dangling_relations(
+    candidates: list[CandidateKnowledge],
+    rejected: list[RejectedCandidate],
+) -> list[CandidateKnowledge]:
+    remaining = candidates
+    while True:
+        valid_refs = {
+            reference
+            for candidate in remaining
+            for reference in (
+                candidate.candidate_id,
+                *(mention.mention_id for mention in candidate.entity_mentions),
+            )
+        }
+        invalid_candidates: list[tuple[CandidateKnowledge, list[str]]] = []
+        for candidate in remaining:
+            invalid_refs = {
+                reference
+                for relation in candidate.relations
+                for reference in (relation.source_ref, relation.target_ref)
+                if reference not in valid_refs
+            }
+            if invalid_refs:
+                invalid_candidates.append(
+                    (
+                        candidate,
+                        [
+                            "relation references rejected or missing objects: "
+                            + ", ".join(sorted(invalid_refs))
+                        ],
+                    )
+                )
+        if not invalid_candidates:
+            return remaining
+        invalid_ids = {candidate.candidate_id for candidate, _ in invalid_candidates}
+        for candidate, reasons in invalid_candidates:
+            rejected.append(
+                RejectedCandidate(
+                    candidate_id=candidate.candidate_id,
+                    reasons=reasons,
+                    raw_candidate=candidate.model_dump(by_alias=True),
+                )
+            )
+        remaining = [
+            candidate for candidate in remaining if candidate.candidate_id not in invalid_ids
+        ]

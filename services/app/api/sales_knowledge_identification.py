@@ -26,6 +26,7 @@ from app.features.sales_knowledge_identification.repository import (
     PsycopgIdentificationRepository,
 )
 from app.features.sales_knowledge_identification.service import (
+    DocumentPackageUnavailable,
     ModelGateway,
     SalesKnowledgeIdentificationService,
 )
@@ -104,7 +105,6 @@ def document_package(
 def run_identification(
     request: RunIdentificationRequest,
     repository: Annotated[PsycopgIdentificationRepository, Depends(get_identification_repository)],
-    gateway: Annotated[ModelGateway, Depends(get_model_gateway)],
 ) -> IdentificationResult:
     try:
         package = repository.get_document_package(request.document_package_id)
@@ -129,8 +129,8 @@ def run_identification(
     configuration = ModelConfigurationSnapshot.model_validate(
         {**configuration_values, "fingerprint": configuration_fingerprint}
     )
-    result = SalesKnowledgeIdentificationService(
-        gateway=gateway,
+    service = SalesKnowledgeIdentificationService(
+        gateway=get_model_gateway(),
         max_retries=settings.llm_max_retries,
         max_candidates=settings.llm_max_candidates,
         document_max_chars=settings.llm_document_max_chars,
@@ -138,7 +138,13 @@ def run_identification(
         provider=settings.llm_provider,
         model=settings.llm_model,
         model_configuration=configuration,
-    ).identify(package)
+    )
+    try:
+        result = service.identify(package)
+    except DocumentPackageUnavailable as error:
+        raise HTTPException(
+            status_code=409, detail="DocumentPackage is unavailable"
+        ) from error
     serialized = result.model_dump(mode="json", by_alias=True)
     repository.save_run(serialized)
     return result

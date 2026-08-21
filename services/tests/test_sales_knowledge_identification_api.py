@@ -1,10 +1,11 @@
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 
+from app.api import sales_knowledge_identification as identification_api
 from app.api.sales_knowledge_identification import (
     get_identification_repository,
-    get_model_gateway,
 )
 from app.features.sales_knowledge_identification.models import (
     DocumentPackage,
@@ -65,7 +66,9 @@ class ApiStubGateway:
         )
 
 
-def test_api_runs_identification_and_reads_the_saved_result() -> None:
+def test_api_runs_identification_and_reads_the_saved_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     document_package = DocumentPackage(
         document_package_id="DP-API",
         workspace_id="WS-TEST",
@@ -81,7 +84,7 @@ def test_api_runs_identification_and_reads_the_saved_result() -> None:
     )
     repository = InMemoryRepository(document_package)
     app.dependency_overrides[get_identification_repository] = lambda: repository
-    app.dependency_overrides[get_model_gateway] = lambda: ApiStubGateway()
+    monkeypatch.setattr(identification_api, "get_model_gateway", lambda: ApiStubGateway())
     client = TestClient(app)
 
     try:
@@ -120,7 +123,9 @@ def test_api_runs_identification_and_reads_the_saved_result() -> None:
     assert evaluation_response.json()["markdown"].startswith("# 代理评估")
 
 
-def test_api_rejects_an_unavailable_document_package() -> None:
+def test_api_rejects_an_unavailable_document_package(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     package = DocumentPackage(
         document_package_id="DP-UNAVAILABLE",
         workspace_id="WS-TEST",
@@ -136,7 +141,11 @@ def test_api_rejects_an_unavailable_document_package() -> None:
     )
     repository = InMemoryRepository(package)
     app.dependency_overrides[get_identification_repository] = lambda: repository
-    app.dependency_overrides[get_model_gateway] = lambda: ApiStubGateway()
+    monkeypatch.setattr(
+        identification_api,
+        "get_model_gateway",
+        lambda: (_ for _ in ()).throw(AssertionError("gateway must not be initialized")),
+    )
     client = TestClient(app)
 
     try:
