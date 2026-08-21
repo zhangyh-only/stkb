@@ -1,0 +1,207 @@
+export type ProcessingMethod = 'agent_assisted' | 'capability'
+export type PackageStatus = 'available' | 'unavailable'
+export type CoverageStatus = 'hit' | 'weak_signal' | 'not_found' | 'unresolved'
+export type ModelCallPurpose = 'identification' | 'output_limit_retry' | 'repair'
+export type ModelCallStatus = 'completed' | 'failed'
+export type ProcessingStageStatus = 'completed' | 'failed'
+
+export type SourceAnchor = {
+  anchorId: string
+  kind: 'page' | 'section' | 'table' | 'paragraph' | 'time_range'
+  page: number | null
+}
+
+export type DocumentPackage = {
+  documentPackageId: string
+  workspaceId: string
+  sourceFileName: string
+  sourceSha256: string
+  fullMarkdownPath: string
+  fullMarkdownSha256: string
+  fullMarkdown: string
+  processingMethod: ProcessingMethod
+  status: PackageStatus
+  anchors: SourceAnchor[]
+  qualityIssues: string[]
+}
+
+export type EntityMention = {
+  mentionId: string
+  text: string
+  proposedType: string
+  referenceRole: string
+  sourceRef: string
+}
+
+export type ProposedRelation = {
+  relationKind: 'entity' | 'object'
+  relationType: string
+  sourceRef: string
+  targetRef: string
+  evidence: string[]
+}
+
+export type CandidateKnowledge = {
+  candidateId: string
+  domain: string
+  module: string
+  objectType: string
+  content: Record<string, unknown>
+  entityMentions: EntityMention[]
+  evidence: string[]
+  relations: ProposedRelation[]
+}
+
+export type RejectedCandidate = {
+  candidateId: string
+  reasons: string[]
+  rawCandidate: Record<string, unknown>
+}
+
+export type CandidateNormalization = {
+  candidateId: string
+  field: 'domain'
+  originalValue: string
+  normalizedValue: string
+  reason: string
+}
+
+export type RejectedAuxiliaryItem = {
+  kind: 'weak_signal' | 'unresolved_item'
+  reasons: string[]
+  rawItem: Record<string, unknown>
+}
+
+export type WeakSignal = {
+  module: string
+  reason: string
+  evidence: string[]
+}
+
+export type UnresolvedItem = {
+  description: string
+  reason: string
+  evidence: string[]
+  module: string | null
+}
+
+export type ModelCallTrace = {
+  attempt: number
+  purpose: ModelCallPurpose
+  status: ModelCallStatus
+  durationMs: number
+  promptTokens: number
+  completionTokens: number
+  error: string | null
+  rawOutput: string | null
+  finishReason: string | null
+  segment: string | null
+}
+
+export type ProcessingStage = {
+  key: string
+  name: string
+  status: ProcessingStageStatus
+  durationMs: number
+  detail: string
+}
+
+export type StorageImpact = {
+  postgresRunRecords: number
+  formalKnowledgeFiles: number
+  pgvectorRecords: number
+  neo4jNodes: number
+  neo4jRelationships: number
+}
+
+export type ModelConfigurationSnapshot = {
+  temperature: number
+  maxOutputTokens: number
+  timeoutSeconds: number
+  maxRetries: number
+  maxCandidates: number
+  enableThinking: boolean
+  documentMaxChars: number
+  maxConcurrency: number
+  fingerprint: string
+}
+
+export type IdentificationResult = {
+  runId: string
+  documentPackageId: string
+  status: 'completed' | 'failed'
+  startedAt: string
+  finishedAt: string
+  durationMs: number
+  provider: string
+  model: string
+  promptVersion: string
+  schemaVersion: string
+  catalogVersion: string
+  rawModelOutput: string
+  modelCalls: ModelCallTrace[]
+  processingStages: ProcessingStage[]
+  candidates: CandidateKnowledge[]
+  rejectedCandidates: RejectedCandidate[]
+  rejectedAuxiliaryItems: RejectedAuxiliaryItem[]
+  normalizations: CandidateNormalization[]
+  weakSignals: WeakSignal[]
+  unresolvedItems: UnresolvedItem[]
+  coverageByModule: Record<string, CoverageStatus>
+  callCount: number
+  promptTokens: number
+  completionTokens: number
+  modelConfiguration: ModelConfigurationSnapshot | null
+  storageImpact: StorageImpact
+}
+
+export type KnowledgeModule = {
+  domain: string
+  domainName: string
+  code: string
+  name: string
+  objectTypes: string[]
+}
+
+export const COVERAGE_LABELS: Record<CoverageStatus, string> = {
+  hit: '已命中',
+  weak_signal: '弱线索',
+  not_found: '未发现',
+  unresolved: '待判断',
+}
+
+export function prettyJson(value: unknown): string {
+  if (typeof value === 'string') {
+    try {
+      return JSON.stringify(JSON.parse(value), null, 2)
+    } catch {
+      return value
+    }
+  }
+  return JSON.stringify(value, null, 2)
+}
+
+export function formatDuration(durationMs: number): string {
+  if (durationMs < 1_000) return `${durationMs} ms`
+  return `${(durationMs / 1_000).toFixed(1)} s`
+}
+
+export function formatDate(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.valueOf())) return value
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date)
+}
+
+export function coverageCount(
+  coverage: Record<string, CoverageStatus> | undefined,
+  status: CoverageStatus,
+): number {
+  return Object.values(coverage ?? {}).filter((value) => value === status).length
+}
