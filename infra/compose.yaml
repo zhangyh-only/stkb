@@ -10,6 +10,7 @@ services:
     volumes:
       - stkb-postgres-data:/var/lib/postgresql/data
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+      - ../services/app/features/sales_knowledge_identification/schema.sql:/docker-entrypoint-initdb.d/002-identification.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${STKB_POSTGRES_USER} -d ${STKB_POSTGRES_DB}"]
       interval: 3s

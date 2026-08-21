@@ -5,6 +5,7 @@ description = "STKB 方案验证服务底座"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "fastapi>=0.116,<1.0",
+    "httpx>=0.28,<1.0",
     "neo4j>=5.28,<6.0",
     "psycopg[binary]>=3.2,<4.0",
     "pydantic-settings>=2.10,<3.0",
@@ -13,7 +14,6 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28,<1.0",
     "pytest>=8.4,<9.0",
     "ruff>=0.12,<1.0",
 ]
