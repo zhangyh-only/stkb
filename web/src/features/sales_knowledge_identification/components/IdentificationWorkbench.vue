@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 
 import {
+  apiBaseUrl,
   defaultDocumentPackageId,
   getDocumentPackage,
   getIdentificationCatalog,
@@ -36,6 +37,8 @@ const activeTab = ref<WorkbenchTab>('overview')
 const packageLoading = ref(false)
 const runLoading = ref(false)
 const error = ref('')
+const errorEndpoint = ref('')
+const apiState = ref<'checking' | 'ready' | 'error'>('checking')
 const packageNotice = ref('')
 const runNotice = ref('')
 const lastRunId = ref('')
@@ -132,9 +135,32 @@ function callClass(call: ModelCallTrace): string {
 }
 
 function loadErrorMessage(reason: unknown): string {
-  if (reason instanceof IdentificationApiError) return reason.message
+  if (reason instanceof IdentificationApiError) {
+    errorEndpoint.value = reason.endpoint
+    if (reason.status === 404) {
+      return `请求的资源不存在（${reason.message}）。请确认 DocumentPackage ID，或重启前端以加载最新 API 配置。`
+    }
+    return reason.message
+  }
   if (reason instanceof Error) return reason.message
   return '请求失败，请检查 API 服务和文档包 ID。'
+}
+
+function clearError(): void {
+  error.value = ''
+  errorEndpoint.value = ''
+}
+
+async function probeApi(): Promise<void> {
+  apiState.value = 'checking'
+  try {
+    const catalog = await getIdentificationCatalog()
+    catalogModules.value = catalog.modules
+    apiState.value = 'ready'
+  } catch (reason) {
+    apiState.value = 'error'
+    error.value = loadErrorMessage(reason)
+  }
 }
 
 async function loadPackage(): Promise<void> {
@@ -144,7 +170,7 @@ async function loadPackage(): Promise<void> {
     return
   }
   packageLoading.value = true
-  error.value = ''
+  clearError()
   packageNotice.value = ''
   try {
     const [nextPackage, history, evaluation, catalog] = await Promise.all([
@@ -160,6 +186,7 @@ async function loadPackage(): Promise<void> {
     selectedCandidateId.value = result.value?.candidates[0]?.candidateId ?? null
     proxyEvaluation.value = evaluation?.markdown ?? ''
     catalogModules.value = catalog.modules
+    apiState.value = 'ready'
     activeTab.value = 'overview'
     packageNotice.value = `已读取 ${id}`
   } catch (reason) {
@@ -176,7 +203,7 @@ async function executeRun(): Promise<void> {
     return
   }
   runLoading.value = true
-  error.value = ''
+  clearError()
   runNotice.value = ''
   try {
     if (!documentPackage.value || documentPackage.value.documentPackageId !== id) {
@@ -201,7 +228,7 @@ async function executeRun(): Promise<void> {
 async function reloadRun(): Promise<void> {
   if (!lastRunId.value) return
   runLoading.value = true
-  error.value = ''
+  clearError()
   try {
     result.value = await getIdentificationRun(lastRunId.value)
     runHistory.value = [
@@ -223,32 +250,53 @@ function selectCandidate(candidateId: string): void {
 }
 
 onMounted(() => {
-  if (defaultDocumentPackageId) void loadPackage()
+  void probeApi()
+  if (defaultDocumentPackageId) {
+    void loadPackage()
+  }
 })
 </script>
 
 <template>
   <main class="workbench-shell">
+    <div class="app-bar">
+      <div class="brand-lockup">
+        <span class="brand-mark">S</span>
+        <div><strong>STKB</strong><span>Validation Lab</span></div>
+      </div>
+      <div class="service-state" :class="`service-${apiState}`">
+        <span class="service-indicator"></span>
+        <span>{{ apiState === 'ready' ? '识别服务已连接' : apiState === 'error' ? '识别服务异常' : '正在检查服务' }}</span>
+        <code>{{ apiBaseUrl }}</code>
+      </div>
+    </div>
+
     <header class="workbench-header">
       <div>
-        <p class="kicker">STKB / NODE 02 / MODEL LAB</p>
-        <h1>销售知识识别调试台</h1>
+        <p class="kicker">CAPABILITY 02 · SALES KNOWLEDGE IDENTIFICATION</p>
+        <h1>销售知识识别<span>调试台</span></h1>
         <p class="lede">
-          以一份可定位的 DocumentPackage 为输入，真实调用模型识别跨 D1—D5 的候选知识；本节点只验证识别，不写入正式知识、向量或图谱。
+          从可定位的 DocumentPackage 发起真实模型调用，检查候选知识、证据和 D1—D5 覆盖情况。
         </p>
       </div>
-      <div class="header-mark" aria-hidden="true">
-        <span>01</span>
-        <span>→</span>
-        <span>候选</span>
+      <div class="scope-card">
+        <span class="scope-index">验证边界</span>
+        <strong>只生成候选</strong>
+        <p>不写入正式知识、向量或图谱</p>
       </div>
     </header>
 
     <section class="control-panel panel">
-      <div class="panel-label">RUN CONTROL</div>
+      <div class="control-heading">
+        <div>
+          <p class="panel-label">RUN CONTROL</p>
+          <h2>选择资料并启动识别</h2>
+        </div>
+        <span class="run-mode"><i></i>真实模型</span>
+      </div>
       <div class="control-row">
         <label class="package-input">
-          <span>DocumentPackage ID</span>
+          <span>DocumentPackage ID <small>资料证据包标识</small></span>
           <input v-model="packageId" type="text" placeholder="例如 DP-YXB-TRAINING-20260821" @keyup.enter="loadPackage" />
         </label>
         <button class="button button-quiet" type="button" :disabled="packageLoading || runLoading" @click="loadPackage">
@@ -260,15 +308,21 @@ onMounted(() => {
         </button>
       </div>
       <div class="control-meta">
-        <span>默认 ID 来自 <code>VITE_IDENTIFICATION_DOCUMENT_PACKAGE_ID</code></span>
+        <span>API <code>{{ apiBaseUrl }}</code></span>
+        <span>默认资料 <code>{{ defaultDocumentPackageId || '未配置' }}</code></span>
         <span v-if="packageNotice" class="success-text">{{ packageNotice }}</span>
         <span v-if="runNotice" class="success-text">{{ runNotice }}</span>
       </div>
     </section>
 
     <div v-if="error" class="alert alert-error" role="alert">
-      <strong>识别台暂时无法继续</strong>
-      <span>{{ error }}</span>
+      <span class="alert-icon">!</span>
+      <div class="alert-copy">
+        <strong>当前请求未完成</strong>
+        <span>{{ error }}</span>
+        <code v-if="errorEndpoint">{{ errorEndpoint }}</code>
+      </div>
+      <button type="button" class="alert-action" @click="probeApi">重新检查服务</button>
     </div>
 
     <section v-if="documentPackage" class="package-strip panel">
