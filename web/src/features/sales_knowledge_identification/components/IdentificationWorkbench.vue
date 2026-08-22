@@ -53,7 +53,7 @@ const tabItems: { key: WorkbenchTab; label: string; icon: Component }[] = [
   { key: 'traces', label: '调用与阶段', icon: IconGitBranch },
 ]
 
-const packageId = ref(defaultDocumentPackageId)
+const packageId = ref('')
 const documentPackage = ref<DocumentPackage | null>(null)
 const result = ref<IdentificationResult | null>(null)
 const selectedCandidateId = ref<string | null>(null)
@@ -196,23 +196,22 @@ async function loadPackage(): Promise<void> {
   packageLoading.value = true
   clearError()
   packageNotice.value = ''
+  runNotice.value = ''
   try {
-    const [nextPackage, history, evaluation, catalog] = await Promise.all([
+    const [nextPackage, catalog] = await Promise.all([
       getDocumentPackage(id),
-      listIdentificationRuns(id),
-      getIdentificationEvaluation(id).catch(() => null),
       getIdentificationCatalog(),
     ])
     documentPackage.value = nextPackage
-    runHistory.value = history
-    result.value = history.at(-1) ?? null
-    lastRunId.value = result.value?.runId ?? ''
-    selectedCandidateId.value = result.value?.candidates[0]?.candidateId ?? null
-    proxyEvaluation.value = evaluation?.markdown ?? ''
+    result.value = null
+    runHistory.value = []
+    lastRunId.value = ''
+    selectedCandidateId.value = null
+    proxyEvaluation.value = ''
     catalogModules.value = catalog.modules
     apiState.value = 'ready'
     activeTab.value = 'overview'
-    packageNotice.value = `已读取 ${id}`
+    packageNotice.value = `已读取 ${id}。历史运行结果未自动载入，请执行识别查看本轮结果。`
   } catch (reason) {
     error.value = loadErrorMessage(reason)
   } finally {
@@ -234,8 +233,16 @@ async function executeRun(): Promise<void> {
       documentPackage.value = await getDocumentPackage(id)
     }
     const nextResult = await runIdentification(id)
+    const [history, evaluation] = await Promise.all([
+      listIdentificationRuns(id).catch(() => []),
+      getIdentificationEvaluation(id).catch(() => null),
+    ])
     result.value = nextResult
-    runHistory.value = [...runHistory.value.filter((run) => run.runId !== nextResult.runId), nextResult].slice(-5)
+    runHistory.value = [
+      ...history.filter((run) => run.runId !== nextResult.runId),
+      nextResult,
+    ].slice(-5)
+    proxyEvaluation.value = evaluation?.markdown ?? ''
     lastRunId.value = nextResult.runId
     selectedCandidateId.value = nextResult.candidates[0]?.candidateId ?? null
     activeTab.value = 'overview'
@@ -275,9 +282,6 @@ function selectCandidate(candidateId: string): void {
 
 onMounted(() => {
   void probeApi()
-  if (defaultDocumentPackageId) {
-    void loadPackage()
-  }
 })
 </script>
 
