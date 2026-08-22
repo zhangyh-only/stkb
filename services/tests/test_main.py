@@ -11,6 +11,7 @@ def test_health() -> None:
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+    assert len(response.headers["x-request-id"]) == 12
 
 
 def test_foundation_exposes_three_knowledge_forms() -> None:

@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from time import perf_counter
 from typing import Any
 
 import httpx
 
+from app.core.logging import get_logger
+
 from ..models import ModelCompletion, ModelRequest
+
+logger = get_logger("model")
 
 
 class ModelGatewayError(RuntimeError):
@@ -35,6 +40,13 @@ class OpenAICompatibleGateway:
         self.client = client or httpx.Client(timeout=timeout_seconds)
 
     def complete(self, request: ModelRequest) -> ModelCompletion:
+        started = perf_counter()
+        logger.info(
+            "model_call.started provider=%s model=%s document_package_id=%s",
+            self.provider,
+            self.model,
+            request.document_package_id,
+        )
         try:
             response = self.client.post(
                 f"{self.base_url}/chat/completions",
@@ -58,6 +70,13 @@ class OpenAICompatibleGateway:
             response.raise_for_status()
             payload = response.json()
         except (httpx.HTTPError, ValueError) as error:
+            logger.exception(
+                "model_call.failed provider=%s model=%s document_package_id=%s duration_ms=%d",
+                self.provider,
+                self.model,
+                request.document_package_id,
+                round((perf_counter() - started) * 1000),
+            )
             raise ModelGatewayError(f"model request failed: {error}") from error
 
         try:
@@ -66,9 +85,17 @@ class OpenAICompatibleGateway:
             content = _normalize_message_content(message_content)
             usage = payload.get("usage") or {}
         except (KeyError, IndexError, TypeError) as error:
+            logger.exception(
+                "model_call.invalid_response provider=%s model=%s document_package_id=%s "
+                "duration_ms=%d",
+                self.provider,
+                self.model,
+                request.document_package_id,
+                round((perf_counter() - started) * 1000),
+            )
             raise ModelGatewayError("model response does not match Chat Completions") from error
 
-        return ModelCompletion(
+        completion = ModelCompletion(
             provider=self.provider,
             model=payload.get("model") or self.model,
             content=content,
@@ -76,6 +103,18 @@ class OpenAICompatibleGateway:
             completion_tokens=int(usage.get("completion_tokens") or 0),
             finish_reason=choice.get("finish_reason"),
         )
+        logger.info(
+            "model_call.completed provider=%s model=%s document_package_id=%s "
+            "duration_ms=%d prompt_tokens=%d completion_tokens=%d finish_reason=%s",
+            completion.provider,
+            completion.model,
+            request.document_package_id,
+            round((perf_counter() - started) * 1000),
+            completion.prompt_tokens,
+            completion.completion_tokens,
+            completion.finish_reason,
+        )
+        return completion
 
 
 def _normalize_message_content(value: Any) -> str:

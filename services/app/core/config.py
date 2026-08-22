@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     )
 
     env: str = "local"
+    log_level: str = "INFO"
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     cors_origins: str = "http://localhost:5173"
