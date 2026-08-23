@@ -11,6 +11,9 @@ from app.features.sales_knowledge_identification.adapters.openai_compatible impo
     OpenAICompatibleGateway,
 )
 from app.features.sales_knowledge_identification.catalog import (
+    CATALOG_FINGERPRINT,
+    CATALOG_SOURCE,
+    CATALOG_STATUS,
     CATALOG_VERSION,
     DOMAIN_NAMES,
     KNOWLEDGE_MODULES,
@@ -44,13 +47,22 @@ class RunIdentificationRequest(BaseModel):
 def identification_catalog() -> dict[str, object]:
     return {
         "version": CATALOG_VERSION,
+        "fingerprint": CATALOG_FINGERPRINT,
+        "status": CATALOG_STATUS,
+        "source": CATALOG_SOURCE,
         "modules": [
             {
                 "domain": module.domain,
                 "domainName": DOMAIN_NAMES[module.domain],
                 "code": module.code,
                 "name": module.name,
+                "lifecycle": module.lifecycle,
+                "meaning": module.meaning,
                 "objectTypes": module.object_types,
+                "coreObjects": module.core_objects,
+                "boundary": module.boundary,
+                "sources": module.sources,
+                "consumers": module.consumers,
             }
             for module in KNOWLEDGE_MODULES
         ],

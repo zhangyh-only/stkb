@@ -221,8 +221,11 @@ def test_identification_accepts_only_candidates_with_valid_catalog_and_evidence(
     assert result.coverage_by_module["D4.2"] == "hit"
     assert result.coverage_by_module["D1.1"] == "not_found"
     assert result.call_count == 1
+    assert len(result.catalog_fingerprint) == 64
     assert gateway.requests[0].document_package_id == "DP-TEST"
     assert "22个知识内容模块" in gateway.requests[0].system_prompt
+    assert "对象边界与分类裁决" in gateway.requests[0].system_prompt
+    assert "全文 Markdown：" in gateway.requests[0].user_prompt
 
 
 def test_identification_rejects_relations_to_a_rejected_candidate() -> None:
@@ -521,6 +524,7 @@ def test_identification_aggregates_structural_segments_without_id_collisions() -
     assert result.coverage_by_module["D4.3"] == "hit"
     assert {trace.segment for trace in result.model_calls} == {"S1/2", "S2/2"}
     assert all("22个知识内容模块" in request.system_prompt for request in gateway.requests)
+    assert all("Markdown 结构分段：" in request.user_prompt for request in gateway.requests)
 
 
 def test_segmenter_matches_source_anchors_exactly() -> None:

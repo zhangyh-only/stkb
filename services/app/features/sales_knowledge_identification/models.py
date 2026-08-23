@@ -179,6 +179,7 @@ class IdentificationResult(ApiModel):
     prompt_version: str
     schema_version: str
     catalog_version: str
+    catalog_fingerprint: str
     raw_model_output: str
     model_calls: list[ModelCallTrace]
     processing_stages: list[ProcessingStage]

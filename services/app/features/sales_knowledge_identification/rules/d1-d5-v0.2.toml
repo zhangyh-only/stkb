@@ -1,0 +1,267 @@
+version = "d1-d5-v0.2"
+status = "sample_validation"
+source = "docs/current/STKB-D1-D5知识对象与业务图模型映射矩阵.md"
+
+[[modules]]
+domain = "D1"
+code = "D1.1"
+name = "产品事实库"
+lifecycle = "planned"
+meaning = "管理围绕同一产品或产品版本、共享适用范围和更新生命周期的参数、责任、限制、数值和服务权益。"
+object_types = ["PRODUCT_FACT", "PRODUCT_VERSION_FACT", "PRODUCT_COMPONENT_FACT"]
+core_objects = ["产品版本方案", "产品事实卡", "服务权益说明"]
+boundary = "对象内部可以包含多个类型化事实字段并为字段绑定证据；按事实主题、产品或版本范围、更新生命周期和消费边界归并，事实类型和值不自动决定对象数量。"
+sources = ["产品条款", "产品说明", "培训材料", "服务权益说明", "官方页面"]
+consumers = ["精确问答", "产品推荐", "话术生成与校验", "合规检查", "D5检测"]
+
+[[modules]]
+domain = "D1"
+code = "D1.2"
+name = "清单事实库"
+lifecycle = "planned"
+meaning = "管理需要逐项查询的集合及其成员，例如药品、疾病、机构和服务项目清单。"
+object_types = ["LIST_FACT", "LIST_ITEM_FACT", "ELIGIBILITY_FACT"]
+core_objects = ["清单", "清单版本"]
+boundary = "产品或版本适用某清单；清单包含可查询的结构化条目；条目具有纳入、排除或条件属性，但不默认成为独立KnowledgeObject；清单按版本和适用范围归并。"
+sources = ["官方清单", "条款附件", "Excel明细表", "服务目录"]
+consumers = ["成员资格查询", "精确过滤", "理赔或服务资格说明", "名单差异比较"]
+
+[[modules]]
+domain = "D1"
+code = "D1.3"
+name = "政策流程库"
+lifecycle = "planned"
+meaning = "管理投保、核保、理赔、退保、续保和服务使用等规则与步骤。"
+object_types = ["POLICY_RULE_SET", "BUSINESS_PROCESS", "PROCESS_STEP"]
+core_objects = ["政策规则集", "业务流程"]
+boundary = "流程内部保存有序步骤、条件转移和例外；步骤只有在具有独立更新、复用或消费价值时才拆分为对象；政策流程回答问答并提供合规依据。"
+sources = ["条款", "投保须知", "理赔指南", "服务手册", "SOP", "业务通知"]
+consumers = ["流程问答", "办理引导", "销售说明", "合规检查", "流程类评价"]
+
+[[modules]]
+domain = "D1"
+code = "D1.4"
+name = "竞品事实库"
+lifecycle = "optional"
+meaning = "管理有明确证据和时间范围的客观竞品差异，不存放主观贬损或无来源结论。"
+object_types = ["COMPETITOR_FACT", "COMPARISON_SNAPSHOT"]
+core_objects = ["竞品事实", "对比维度", "对比快照"]
+boundary = "对比快照在同一维度和时间范围内比较双方事实；所有差异必须回到证据和快照时间，不能覆盖为永久真值。"
+sources = ["竞品条款", "官方页面", "公开说明", "经核验对比材料"]
+consumers = ["竞品问答", "差异说明", "卖点选择", "策略参考"]
+
+[[modules]]
+domain = "D2"
+code = "D2.1"
+name = "画像坐标轴库"
+lifecycle = "planned"
+meaning = "定义可用于描述和区分客户的稳定维度、维度值及行业扩展维度。"
+object_types = ["PROFILE_DIMENSION", "PROFILE_DIMENSION_VALUE"]
+core_objects = ["画像维度", "维度值", "行业扩展维度"]
+boundary = "维度包含维度值；只有能够支持画像构建、策略选择或评价的维度才纳入，不从每份资料随意创造新标签。"
+sources = ["客户分群定义", "调研报告", "业务标签字典", "行业方法材料"]
+consumers = ["画像构建", "候选过滤", "策略适用条件", "跨企业行业模板"]
+
+[[modules]]
+domain = "D2"
+code = "D2.2"
+name = "画像库"
+lifecycle = "planned"
+meaning = "管理具有稳定特征组合的客户画像及其背景事实、可复用扮演边界。"
+object_types = ["CUSTOMER_PROFILE", "PROFILE_BACKGROUND_FACT", "ROLEPLAY_RULE"]
+core_objects = ["客户画像", "画像背景事实", "扮演规则"]
+boundary = "画像具有维度值、需求和触发机制；画像可被案例实例化；扮演规则只保留稳定反应边界，不包含某次训练的实时状态或Prompt配置。"
+sources = ["画像研究", "客户访谈", "业务经验材料", "典型案例"]
+consumers = ["AI客户扮演", "场景装配", "策略检索", "个性化话术"]
+
+[[modules]]
+domain = "D2"
+code = "D2.3"
+name = "需求与决策动因库"
+lifecycle = "planned"
+meaning = "管理客户要解决的问题、痛点、购买动机和稳定紧迫性判断。"
+object_types = ["CUSTOMER_NEED", "PAIN_POINT", "PURCHASE_MOTIVATION", "URGENCY_RULE"]
+core_objects = ["客户需求", "痛点", "购买动机", "紧迫度规则"]
+boundary = "资料仅描述现象但不能支持根因时，不直接提升为稳定动因；需求、痛点、购买动机和紧迫度按可独立归并的业务含义区分。"
+sources = ["客户访谈", "VOC", "调研", "销售案例", "对话记录"]
+consumers = ["需求识别", "产品与卖点推荐", "策略选择", "客户扮演"]
+
+[[modules]]
+domain = "D2"
+code = "D2.4"
+name = "打动点与触发机制库"
+lifecycle = "planned"
+meaning = "管理客户建立信任、产生兴趣或排斥的触发条件及稳定反应模式。"
+object_types = ["PERSUASION_TRIGGER", "TRUST_TRIGGER", "REJECTION_TRIGGER", "RESPONSE_PATTERN"]
+core_objects = ["打动点", "信任触发", "排斥触发", "反应模式"]
+boundary = "触发机制需要表达条件与相对稳定的反应；不能把单次对话中的偶然反应直接归纳为通用规则。"
+sources = ["客户研究", "优秀案例", "对话记录", "销售方法材料"]
+consumers = ["策略路由", "AI客户反应", "话术选择", "卖点优先级判断"]
+
+[[modules]]
+domain = "D2"
+code = "D2.5"
+name = "决策链角色库"
+lifecycle = "optional"
+meaning = "管理家庭或组织购买中的决策者、影响者、使用者及其关注点。"
+object_types = ["DECISION_ROLE", "INFLUENCE_RELATION", "ROLE_CONCERN"]
+core_objects = ["决策角色", "影响关系", "角色关注点"]
+boundary = "决策链表达角色、影响关系、关注点和决策权重；不把个人姓名作为通用决策角色知识。"
+sources = ["复杂销售材料", "家庭决策案例", "企业客户访谈", "组织采购流程"]
+consumers = ["多角色陪练", "复杂销售策略", "角色化话术与评价"]
+
+[[modules]]
+domain = "D3"
+code = "D3.1"
+name = "场景与流程阶段库"
+lifecycle = "planned"
+meaning = "管理销售场景的稳定骨架、阶段划分、转移条件和到位标志。"
+object_types = ["SALES_SCENARIO", "SALES_STAGE", "STAGE_TRANSITION_RULE", "STAGE_COMPLETION_MARKER"]
+core_objects = ["场景骨架", "销售阶段", "阶段转移规则", "到位标志"]
+boundary = "场景包含阶段，阶段按条件转移；具体会话当前处于哪个阶段属于运行时状态，不进入STKB。仅描述特定条件下应采取动作的内容优先归入D3.3。"
+sources = ["销售流程", "培训材料", "场景设计规范", "质检标准"]
+consumers = ["陪练流程控制", "策略装配", "阶段检测", "分阶段评价"]
+
+[[modules]]
+domain = "D3"
+code = "D3.2"
+name = "技巧模式库"
+lifecycle = "planned"
+meaning = "管理可跨表达复用的销售技巧、方法步骤和适用条件。"
+object_types = ["SALES_TECHNIQUE", "METHOD_STEP", "APPLICABILITY_CONDITION"]
+core_objects = ["技巧模式", "方法步骤", "适用条件"]
+boundary = "方法包含步骤；只有得到跨材料支持时才提升为跨产品通用技巧。带明确产品或场景条件的行动判断优先作为D3.3策略，不与通用技巧混为同一对象。"
+sources = ["销售方法论", "培训课件", "优秀案例", "标准话术"]
+consumers = ["销售指导", "教学", "策略生成", "行为评价", "改进建议"]
+
+[[modules]]
+domain = "D3"
+code = "D3.3"
+name = "策略与判断规则库"
+lifecycle = "planned"
+meaning = "管理在特定条件下如何判断、采取什么动作以及下一步优先做什么。"
+object_types = ["SALES_STRATEGY", "DECISION_RULE", "NEXT_BEST_ACTION", "CLARIFYING_QUESTION"]
+core_objects = ["策略打法", "判断规则", "下一最佳动作", "澄清问题"]
+boundary = "策略必须具有明确上下文、触发条件或行动目标；通用技巧与产品或场景策略保持独立并建立应用关系。场景的稳定阶段骨架归D3.1，产品事实或卖点本身不归策略。"
+sources = ["销售策略材料", "训练方案", "优秀案例", "质检反馈", "话术材料"]
+consumers = ["陪练决策", "销售助手策略推荐", "话术选择", "训练诊断"]
+
+[[modules]]
+domain = "D3"
+code = "D3.4"
+name = "合规红线库"
+lifecycle = "planned"
+meaning = "管理销售表达和行为的禁止项、风险判定模式及有依据的改写边界。"
+object_types = ["COMPLIANCE_RULE", "PROHIBITED_EXPRESSION", "RISK_PATTERN", "COMPLIANT_REWRITE_GUIDE"]
+core_objects = ["合规规则", "禁止性表述", "风险判定模式", "合规改写指引"]
+boundary = "合规规则必须基于事实、政策或监管依据；模型不能依据常识擅自创建高风险禁止项。"
+sources = ["法规", "监管文件", "公司合规制度", "产品条款", "稽核案例"]
+consumers = ["生成约束", "实时风险提示", "评分扣分", "审核与解释"]
+
+[[modules]]
+domain = "D4"
+code = "D4.1"
+name = "标准话术库"
+lifecycle = "planned"
+meaning = "管理具有明确回答目标、方法、适用范围和事实依据的可复用销售表达。"
+object_types = ["STANDARD_SCRIPT", "SCRIPT_VARIANT"]
+core_objects = ["标准话术", "可发布表达变体"]
+boundary = "话术必须具有表达目标、适用范围和事实依据；同一目标、方法和适用范围下的措辞变化作为变体，不单独建对象。"
+sources = ["标准话术", "优秀话术", "培训材料", "经核验案例"]
+consumers = ["话术推荐", "生成增强", "标准表达展示", "话术评价"]
+
+[[modules]]
+domain = "D4"
+code = "D4.2"
+name = "异议库"
+lifecycle = "planned"
+meaning = "管理客户拒绝或顾虑的规范含义、常见表达和可能原因，不混入完整回答。"
+object_types = ["CUSTOMER_OBJECTION", "ROOT_CONCERN_HYPOTHESIS", "RESOLUTION_ELEMENT"]
+core_objects = ["异议", "深层原因假设", "化解要素"]
+boundary = "根本顾虑和处理方向相同的语义变体归入同一异议对象；完整应对表达归D4.1，策略判断归D3.3。"
+sources = ["异议清单", "标准话术", "真实对话", "客户调研", "销售案例"]
+consumers = ["异议检索", "AI客户扮演", "应对策略和话术推荐", "异议评价"]
+
+[[modules]]
+domain = "D4"
+code = "D4.3"
+name = "Q&A与术语库"
+lifecycle = "planned"
+meaning = "管理可直接检索的问题、标准回答、术语及标准解释，答案必须引用事实依据。"
+object_types = ["QA_PAIR", "TERM", "STANDARD_EXPLANATION"]
+core_objects = ["问答对", "术语", "标准解释"]
+boundary = "问答不复制事实真值，答案需要引用D1事实或流程；术语可以包含标准解释和别名，同义问法归并到同一问答对象。"
+sources = ["FAQ", "产品手册", "客服问答", "培训资料", "术语表"]
+consumers = ["精确问答", "追问", "概念解释", "Agent文件阅读"]
+
+[[modules]]
+domain = "D4"
+code = "D4.4"
+name = "案例库"
+lifecycle = "planned"
+meaning = "保留具有上下文、关键事件、结果和经验结论的真实或教学案例。"
+object_types = ["SALES_CASE", "KEY_EVENT", "CASE_OUTCOME", "SUCCESS_FAILURE_CAUSE", "LESSON_LEARNED"]
+core_objects = ["案例", "关键事件", "结果", "成败原因", "经验结论"]
+boundary = "案例包含上下文和有序事件并关联结果；单个案例可以为方法、策略、话术和异议提供证据，但不能自动证明通用规则。"
+sources = ["成交案例", "失败案例", "对话记录", "复盘报告", "教学案例"]
+consumers = ["案例教学", "策略参考", "AI客户示例", "知识抽取证据"]
+
+[[modules]]
+domain = "D4"
+code = "D4.5"
+name = "物料与微课库"
+lifecycle = "planned"
+meaning = "管理可被销售助手或训练系统直接分发的内容资产及其适用范围。"
+object_types = ["SALES_MATERIAL", "SCRIPT_CARD", "MICRO_LESSON_CARD"]
+core_objects = ["物料资产", "话术卡", "微课卡片"]
+boundary = "物料引用或编排一个或多个知识对象并具有明确适用范围；原始媒体保留在文件存储，STKB只管理其身份、内容摘要、来源和知识引用。"
+sources = ["宣传册", "PPT", "海报", "视频", "课程", "销售卡片"]
+consumers = ["销售助手推送", "训练补强", "课程推荐", "Agent文件阅读"]
+
+[[modules]]
+domain = "D5"
+code = "D5.1"
+name = "卖点与检测单元库"
+lifecycle = "planned"
+meaning = "管理产品卖点及可观察、可判断的检测点和触发条件。"
+object_types = ["SELLING_POINT", "CHECK_UNIT", "TRIGGER_CONDITION"]
+core_objects = ["卖点", "检测点", "触发条件"]
+boundary = "D1事实支持卖点，检测点观察卖点是否被正确表达；卖点不能脱离事实来源成为营销口号，销售行动方案本身归D3.3。"
+sources = ["产品培训", "质检标准", "卖点清单", "标准话术", "客户研究"]
+consumers = ["卖点推荐", "覆盖检测", "实时评价", "结果解释"]
+
+[[modules]]
+domain = "D5"
+code = "D5.2"
+name = "能力模型库"
+lifecycle = "planned"
+meaning = "管理销售能力维度、可观察行为锚点和等级标准。"
+object_types = ["COMPETENCY_DIMENSION", "BEHAVIOR_ANCHOR", "PROFICIENCY_LEVEL"]
+core_objects = ["能力维度", "行为锚点", "等级标准"]
+boundary = "能力维度包含行为锚点，锚点指示等级；能力定义不保存某个学员的当前能力值。"
+sources = ["能力模型", "培训标准", "岗位要求", "质检体系"]
+consumers = ["总体评价", "长期能力诊断", "训练推荐", "能力报告"]
+
+[[modules]]
+domain = "D5"
+code = "D5.3"
+name = "评分规则库"
+lifecycle = "planned"
+meaning = "管理如何依据证据评价行为，包括指标、规则、证据要求和宽容边界。"
+object_types = ["EVALUATION_METRIC", "SCORING_RULE", "EVIDENCE_REQUIREMENT", "TOLERANCE_RULE"]
+core_objects = ["评价指标", "评分规则", "证据要求", "宽容规则"]
+boundary = "评分规则必须说明评价目标和所需证据；具体运行分数属于运行结果，不是新的知识对象。"
+sources = ["质检表", "评分标准", "评测规范", "验收规则"]
+consumers = ["实时评价", "总体评价", "结果解释", "改进建议"]
+
+[[modules]]
+domain = "D5"
+code = "D5.4"
+name = "基准与黄金测集库"
+lifecycle = "planned"
+meaning = "管理用于回归、方案比较和验收的稳定样本、预期结果与检查清单。"
+object_types = ["EVALUATION_BENCHMARK", "GOLDEN_SAMPLE", "REGRESSION_PROBE", "ACCEPTANCE_CHECKLIST"]
+core_objects = ["方案基准", "黄金样本", "回归探针", "验收清单"]
+boundary = "基准绑定输入证据、预期行为和被验证的知识或方案版本；生产运行记录只有经过筛选和确认后才能进入黄金样本。"
+sources = ["验收样例", "历史标注", "回归用例", "业务评审记录", "测试报告"]
+consumers = ["回归测试", "方案对比", "客户验收", "方案与技术验证"]

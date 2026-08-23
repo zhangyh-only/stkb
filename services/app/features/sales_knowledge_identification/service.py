@@ -9,6 +9,7 @@ from typing import Any, Literal, Protocol
 from pydantic import ValidationError
 
 from .catalog import (
+    CATALOG_FINGERPRINT,
     CATALOG_VERSION,
     KNOWLEDGE_MODULES,
     MODULE_BY_CODE,
@@ -143,6 +144,7 @@ class SalesKnowledgeIdentificationService:
                 prompt_version=PROMPT_VERSION,
                 schema_version=SCHEMA_VERSION,
                 catalog_version=CATALOG_VERSION,
+                catalog_fingerprint=CATALOG_FINGERPRINT,
                 raw_model_output="",
                 model_calls=model_calls,
                 processing_stages=[
@@ -403,6 +405,7 @@ class SalesKnowledgeIdentificationService:
             prompt_version=PROMPT_VERSION,
             schema_version=SCHEMA_VERSION,
             catalog_version=CATALOG_VERSION,
+            catalog_fingerprint=CATALOG_FINGERPRINT,
             raw_model_output=json.dumps(
                 {
                     "segments": [

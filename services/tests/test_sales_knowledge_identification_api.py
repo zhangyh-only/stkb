@@ -111,6 +111,14 @@ def test_api_runs_identification_and_reads_the_saved_result(
     assert document_response.status_code == 200
     assert catalog_response.status_code == 200
     assert len(catalog_response.json()["modules"]) == 22
+    assert catalog_response.json()["version"] == "d1-d5-v0.2"
+    assert catalog_response.json()["status"] == "sample_validation"
+    assert len(catalog_response.json()["fingerprint"]) == 64
+    assert catalog_response.json()["source"].endswith(
+        "STKB-D1-D5知识对象与业务图模型映射矩阵.md"
+    )
+    assert catalog_response.json()["modules"][0]["meaning"]
+    assert catalog_response.json()["modules"][0]["boundary"]
     assert run_response.status_code == 200
     assert run_response.json()["status"] == "completed"
     assert run_response.json()["modelConfiguration"]["documentMaxChars"] == 3500

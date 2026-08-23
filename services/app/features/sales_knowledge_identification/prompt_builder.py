@@ -1,7 +1,7 @@
 from .catalog import render_catalog_for_prompt
 from .models import DocumentPackage, ModelRequest
 
-PROMPT_VERSION = "sales-identification-v0.1"
+PROMPT_VERSION = "sales-identification-v0.2"
 SCHEMA_VERSION = "candidate-knowledge-v0.1"
 
 
@@ -11,7 +11,7 @@ def build_model_request(
     segment_label: str | None = None,
 ) -> ModelRequest:
     system_prompt = f"""你是 STKB 销售知识识别器。
-你需要阅读全文并一次性综合识别销售知识，不得按五域或22个知识内容模块循环调用。
+你需要阅读本次提供的 Markdown 内容并综合识别销售知识，不得按五域或22个知识内容模块循环调用。
 
 识别规则：
 1. 输出0到多个候选知识；按可独立归并和更新的业务对象聚合，不按句子、字段或表格单元格机械拆分。
@@ -25,8 +25,12 @@ def build_model_request(
 5. 不生成正式 KnowledgeObject ID，不执行跨资料归并，不输出通用置信度或推理过程。
 6. 明确不属于 STKB 的内容不形成候选；无法判断的内容进入 unresolvedItems。
 7. 请严格输出 JSON 对象，不要输出 Markdown 代码围栏或解释文字。
+8. 分类必须同时依据模块业务含义、允许对象类型、对象边界和消费职责，不能只按关键词、
+   资料名称或典型来源判断。
+9. 同一证据可以支持多个候选，但只有业务身份、更新边界或消费职责确实独立时才拆分。
+10. 多个模块都可能成立且规则不足以裁决时，进入 unresolvedItems，不为填满覆盖矩阵强制分类。
 
-当前 D1-D5 / 22个知识内容模块目录：
+当前 D1-D5 / 22个知识内容模块识别规则包：
 {render_catalog_for_prompt()}
 
 输出对象形态：
@@ -61,6 +65,7 @@ def build_model_request(
         if segment_label
         else ""
     )
+    content_label = "Markdown 结构分段" if segment_label else "全文 Markdown"
     user_prompt = f"""DocumentPackage: {document_package.document_package_id}
 {segment_context}处理方式: {document_package.processing_method}
 已知解析质量问题: {document_package.quality_issues}
@@ -68,7 +73,7 @@ def build_model_request(
 允许使用的来源锚点：
 {anchors}
 
-全文 Markdown：
+{content_label}：
 {document_package.full_markdown}
 """
     return ModelRequest(

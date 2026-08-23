@@ -138,6 +138,7 @@ export type IdentificationResult = {
   promptVersion: string
   schemaVersion: string
   catalogVersion: string
+  catalogFingerprint: string
   rawModelOutput: string
   modelCalls: ModelCallTrace[]
   processingStages: ProcessingStage[]
@@ -160,7 +161,21 @@ export type KnowledgeModule = {
   domainName: string
   code: string
   name: string
+  lifecycle: 'planned' | 'optional'
+  meaning: string
   objectTypes: string[]
+  coreObjects: string[]
+  boundary: string
+  sources: string[]
+  consumers: string[]
+}
+
+export type IdentificationCatalog = {
+  version: string
+  fingerprint: string
+  status: 'sample_validation'
+  source: string
+  modules: KnowledgeModule[]
 }
 
 export const COVERAGE_LABELS: Record<CoverageStatus, string> = {

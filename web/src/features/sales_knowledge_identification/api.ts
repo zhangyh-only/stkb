@@ -1,4 +1,4 @@
-import type { DocumentPackage, IdentificationResult, KnowledgeModule } from './types'
+import type { DocumentPackage, IdentificationCatalog, IdentificationResult } from './types'
 import { resolveApiBaseUrl } from '../../core/api-base'
 
 export const apiBaseUrl = resolveApiBaseUrl(import.meta.env.VITE_API_BASE_URL)
@@ -51,10 +51,7 @@ export function getDocumentPackage(documentPackageId: string): Promise<DocumentP
   )
 }
 
-export function getIdentificationCatalog(): Promise<{
-  version: string
-  modules: KnowledgeModule[]
-}> {
+export function getIdentificationCatalog(): Promise<IdentificationCatalog> {
   return request('/sales-knowledge-identification/catalog')
 }
 

@@ -1,4 +1,14 @@
+from __future__ import annotations
+
+import tomllib
 from dataclasses import dataclass
+from hashlib import sha256
+from pathlib import Path
+from typing import Literal
+
+RULE_PACKAGE_PATH = Path(__file__).with_name("rules") / "d1-d5-v0.2.toml"
+EXPECTED_MODULE_COUNT = 22
+EXPECTED_DOMAINS = {"D1", "D2", "D3", "D4", "D5"}
 
 
 @dataclass(frozen=True)
@@ -6,100 +16,71 @@ class KnowledgeModule:
     domain: str
     code: str
     name: str
+    lifecycle: Literal["planned", "optional"]
+    meaning: str
     object_types: tuple[str, ...]
+    core_objects: tuple[str, ...]
+    boundary: str
+    sources: tuple[str, ...]
+    consumers: tuple[str, ...]
 
 
-KNOWLEDGE_MODULES = (
-    KnowledgeModule(
-        "D1",
-        "D1.1",
-        "产品事实库",
-        ("PRODUCT_FACT", "PRODUCT_VERSION_FACT", "PRODUCT_COMPONENT_FACT"),
-    ),
-    KnowledgeModule(
-        "D1", "D1.2", "清单事实库", ("LIST_FACT", "LIST_ITEM_FACT", "ELIGIBILITY_FACT")
-    ),
-    KnowledgeModule(
-        "D1", "D1.3", "政策流程库", ("POLICY_RULE_SET", "BUSINESS_PROCESS", "PROCESS_STEP")
-    ),
-    KnowledgeModule("D1", "D1.4", "竞品事实库", ("COMPETITOR_FACT", "COMPARISON_SNAPSHOT")),
-    KnowledgeModule("D2", "D2.1", "画像坐标轴库", ("PROFILE_DIMENSION", "PROFILE_DIMENSION_VALUE")),
-    KnowledgeModule(
-        "D2", "D2.2", "画像库", ("CUSTOMER_PROFILE", "PROFILE_BACKGROUND_FACT", "ROLEPLAY_RULE")
-    ),
-    KnowledgeModule(
-        "D2",
-        "D2.3",
-        "需求与决策动因库",
-        ("CUSTOMER_NEED", "PAIN_POINT", "PURCHASE_MOTIVATION", "URGENCY_RULE"),
-    ),
-    KnowledgeModule(
-        "D2",
-        "D2.4",
-        "打动点与触发机制库",
-        ("PERSUASION_TRIGGER", "TRUST_TRIGGER", "REJECTION_TRIGGER", "RESPONSE_PATTERN"),
-    ),
-    KnowledgeModule(
-        "D2", "D2.5", "决策链角色库", ("DECISION_ROLE", "INFLUENCE_RELATION", "ROLE_CONCERN")
-    ),
-    KnowledgeModule(
-        "D3",
-        "D3.1",
-        "场景与流程阶段库",
-        ("SALES_SCENARIO", "SALES_STAGE", "STAGE_TRANSITION_RULE", "STAGE_COMPLETION_MARKER"),
-    ),
-    KnowledgeModule(
-        "D3", "D3.2", "技巧模式库", ("SALES_TECHNIQUE", "METHOD_STEP", "APPLICABILITY_CONDITION")
-    ),
-    KnowledgeModule(
-        "D3",
-        "D3.3",
-        "策略与判断规则库",
-        ("SALES_STRATEGY", "DECISION_RULE", "NEXT_BEST_ACTION", "CLARIFYING_QUESTION"),
-    ),
-    KnowledgeModule(
-        "D3",
-        "D3.4",
-        "合规红线库",
-        ("COMPLIANCE_RULE", "PROHIBITED_EXPRESSION", "RISK_PATTERN", "COMPLIANT_REWRITE_GUIDE"),
-    ),
-    KnowledgeModule("D4", "D4.1", "标准话术库", ("STANDARD_SCRIPT", "SCRIPT_VARIANT")),
-    KnowledgeModule(
-        "D4",
-        "D4.2",
-        "异议库",
-        ("CUSTOMER_OBJECTION", "ROOT_CONCERN_HYPOTHESIS", "RESOLUTION_ELEMENT"),
-    ),
-    KnowledgeModule("D4", "D4.3", "Q&A与术语库", ("QA_PAIR", "TERM", "STANDARD_EXPLANATION")),
-    KnowledgeModule(
-        "D4",
-        "D4.4",
-        "案例库",
-        ("SALES_CASE", "KEY_EVENT", "CASE_OUTCOME", "SUCCESS_FAILURE_CAUSE", "LESSON_LEARNED"),
-    ),
-    KnowledgeModule(
-        "D4", "D4.5", "物料与微课库", ("SALES_MATERIAL", "SCRIPT_CARD", "MICRO_LESSON_CARD")
-    ),
-    KnowledgeModule(
-        "D5", "D5.1", "卖点与检测单元库", ("SELLING_POINT", "CHECK_UNIT", "TRIGGER_CONDITION")
-    ),
-    KnowledgeModule(
-        "D5", "D5.2", "能力模型库", ("COMPETENCY_DIMENSION", "BEHAVIOR_ANCHOR", "PROFICIENCY_LEVEL")
-    ),
-    KnowledgeModule(
-        "D5",
-        "D5.3",
-        "评分规则库",
-        ("EVALUATION_METRIC", "SCORING_RULE", "EVIDENCE_REQUIREMENT", "TOLERANCE_RULE"),
-    ),
-    KnowledgeModule(
-        "D5",
-        "D5.4",
-        "基准与黄金测集库",
-        ("EVALUATION_BENCHMARK", "GOLDEN_SAMPLE", "REGRESSION_PROBE", "ACCEPTANCE_CHECKLIST"),
-    ),
-)
+def _load_rule_package() -> tuple[str, str, str, str, tuple[KnowledgeModule, ...]]:
+    rule_content = RULE_PACKAGE_PATH.read_bytes()
+    payload = tomllib.loads(rule_content.decode("utf-8"))
+    modules = tuple(
+        KnowledgeModule(
+            domain=item["domain"],
+            code=item["code"],
+            name=item["name"],
+            lifecycle=item["lifecycle"],
+            meaning=item["meaning"],
+            object_types=tuple(item["object_types"]),
+            core_objects=tuple(item["core_objects"]),
+            boundary=item["boundary"],
+            sources=tuple(item["sources"]),
+            consumers=tuple(item["consumers"]),
+        )
+        for item in payload["modules"]
+    )
+    _validate_rule_package(modules)
+    fingerprint = sha256(rule_content).hexdigest()
+    return payload["version"], payload["status"], payload["source"], fingerprint, modules
 
+
+def _validate_rule_package(modules: tuple[KnowledgeModule, ...]) -> None:
+    if len(modules) != EXPECTED_MODULE_COUNT:
+        raise RuntimeError(
+            f"knowledge rule package must define {EXPECTED_MODULE_COUNT} modules"
+        )
+    codes = [module.code for module in modules]
+    if len(codes) != len(set(codes)):
+        raise RuntimeError("knowledge rule package contains duplicate module codes")
+    if {module.domain for module in modules} != EXPECTED_DOMAINS:
+        raise RuntimeError("knowledge rule package must cover D1-D5")
+    for module in modules:
+        if not module.code.startswith(f"{module.domain}."):
+            raise RuntimeError(f"module {module.code} does not belong to {module.domain}")
+        required_values = (
+            module.name,
+            module.meaning,
+            module.boundary,
+            module.object_types,
+            module.core_objects,
+            module.sources,
+            module.consumers,
+        )
+        if not all(required_values):
+            raise RuntimeError(f"module {module.code} has incomplete identification rules")
+
+
+(
+    CATALOG_VERSION,
+    CATALOG_STATUS,
+    CATALOG_SOURCE,
+    CATALOG_FINGERPRINT,
+    KNOWLEDGE_MODULES,
+) = _load_rule_package()
 MODULE_BY_CODE = {module.code: module for module in KNOWLEDGE_MODULES}
 DOMAIN_NAMES = {
     "D1": "业务事实",
@@ -108,7 +89,6 @@ DOMAIN_NAMES = {
     "D4": "话术与案例",
     "D5": "评估与训练",
 }
-CATALOG_VERSION = "d1-d5-v0.1"
 
 
 def validate_candidate_classification(domain: str, module: str, object_type: str) -> list[str]:
@@ -124,7 +104,20 @@ def validate_candidate_classification(domain: str, module: str, object_type: str
 
 
 def render_catalog_for_prompt() -> str:
-    return "\n".join(
-        f"- {module.code} / {module.name} / allowed object types: {', '.join(module.object_types)}"
-        for module in KNOWLEDGE_MODULES
-    )
+    sections = []
+    for module in KNOWLEDGE_MODULES:
+        lifecycle = "可选模块" if module.lifecycle == "optional" else "计划建设模块"
+        sections.append(
+            "\n".join(
+                [
+                    f"### {module.code} {module.name}（{lifecycle}）",
+                    f"- 业务含义：{module.meaning}",
+                    f"- 允许对象类型：{', '.join(module.object_types)}",
+                    f"- 核心对象：{'、'.join(module.core_objects)}",
+                    f"- 对象边界与分类裁决：{module.boundary}",
+                    f"- 典型来源：{'、'.join(module.sources)}",
+                    f"- 明确消费方：{'、'.join(module.consumers)}",
+                ]
+            )
+        )
+    return "\n\n".join(sections)
