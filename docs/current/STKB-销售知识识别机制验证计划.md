@@ -95,6 +95,8 @@ GET  /api/sales-knowledge-identification/evaluations/{document_package_id}
 
 `POST /runs` 必须执行真实模型调用并返回运行结果。测试替身只用于网络错误、格式错误等确定性分支，不能作为真实效果验收依据。
 
+调试台面向使用者时按项目内原始资料选择，不要求输入或记忆 `DocumentPackage ID`。后端仍用该 ID 绑定原件、代理解析后的全文 Markdown、证据锚点、识别运行和评估结果。当前验证样例的原始 PPTX 位于本地 `workspace/source-materials/DP-YXB-TRAINING-20260821/`，其路径和 SHA-256 由对应 `manifest.json` 登记；原件和运行数据不提交 Git。
+
 ## 7. 调试页面
 
 Vue 调试台至少展示：
