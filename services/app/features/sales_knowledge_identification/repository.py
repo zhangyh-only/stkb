@@ -11,7 +11,7 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from .models import DocumentPackage
+from .models import DocumentPackage, SourceMaterial
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
@@ -46,13 +46,15 @@ class PsycopgIdentificationRepository:
             connection.execute(
                 """
                 INSERT INTO document_packages (
-                    document_package_id, workspace_id, source_file_name, source_sha256,
+                    document_package_id, workspace_id, source_file_name, source_file_path,
+                    source_sha256,
                     full_markdown_path, full_markdown_sha256, processing_method, status,
                     anchors, quality_issues
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (document_package_id) DO UPDATE SET
                     workspace_id = EXCLUDED.workspace_id,
                     source_file_name = EXCLUDED.source_file_name,
+                    source_file_path = EXCLUDED.source_file_path,
                     source_sha256 = EXCLUDED.source_sha256,
                     full_markdown_path = EXCLUDED.full_markdown_path,
                     full_markdown_sha256 = EXCLUDED.full_markdown_sha256,
@@ -65,6 +67,7 @@ class PsycopgIdentificationRepository:
                     manifest["documentPackageId"],
                     manifest["workspaceId"],
                     manifest["sourceFileName"],
+                    manifest["sourceFilePath"],
                     manifest["sourceSha256"],
                     manifest["fullMarkdownPath"],
                     manifest["fullMarkdownSha256"],
@@ -75,6 +78,28 @@ class PsycopgIdentificationRepository:
                 ),
             )
 
+    def list_source_materials(self) -> list[SourceMaterial]:
+        with psycopg.connect(self.postgres_dsn, row_factory=dict_row) as connection:
+            rows = connection.execute(
+                """
+                SELECT document_package_id, source_file_name, source_file_path, source_sha256,
+                       processing_method, status
+                FROM document_packages
+                ORDER BY created_at DESC, source_file_name
+                """
+            ).fetchall()
+        return [
+            SourceMaterial(
+                document_package_id=row["document_package_id"],
+                source_file_name=row["source_file_name"],
+                source_file_path=row["source_file_path"],
+                source_sha256=row["source_sha256"],
+                processing_method=row["processing_method"],
+                status=row["status"],
+            )
+            for row in rows
+        ]
+
     def get_document_package(self, document_package_id: str) -> DocumentPackage:
         with psycopg.connect(self.postgres_dsn, row_factory=dict_row) as connection:
             row = connection.execute(
@@ -83,6 +108,12 @@ class PsycopgIdentificationRepository:
             ).fetchone()
         if row is None:
             raise IdentificationRecordNotFound(document_package_id)
+        source_file_path = self._resolve_workspace_path(row["source_file_path"])
+        actual_source_checksum = hashlib.sha256(source_file_path.read_bytes()).hexdigest()
+        if actual_source_checksum != row["source_sha256"]:
+            raise DocumentPackageIntegrityError(
+                f"source file checksum mismatch for {document_package_id}"
+            )
         full_markdown_path = self._resolve_workspace_path(row["full_markdown_path"])
         full_markdown = full_markdown_path.read_text(encoding="utf-8")
         actual_checksum = hashlib.sha256(full_markdown.encode("utf-8")).hexdigest()
@@ -94,6 +125,7 @@ class PsycopgIdentificationRepository:
             document_package_id=row["document_package_id"],
             workspace_id=row["workspace_id"],
             source_file_name=row["source_file_name"],
+            source_file_path=row["source_file_path"],
             source_sha256=row["source_sha256"],
             full_markdown_path=row["full_markdown_path"],
             full_markdown_sha256=row["full_markdown_sha256"],

@@ -22,6 +22,7 @@ from app.features.sales_knowledge_identification.models import (
     DocumentPackage,
     IdentificationResult,
     ModelConfigurationSnapshot,
+    SourceMaterial,
     to_camel,
 )
 from app.features.sales_knowledge_identification.repository import (
@@ -72,11 +73,15 @@ def identification_catalog() -> dict[str, object]:
 @lru_cache
 def get_identification_repository() -> PsycopgIdentificationRepository:
     settings = get_settings()
-    return PsycopgIdentificationRepository(
+    repository = PsycopgIdentificationRepository(
         postgres_dsn=settings.postgres_dsn,
         project_root=PROJECT_ROOT,
         retention_hours=settings.identification_debug_retention_hours,
     )
+    repository.ensure_schema()
+    for manifest_path in sorted((settings.workspace_root / "documents").glob("*/manifest.json")):
+        repository.register_manifest(manifest_path)
+    return repository
 
 
 @lru_cache
@@ -97,6 +102,16 @@ def get_model_gateway() -> ModelGateway:
         timeout_seconds=settings.llm_timeout_seconds,
         enable_thinking=settings.llm_enable_thinking,
     )
+
+
+@router.get(
+    "/source-materials",
+    response_model=list[SourceMaterial],
+)
+def source_materials(
+    repository: Annotated[PsycopgIdentificationRepository, Depends(get_identification_repository)],
+) -> list[SourceMaterial]:
+    return repository.list_source_materials()
 
 
 @router.get(

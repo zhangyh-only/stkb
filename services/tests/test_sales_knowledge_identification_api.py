@@ -11,6 +11,7 @@ from app.features.sales_knowledge_identification.models import (
     DocumentPackage,
     ModelCompletion,
     SourceAnchor,
+    SourceMaterial,
 )
 from app.main import app
 
@@ -23,6 +24,18 @@ class InMemoryRepository:
     def get_document_package(self, document_package_id: str) -> DocumentPackage:
         assert document_package_id == self.document_package.document_package_id
         return self.document_package
+
+    def list_source_materials(self) -> list[SourceMaterial]:
+        return [
+            SourceMaterial(
+                document_package_id=self.document_package.document_package_id,
+                source_file_name=self.document_package.source_file_name,
+                source_file_path=self.document_package.source_file_path,
+                source_sha256=self.document_package.source_sha256,
+                processing_method=self.document_package.processing_method,
+                status=self.document_package.status,
+            )
+        ]
 
     def save_run(self, result: dict[str, object]) -> None:
         self.runs[str(result["runId"])] = result
@@ -89,6 +102,9 @@ def test_api_runs_identification_and_reads_the_saved_result(
 
     try:
         catalog_response = client.get("/api/sales-knowledge-identification/catalog")
+        materials_response = client.get(
+            "/api/sales-knowledge-identification/source-materials"
+        )
         document_response = client.get(
             "/api/sales-knowledge-identification/document-packages/DP-API"
         )
@@ -109,6 +125,9 @@ def test_api_runs_identification_and_reads_the_saved_result(
         app.dependency_overrides.clear()
 
     assert document_response.status_code == 200
+    assert materials_response.status_code == 200
+    assert materials_response.json()[0]["sourceFileName"] == "sample.pdf"
+    assert materials_response.json()[0]["documentPackageId"] == "DP-API"
     assert catalog_response.status_code == 200
     assert len(catalog_response.json()["modules"]) == 22
     assert catalog_response.json()["version"] == "d1-d5-v0.2"

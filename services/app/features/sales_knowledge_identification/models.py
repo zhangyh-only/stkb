@@ -31,6 +31,7 @@ class DocumentPackage(ApiModel):
     document_package_id: str
     workspace_id: str
     source_file_name: str
+    source_file_path: str = ""
     source_sha256: str
     full_markdown_path: str
     full_markdown_sha256: str
@@ -39,6 +40,15 @@ class DocumentPackage(ApiModel):
     status: Literal["available", "unavailable"]
     anchors: list[SourceAnchor]
     quality_issues: list[str]
+
+
+class SourceMaterial(ApiModel):
+    document_package_id: str
+    source_file_name: str
+    source_file_path: str
+    source_sha256: str
+    processing_method: Literal["agent_assisted", "capability"]
+    status: Literal["available", "unavailable"]
 
 
 class ModelRequest(ApiModel):
