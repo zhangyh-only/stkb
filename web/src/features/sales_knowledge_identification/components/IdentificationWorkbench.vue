@@ -18,13 +18,13 @@ import { computed, onMounted, ref, type Component } from 'vue'
 
 import {
   apiBaseUrl,
-  defaultDocumentPackageId,
   getDocumentPackage,
   getIdentificationCatalog,
   getIdentificationEvaluation,
   getIdentificationRun,
   IdentificationApiError,
   listIdentificationRuns,
+  listSourceMaterials,
   runIdentification,
 } from '../api'
 import {
@@ -40,6 +40,7 @@ import {
   type ModelCallTrace,
   type ProcessingStage,
   type SourceAnchor,
+  type SourceMaterial,
 } from '../types'
 
 type WorkbenchTab = 'overview' | 'source' | 'candidates' | 'coverage' | 'evaluation' | 'traces'
@@ -53,7 +54,8 @@ const tabItems: { key: WorkbenchTab; label: string; icon: Component }[] = [
   { key: 'traces', label: '调用与阶段', icon: IconGitBranch },
 ]
 
-const packageId = ref('')
+const selectedMaterialId = ref('')
+const sourceMaterials = ref<SourceMaterial[]>([])
 const documentPackage = ref<DocumentPackage | null>(null)
 const result = ref<IdentificationResult | null>(null)
 const selectedCandidateId = ref<string | null>(null)
@@ -162,12 +164,12 @@ function loadErrorMessage(reason: unknown): string {
   if (reason instanceof IdentificationApiError) {
     errorEndpoint.value = reason.endpoint
     if (reason.status === 404) {
-      return `请求的资源不存在（${reason.message}）。请确认 DocumentPackage ID，或重启前端以加载最新 API 配置。`
+      return `请求的资料不存在（${reason.message}）。请重新选择资料，或重启前端以加载最新 API 配置。`
     }
     return reason.message
   }
   if (reason instanceof Error) return reason.message
-  return '请求失败，请检查 API 服务和文档包 ID。'
+  return '请求失败，请检查识别服务和原始资料登记。'
 }
 
 function clearError(): void {
@@ -178,8 +180,12 @@ function clearError(): void {
 async function probeApi(): Promise<void> {
   apiState.value = 'checking'
   try {
-    const catalog = await getIdentificationCatalog()
+    const [catalog, materials] = await Promise.all([
+      getIdentificationCatalog(),
+      listSourceMaterials(),
+    ])
     catalogModules.value = catalog.modules
+    sourceMaterials.value = materials
     apiState.value = 'ready'
   } catch (reason) {
     apiState.value = 'error'
@@ -188,9 +194,9 @@ async function probeApi(): Promise<void> {
 }
 
 async function loadPackage(): Promise<void> {
-  const id = packageId.value.trim()
+  const id = selectedMaterialId.value
   if (!id) {
-    error.value = '请先提供 DocumentPackage ID。'
+    error.value = '请先选择一份原始资料。'
     return
   }
   packageLoading.value = true
@@ -211,7 +217,7 @@ async function loadPackage(): Promise<void> {
     catalogModules.value = catalog.modules
     apiState.value = 'ready'
     activeTab.value = 'overview'
-    packageNotice.value = `已读取 ${id}。历史运行结果未自动载入，请执行识别查看本轮结果。`
+    packageNotice.value = `已读取《${nextPackage.sourceFileName}》。历史运行结果未自动载入，请执行识别查看本轮结果。`
   } catch (reason) {
     error.value = loadErrorMessage(reason)
   } finally {
@@ -220,9 +226,9 @@ async function loadPackage(): Promise<void> {
 }
 
 async function executeRun(): Promise<void> {
-  const id = packageId.value.trim()
+  const id = selectedMaterialId.value
   if (!id) {
-    error.value = '请先提供 DocumentPackage ID。'
+    error.value = '请先选择一份原始资料。'
     return
   }
   runLoading.value = true
@@ -324,11 +330,11 @@ onMounted(() => {
       <div>
         <h1>销售知识识别调试台</h1>
         <p class="lede">
-          以可定位的 DocumentPackage 为输入，调用真实模型识别候选知识，并复核证据、D1-D5 覆盖和运行稳定性。
+          选择项目内已完成代理解析的原始资料，调用真实模型识别候选知识，并复核证据、D1-D5 覆盖和运行稳定性。
         </p>
       </div>
       <div class="header-facts" aria-label="当前验证范围">
-        <div><span>输入</span><strong>DocumentPackage</strong></div>
+        <div><span>输入</span><strong>原始资料</strong></div>
         <div><span>调用</span><strong>真实模型</strong></div>
         <div><span>输出</span><strong>CandidateKnowledgeSet</strong></div>
       </div>
@@ -344,14 +350,24 @@ onMounted(() => {
       </div>
       <div class="control-row">
         <label class="package-input">
-          <span>DocumentPackage ID <small>资料证据包标识</small></span>
-          <input v-model="packageId" type="text" placeholder="例如 DP-YXB-TRAINING-20260821" @keyup.enter="loadPackage" />
+          <span>原始资料 <small>已绑定代理解析结果</small></span>
+          <select v-model="selectedMaterialId">
+            <option value="">请选择项目内原始资料</option>
+            <option
+              v-for="material in sourceMaterials"
+              :key="material.documentPackageId"
+              :value="material.documentPackageId"
+              :disabled="material.status !== 'available'"
+            >
+              {{ material.sourceFileName }}{{ material.status !== 'available' ? '（不可用）' : '' }}
+            </option>
+          </select>
         </label>
-        <button class="button button-quiet" type="button" :disabled="packageLoading || runLoading" @click="loadPackage">
+        <button class="button button-quiet" type="button" :disabled="packageLoading || runLoading || !selectedMaterialId" @click="loadPackage">
           <IconSearch size="16" stroke="2" />
           {{ packageLoading ? '读取中…' : '读取资料' }}
         </button>
-        <button class="button button-primary" type="button" :disabled="runLoading || packageLoading" @click="executeRun">
+        <button class="button button-primary" type="button" :disabled="runLoading || packageLoading || !selectedMaterialId" @click="executeRun">
           <IconPlayerPlay v-if="!runLoading" size="16" stroke="2" />
           <span v-else class="button-loader"></span>
           {{ runLoading ? '模型识别运行中…' : '执行真实模型识别' }}
@@ -359,7 +375,7 @@ onMounted(() => {
       </div>
       <div class="control-meta">
         <span>API <code>{{ apiBaseUrl }}</code></span>
-        <span>默认资料 <code>{{ defaultDocumentPackageId || '未配置' }}</code></span>
+        <span>{{ sourceMaterials.length }} 份资料已登记</span>
         <span v-if="packageNotice" class="success-text">{{ packageNotice }}</span>
         <span v-if="runNotice" class="success-text">{{ runNotice }}</span>
       </div>
@@ -381,7 +397,7 @@ onMounted(() => {
         <div>
           <p class="eyebrow-small">DOCUMENT PACKAGE</p>
           <h2>{{ documentPackage.sourceFileName }}</h2>
-          <p class="muted">{{ documentPackage.documentPackageId }} · {{ documentPackage.workspaceId }}</p>
+          <p class="muted">{{ documentPackage.sourceFilePath }}</p>
         </div>
       </div>
       <div class="package-facts">
@@ -500,7 +516,7 @@ onMounted(() => {
 
       <section v-else-if="activeTab === 'source'" class="source-view">
         <div class="source-meta-grid">
-          <div class="panel source-card"><p class="eyebrow-small">SOURCE FILE</p><h2>{{ documentPackage.sourceFileName }}</h2><dl class="detail-list"><div><dt>原件 SHA-256</dt><dd class="mono hash-value">{{ documentPackage.sourceSha256 }}</dd></div><div><dt>全文路径</dt><dd class="mono">{{ documentPackage.fullMarkdownPath }}</dd></div><div><dt>全文 SHA-256</dt><dd class="mono hash-value">{{ documentPackage.fullMarkdownSha256 }}</dd></div></dl></div>
+          <div class="panel source-card"><p class="eyebrow-small">SOURCE FILE</p><h2>{{ documentPackage.sourceFileName }}</h2><dl class="detail-list"><div><dt>项目内原件</dt><dd class="mono">{{ documentPackage.sourceFilePath }}</dd></div><div><dt>原件 SHA-256</dt><dd class="mono hash-value">{{ documentPackage.sourceSha256 }}</dd></div><div><dt>全文路径</dt><dd class="mono">{{ documentPackage.fullMarkdownPath }}</dd></div><div><dt>全文 SHA-256</dt><dd class="mono hash-value">{{ documentPackage.fullMarkdownSha256 }}</dd></div></dl></div>
           <div class="panel source-card"><p class="eyebrow-small">QUALITY NOTES</p><h2>{{ documentPackage.qualityIssues.length ? '需要留意' : '暂无质量问题' }}</h2><ul v-if="documentPackage.qualityIssues.length" class="issue-list"><li v-for="issue in documentPackage.qualityIssues" :key="issue">{{ issue }}</li></ul><p v-else class="muted">代理解析结果未登记质量问题。</p><div class="method-stamp">{{ documentPackage.processingMethod === 'agent_assisted' ? 'AGENT ASSISTED' : 'CAPABILITY OUTPUT' }}</div></div>
         </div>
         <div class="panel source-document"><div class="section-title-row"><div><p class="eyebrow-small">FULL MARKDOWN</p><h2>可定位的全文输入</h2></div><span class="pill">只读</span></div><pre class="markdown-viewer">{{ documentPackage.fullMarkdown }}</pre></div>
@@ -529,7 +545,7 @@ onMounted(() => {
           <div class="secondary-result-grid"><div class="panel secondary-card"><div class="section-title-row"><div><p class="eyebrow-small">REJECTED</p><h2>拒绝项</h2></div><span class="pill pill-red">{{ result.rejectedCandidates.length }}</span></div><div v-if="result.rejectedCandidates.length" class="rejected-list"><details v-for="item in result.rejectedCandidates" :key="item.candidateId"><summary><strong>{{ item.candidateId }}</strong><span>{{ item.reasons.length }} 个原因</span></summary><ul class="issue-list"><li v-for="reason in item.reasons" :key="reason">{{ reason }}</li></ul><pre class="json-viewer compact">{{ prettyJson(item.rawCandidate) }}</pre></details></div><p v-else class="muted">没有被程序拒绝的候选。</p></div><div class="panel secondary-card"><div class="section-title-row"><div><p class="eyebrow-small">WEAK / UNRESOLVED</p><h2>弱线索与未决项</h2></div><span class="pill">{{ result.weakSignals.length + result.unresolvedItems.length }}</span></div><div v-if="result.weakSignals.length || result.unresolvedItems.length" class="weak-list"><div v-for="(item, index) in result.weakSignals" :key="`weak-${index}`" class="weak-item"><span class="pill pill-amber">弱线索 · {{ item.module }}</span><p>{{ item.reason }}</p><div class="evidence-chips"><code v-for="reference in item.evidence" :key="reference">{{ reference }}</code></div></div><div v-for="(item, index) in result.unresolvedItems" :key="`unresolved-${index}`" class="weak-item"><span class="pill pill-purple">未决{{ item.module ? ` · ${item.module}` : '' }}</span><p>{{ item.description }}：{{ item.reason }}</p></div></div><p v-else class="muted">本次没有弱线索或未决项。</p></div></div>
           <div v-if="result.normalizations.length" class="panel secondary-card"><div class="section-title-row"><div><p class="eyebrow-small">DETERMINISTIC NORMALIZATION</p><h2>公开规范化记录</h2></div><span class="pill pill-amber">{{ result.normalizations.length }}</span></div><div class="weak-list"><div v-for="item in result.normalizations" :key="`${item.candidateId}-${item.field}`" class="weak-item"><strong>{{ item.candidateId }}</strong><p>{{ item.field }}：{{ item.originalValue }} → {{ item.normalizedValue }}</p><span class="muted">{{ item.reason }}</span></div></div></div>
         </template>
-        <div v-else class="panel empty-state"><span class="empty-index">03</span><div><h2>运行后查看候选与证据</h2><p>当前只加载了 DocumentPackage。执行一次真实模型识别后，这里会展示通过项、拒绝项、弱线索和未决项。</p></div></div>
+        <div v-else class="panel empty-state"><span class="empty-index">03</span><div><h2>运行后查看候选与证据</h2><p>当前只读取了原始资料及其代理解析结果。执行一次真实模型识别后，这里会展示通过项、拒绝项、弱线索和未决项。</p></div></div>
       </section>
 
       <section v-else-if="activeTab === 'coverage'" class="coverage-view">
@@ -542,7 +558,7 @@ onMounted(() => {
         <div class="panel trace-panel">
           <div class="section-title-row"><div><p class="eyebrow-small">PROXY EVALUATION</p><h2>独立评估与裁决边界</h2></div><span class="pill">不回写模型输出</span></div>
           <pre v-if="proxyEvaluation" class="json-viewer raw-output">{{ proxyEvaluation }}</pre>
-          <p v-else class="muted">当前 DocumentPackage 尚未登记代理评估报告。</p>
+          <p v-else class="muted">当前资料尚未登记代理评估报告。</p>
         </div>
       </section>
 
@@ -551,7 +567,7 @@ onMounted(() => {
         <div v-else class="panel empty-state"><span class="empty-index">05</span><div><h2>等待一次真实模型调用</h2><p>调用轨迹、token、耗时、错误和只读原始输出都会来自后端运行结果，不在前端伪造。</p></div></div>
       </section>
     </template>
-    <section v-else class="panel empty-state initial-state"><span class="empty-index">01</span><div><h2>先读取一份 DocumentPackage</h2><p>默认 ID：{{ defaultDocumentPackageId || '尚未配置' }}。输入文档包 ID 后读取全文和来源锚点，再执行识别。</p></div></section>
+    <section v-else class="panel empty-state initial-state"><span class="empty-index">01</span><div><h2>先选择一份原始资料</h2><p>资料选择器只展示已经放入项目、完成代理解析并绑定全文 Markdown 的原件；内部证据包标识由后端维护。</p></div></section>
 
     <footer class="workbench-footer"><span>STKB 方案验证切片</span><span>候选知识不等同于正式知识</span><span v-if="lastRunId" class="mono">{{ lastRunId }}</span></footer>
     </section>

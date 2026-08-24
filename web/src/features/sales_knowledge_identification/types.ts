@@ -15,6 +15,7 @@ export type DocumentPackage = {
   documentPackageId: string
   workspaceId: string
   sourceFileName: string
+  sourceFilePath: string
   sourceSha256: string
   fullMarkdownPath: string
   fullMarkdownSha256: string
@@ -23,6 +24,15 @@ export type DocumentPackage = {
   status: PackageStatus
   anchors: SourceAnchor[]
   qualityIssues: string[]
+}
+
+export type SourceMaterial = {
+  documentPackageId: string
+  sourceFileName: string
+  sourceFilePath: string
+  sourceSha256: string
+  processingMethod: ProcessingMethod
+  status: PackageStatus
 }
 
 export type EntityMention = {

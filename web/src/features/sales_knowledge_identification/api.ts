@@ -1,4 +1,9 @@
-import type { DocumentPackage, IdentificationCatalog, IdentificationResult } from './types'
+import type {
+  DocumentPackage,
+  IdentificationCatalog,
+  IdentificationResult,
+  SourceMaterial,
+} from './types'
 import { resolveApiBaseUrl } from '../../core/api-base'
 
 export const apiBaseUrl = resolveApiBaseUrl(import.meta.env.VITE_API_BASE_URL)
@@ -51,6 +56,10 @@ export function getDocumentPackage(documentPackageId: string): Promise<DocumentP
   )
 }
 
+export function listSourceMaterials(): Promise<SourceMaterial[]> {
+  return request<SourceMaterial[]>('/sales-knowledge-identification/source-materials')
+}
+
 export function getIdentificationCatalog(): Promise<IdentificationCatalog> {
   return request('/sales-knowledge-identification/catalog')
 }
@@ -83,5 +92,3 @@ export function getIdentificationEvaluation(
     `/sales-knowledge-identification/evaluations/${encodeURIComponent(documentPackageId)}`,
   )
 }
-
-export const defaultDocumentPackageId = import.meta.env.VITE_IDENTIFICATION_DOCUMENT_PACKAGE_ID ?? ''

@@ -182,7 +182,8 @@ a { color: inherit; text-decoration: none; }
 .package-input { display: grid; gap: 6px; min-width: 0; }
 .package-input span { color: var(--label); font-size: 13px; font-weight: 500; }
 .package-input small { margin-left: 8px; color: var(--muted); font-size: 12px; font-weight: 400; }
-.package-input input {
+.package-input input,
+.package-input select {
   width: 100%;
   height: 32px;
   padding: 4px 10px;
@@ -192,7 +193,8 @@ a { color: inherit; text-decoration: none; }
   border-radius: var(--radius);
 }
 .package-input input::placeholder { color: var(--placeholder); }
-.package-input input:focus { border-color: var(--primary); outline: 0; box-shadow: 0 0 0 2px rgb(29 95 214 / .12); }
+.package-input input:focus,
+.package-input select:focus { border-color: var(--primary); outline: 0; box-shadow: 0 0 0 2px rgb(29 95 214 / .12); }
 .button {
   display: inline-flex;
   align-items: center;
