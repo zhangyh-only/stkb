@@ -82,11 +82,15 @@ class ProposedRelation(ApiModel):
     evidence: list[str] = Field(min_length=1)
 
 
-class CandidateKnowledge(ApiModel):
+class CandidateKnowledgeObject(ApiModel):
     candidate_id: str
+    title: str = ""
     domain: str
     module: str
     object_type: str
+    object_boundary: str = ""
+    classification_basis: str = ""
+    identity_hints: dict[str, Any] = Field(default_factory=dict)
     content: dict[str, Any]
     entity_mentions: list[EntityMention] = Field(default_factory=list)
     evidence: list[str] = Field(min_length=1)
@@ -193,7 +197,7 @@ class IdentificationResult(ApiModel):
     raw_model_output: str
     model_calls: list[ModelCallTrace]
     processing_stages: list[ProcessingStage]
-    candidates: list[CandidateKnowledge]
+    candidates: list[CandidateKnowledgeObject]
     rejected_candidates: list[RejectedCandidate]
     rejected_auxiliary_items: list[RejectedAuxiliaryItem] = Field(default_factory=list)
     normalizations: list[CandidateNormalization] = Field(default_factory=list)

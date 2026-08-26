@@ -110,6 +110,10 @@ class SegmentAwareGateway:
                     "candidates": [
                         {
                             "candidateId": "C1",
+                            "title": "测试对象 C1",
+                            "objectBoundary": "共享测试业务身份与更新边界",
+                            "classificationBasis": "依据测试模块规则分类",
+                            "identityHints": {"testKey": "C1"},
                             "domain": module.split(".")[0],
                             "module": module,
                             "objectType": object_type,
@@ -134,6 +138,10 @@ class CrossSegmentEvidenceGateway:
             candidates.append(
                 {
                     "candidateId": "C1",
+                    "title": "测试对象 C1",
+                    "objectBoundary": "共享测试业务身份与更新边界",
+                    "classificationBasis": "依据测试模块规则分类",
+                    "identityHints": {"testKey": "C1"},
                     "domain": "D1",
                     "module": "D1.1",
                     "objectType": "PRODUCT_FACT",
@@ -158,6 +166,10 @@ def test_identification_accepts_only_candidates_with_valid_catalog_and_evidence(
             "candidates": [
                 {
                     "candidateId": "C1",
+                    "title": "测试对象 C1",
+                    "objectBoundary": "共享测试业务身份与更新边界",
+                    "classificationBasis": "依据测试模块规则分类",
+                    "identityHints": {"testKey": "C1"},
                     "domain": "D4",
                     "module": "D4.2",
                     "objectType": "CUSTOMER_OBJECTION",
@@ -176,6 +188,10 @@ def test_identification_accepts_only_candidates_with_valid_catalog_and_evidence(
                 },
                 {
                     "candidateId": "C2",
+                    "title": "测试对象 C2",
+                    "objectBoundary": "共享测试业务身份与更新边界",
+                    "classificationBasis": "依据测试模块规则分类",
+                    "identityHints": {"testKey": "C2"},
                     "domain": "D9",
                     "module": "D9.1",
                     "objectType": "UNKNOWN",
@@ -186,6 +202,10 @@ def test_identification_accepts_only_candidates_with_valid_catalog_and_evidence(
                 },
                 {
                     "candidateId": "C3",
+                    "title": "测试对象 C3",
+                    "objectBoundary": "共享测试业务身份与更新边界",
+                    "classificationBasis": "依据测试模块规则分类",
+                    "identityHints": {"testKey": "C3"},
                     "domain": "D1",
                     "module": "D1.1",
                     "objectType": "PRODUCT_FACT",
@@ -234,6 +254,10 @@ def test_identification_rejects_relations_to_a_rejected_candidate() -> None:
             "candidates": [
                 {
                     "candidateId": "C1",
+                    "title": "测试对象 C1",
+                    "objectBoundary": "共享测试业务身份与更新边界",
+                    "classificationBasis": "依据测试模块规则分类",
+                    "identityHints": {"testKey": "C1"},
                     "domain": "D1",
                     "module": "D1.1",
                     "objectType": "PRODUCT_FACT",
@@ -252,6 +276,10 @@ def test_identification_rejects_relations_to_a_rejected_candidate() -> None:
                 },
                 {
                     "candidateId": "C2",
+                    "title": "测试对象 C2",
+                    "objectBoundary": "共享测试业务身份与更新边界",
+                    "classificationBasis": "依据测试模块规则分类",
+                    "identityHints": {"testKey": "C2"},
                     "domain": "D9",
                     "module": "D9.1",
                     "objectType": "UNKNOWN",
@@ -289,6 +317,52 @@ def test_identification_rejects_relations_to_a_rejected_candidate() -> None:
     ].reasons[0]
 
 
+def test_identification_rejects_incomplete_candidate_object_contract() -> None:
+    gateway = StubModelGateway(
+        {
+            "candidates": [
+                {
+                    "candidateId": "C-INCOMPLETE",
+                    "domain": "D1",
+                    "module": "D1.1",
+                    "objectType": "PRODUCT_FACT",
+                    "content": {"summary": "只有摘要"},
+                    "entityMentions": [],
+                    "evidence": ["DP-INCOMPLETE#page-1"],
+                    "relations": [],
+                }
+            ],
+            "weakSignals": [],
+            "unresolvedItems": [],
+        }
+    )
+    package = DocumentPackage(
+        document_package_id="DP-INCOMPLETE",
+        workspace_id="WS-TEST",
+        source_file_name="sample.md",
+        source_sha256="source-checksum",
+        full_markdown_path="workspace/documents/DP-INCOMPLETE/full.md",
+        full_markdown_sha256="markdown-checksum",
+        full_markdown="# 示例\n\n只有摘要。",
+        processing_method="agent_assisted",
+        status="available",
+        anchors=[
+            SourceAnchor(anchor_id="DP-INCOMPLETE#page-1", kind="page", page=1)
+        ],
+        quality_issues=[],
+    )
+
+    result = SalesKnowledgeIdentificationService(gateway=gateway).identify(package)
+
+    assert result.candidates == []
+    assert set(result.rejected_candidates[0].reasons) >= {
+        "candidate title is required",
+        "candidate object boundary is required",
+        "candidate classification basis is required",
+        "candidate identity hints are required",
+    }
+
+
 def test_identification_rejects_unavailable_packages_at_capability_boundary() -> None:
     package = DocumentPackage(
         document_package_id="DP-UNAVAILABLE",
@@ -316,6 +390,10 @@ def test_identification_canonicalizes_domain_when_model_repeats_module_code() ->
             "candidates": [
                 {
                     "candidateId": "C1",
+                    "title": "测试对象 C1",
+                    "objectBoundary": "共享测试业务身份与更新边界",
+                    "classificationBasis": "依据测试模块规则分类",
+                    "identityHints": {"testKey": "C1"},
                     "domain": "D1.3",
                     "module": "D1.3",
                     "objectType": "PROCESS_STEP",
@@ -356,6 +434,10 @@ def test_identification_uses_an_explicit_repair_call_for_invalid_json() -> None:
         "candidates": [
             {
                 "candidateId": "C1",
+                "title": "测试对象 C1",
+                "objectBoundary": "共享测试业务身份与更新边界",
+                "classificationBasis": "依据测试模块规则分类",
+                "identityHints": {"testKey": "C1"},
                 "domain": "D1",
                 "module": "D1.1",
                 "objectType": "PRODUCT_FACT",

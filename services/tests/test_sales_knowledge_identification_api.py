@@ -65,6 +65,10 @@ class ApiStubGateway:
                     "candidates": [
                         {
                             "candidateId": "C1",
+                            "title": "测试对象 C1",
+                            "objectBoundary": "共享测试业务身份与更新边界",
+                            "classificationBasis": "依据测试模块规则分类",
+                            "identityHints": {"testKey": "C1"},
                             "domain": "D1",
                             "module": "D1.1",
                             "objectType": "PRODUCT_FACT",

@@ -1,8 +1,8 @@
 from .catalog import render_catalog_for_prompt
 from .models import DocumentPackage, ModelRequest
 
-PROMPT_VERSION = "sales-identification-v0.2"
-SCHEMA_VERSION = "candidate-knowledge-v0.1"
+PROMPT_VERSION = "sales-identification-v0.3"
+SCHEMA_VERSION = "candidate-knowledge-object-v0.2"
 
 
 def build_model_request(
@@ -29,6 +29,10 @@ def build_model_request(
    资料名称或典型来源判断。
 9. 同一证据可以支持多个候选，但只有业务身份、更新边界或消费职责确实独立时才拆分。
 10. 多个模块都可能成立且规则不足以裁决时，进入 unresolvedItems，不为填满覆盖矩阵强制分类。
+11. 每个候选必须给出可读标题、对象边界、分类依据和非空身份线索。
+    身份线索只描述后续归并需要比较的业务维度，不能创建正式 ID。
+12. classificationBasis 只说明引用了哪项模块职责和边界，不输出隐藏推理过程；
+    objectBoundary 说明为什么这些内容应作为一项对象共同更新和复用。
 
 当前 D1-D5 / 22个知识内容模块识别规则包：
 {render_catalog_for_prompt()}
@@ -37,10 +41,14 @@ def build_model_request(
 {{
   "candidates": [{{
     "candidateId": "C1",
+    "title": "便于业务人员识别的候选对象标题",
     "domain": "D1",
     "module": "D1.1",
     "objectType": "PRODUCT_FACT",
-    "content": {{"summary": "按对象类型组织的非空内容"}},
+    "objectBoundary": "共享同一业务身份、适用范围和更新生命周期，因此作为一项对象提议",
+    "classificationBasis": "内容属于产品可核验事实，按 D1.1 业务含义和边界归类",
+    "identityHints": {{"subject": "原文中的业务主体", "scope": "适用范围或上下文"}},
+    "content": {{"summary": "按对象类型组织的非空业务内容"}},
     "entityMentions": [{{
       "mentionId": "M1",
       "text": "原文称呼",

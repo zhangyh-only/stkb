@@ -16,7 +16,7 @@ from .catalog import (
     validate_candidate_classification,
 )
 from .models import (
-    CandidateKnowledge,
+    CandidateKnowledgeObject,
     CandidateNormalization,
     DocumentPackage,
     IdentificationResult,
@@ -224,7 +224,7 @@ class SalesKnowledgeIdentificationService:
             )
         validation_started = perf_counter()
         raw_candidates = payload.get("candidates", [])
-        accepted: list[CandidateKnowledge] = []
+        accepted: list[CandidateKnowledgeObject] = []
         rejected: list[RejectedCandidate] = []
         seen_candidate_ids: set[str] = set()
         seen_fingerprints: set[str] = set()
@@ -266,7 +266,7 @@ class SalesKnowledgeIdentificationService:
                     )
                 )
             try:
-                candidate = CandidateKnowledge.model_validate(candidate_payload)
+                candidate = CandidateKnowledgeObject.model_validate(candidate_payload)
             except ValidationError as error:
                 rejected.append(
                     RejectedCandidate(
@@ -280,6 +280,14 @@ class SalesKnowledgeIdentificationService:
             reasons = validate_candidate_classification(
                 candidate.domain, candidate.module, candidate.object_type
             )
+            if not candidate.title.strip():
+                reasons.append("candidate title is required")
+            if not candidate.object_boundary.strip():
+                reasons.append("candidate object boundary is required")
+            if not candidate.classification_basis.strip():
+                reasons.append("candidate classification basis is required")
+            if not candidate.identity_hints:
+                reasons.append("candidate identity hints are required")
             if candidate.candidate_id in seen_candidate_ids:
                 reasons.append(f"duplicate candidate id: {candidate.candidate_id}")
             seen_candidate_ids.add(candidate.candidate_id)
@@ -628,9 +636,9 @@ def _candidate_relation_refs(raw_candidate: dict[str, Any]) -> set[str]:
 
 
 def _reject_dangling_relations(
-    candidates: list[CandidateKnowledge],
+    candidates: list[CandidateKnowledgeObject],
     rejected: list[RejectedCandidate],
-) -> list[CandidateKnowledge]:
+) -> list[CandidateKnowledgeObject]:
     remaining = candidates
     while True:
         valid_refs = {
@@ -641,7 +649,7 @@ def _reject_dangling_relations(
                 *(mention.mention_id for mention in candidate.entity_mentions),
             )
         }
-        invalid_candidates: list[tuple[CandidateKnowledge, list[str]]] = []
+        invalid_candidates: list[tuple[CandidateKnowledgeObject, list[str]]] = []
         for candidate in remaining:
             invalid_refs = {
                 reference
