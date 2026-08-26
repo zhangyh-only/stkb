@@ -12,6 +12,7 @@ web/node_modules/
 web/dist/
 *.tsbuildinfo
 output/
+.playwright-cli/
 .env
 *.log
 workspace/*
