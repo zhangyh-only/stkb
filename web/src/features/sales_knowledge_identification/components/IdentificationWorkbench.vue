@@ -51,7 +51,7 @@ const tabItems: { key: WorkbenchTab; label: string; icon: Component }[] = [
   { key: 'overview', label: '运行总览', icon: IconActivityHeartbeat },
   { key: 'source', label: '输入资料', icon: IconFileText },
   { key: 'rules', label: '规则审阅', icon: IconBook2 },
-  { key: 'candidates', label: '候选与证据', icon: IconStack2 },
+  { key: 'candidates', label: '对象提议', icon: IconStack2 },
   { key: 'coverage', label: '模块覆盖', icon: IconTable },
   { key: 'evaluation', label: '代理评估', icon: IconShieldCheck },
   { key: 'traces', label: '调用与阶段', icon: IconGitBranch },
@@ -75,6 +75,8 @@ const runHistory = ref<IdentificationResult[]>([])
 const proxyEvaluation = ref('')
 const catalogModules = ref<KnowledgeModule[]>([])
 const catalogInfo = ref<Omit<IdentificationCatalog, 'modules'> | null>(null)
+const selectedRuleDomainCode = ref('D1')
+const selectedRuleModuleCode = ref('D1.1')
 
 const selectedCandidate = computed<CandidateKnowledge | null>(() => {
   const candidates = result.value?.candidates ?? []
@@ -96,6 +98,20 @@ const groupedModules = computed(() => {
 })
 
 const moduleCount = computed(() => catalogModules.value.length)
+
+const selectedRuleDomain = computed(() =>
+  catalogInfo.value?.domains.find((domain) => domain.code === selectedRuleDomainCode.value) ?? null,
+)
+
+const selectedRuleModules = computed(() =>
+  catalogModules.value.filter((module) => module.domain === selectedRuleDomainCode.value),
+)
+
+const selectedRuleModule = computed(() =>
+  selectedRuleModules.value.find((module) => module.code === selectedRuleModuleCode.value)
+    ?? selectedRuleModules.value[0]
+    ?? null,
+)
 
 const coverageSummary = computed(() => ({
   hit: coverageCount(result.value?.coverageByModule, 'hit'),
@@ -145,8 +161,8 @@ function evidenceExcerpt(reference: string): string {
   const markerIndex = markdown.indexOf(marker)
   if (markerIndex < 0) return ''
   const contentStart = markerIndex + marker.length
-  const nextPageIndex = markdown.indexOf('\n## 第 ', contentStart)
-  const contentEnd = nextPageIndex < 0 ? markdown.length : nextPageIndex
+  const nextAnchorIndex = markdown.indexOf('<!-- source-anchor:', contentStart)
+  const contentEnd = nextAnchorIndex < 0 ? markdown.length : nextAnchorIndex
   return markdown.slice(contentStart, contentEnd).trim().slice(0, 900)
 }
 
@@ -194,6 +210,7 @@ async function probeApi(): Promise<void> {
       fingerprint: catalog.fingerprint,
       status: catalog.status,
       source: catalog.source,
+      scopeDefinitions: catalog.scopeDefinitions,
       domains: catalog.domains,
     }
     sourceMaterials.value = materials
@@ -231,6 +248,7 @@ async function loadPackage(): Promise<void> {
       fingerprint: catalog.fingerprint,
       status: catalog.status,
       source: catalog.source,
+      scopeDefinitions: catalog.scopeDefinitions,
       domains: catalog.domains,
     }
     apiState.value = 'ready'
@@ -269,7 +287,7 @@ async function executeRun(): Promise<void> {
     proxyEvaluation.value = evaluation?.markdown ?? ''
     lastRunId.value = nextResult.runId
     selectedCandidateId.value = nextResult.candidates[0]?.candidateId ?? null
-    activeTab.value = 'overview'
+    activeTab.value = nextResult.status === 'completed' ? 'candidates' : 'traces'
     runNotice.value = nextResult.status === 'completed'
       ? `运行 ${nextResult.runId} 已完成，模型调用 ${nextResult.callCount} 次。`
       : `运行 ${nextResult.runId} 失败，失败轨迹已写入运行账本。`
@@ -304,6 +322,13 @@ function selectCandidate(candidateId: string): void {
   activeTab.value = 'candidates'
 }
 
+function selectRuleDomain(domainCode: string): void {
+  selectedRuleDomainCode.value = domainCode
+  selectedRuleModuleCode.value = catalogModules.value.find(
+    (module) => module.domain === domainCode,
+  )?.code ?? ''
+}
+
 onMounted(() => {
   void probeApi()
 })
@@ -325,8 +350,8 @@ onMounted(() => {
 
       <div class="sidebar-boundary">
         <span>验证边界</span>
-        <strong>只生成候选</strong>
-        <p>本节点不写正式知识、pgvector 或 Neo4j。运行记录只进入 PostgreSQL 账本。</p>
+        <strong>只形成对象提议</strong>
+        <p>销售知识识别形成候选知识，不直接生成正式 KnowledgeObject；正式对象需要后续实体归一与知识归并。</p>
       </div>
     </aside>
 
@@ -348,13 +373,13 @@ onMounted(() => {
       <div>
         <h1>销售知识识别调试台</h1>
         <p class="lede">
-          选择项目内已完成代理解析的原始资料，调用真实模型识别候选知识，并复核证据、D1-D5 覆盖和运行稳定性。
+          选择项目内已完成代理解析的原始资料，调用真实模型形成候选知识对象提议，并复核对象边界、来源证据和 D1-D5 归属。
         </p>
       </div>
       <div class="header-facts" aria-label="当前验证范围">
         <div><span>输入</span><strong>原始资料</strong></div>
         <div><span>调用</span><strong>真实模型</strong></div>
-        <div><span>输出</span><strong>CandidateKnowledgeSet</strong></div>
+        <div><span>输出</span><strong>候选知识</strong></div>
       </div>
     </header>
 
@@ -440,7 +465,7 @@ onMounted(() => {
         <div class="main-column">
           <div v-if="result" class="metrics-grid">
             <article class="metric-card metric-accent">
-              <span>候选知识</span>
+              <span>对象提议</span>
               <strong>{{ result.candidates.length }}</strong>
               <small>通过程序合同与证据校验</small>
             </article>
@@ -464,7 +489,7 @@ onMounted(() => {
             <span class="empty-index">02</span>
             <div>
               <h2>资料已就绪，等待一次真实识别</h2>
-              <p>点击“执行真实模型识别”后，后端将把全文、D1-D5 目录和证据规则组装为模型请求。没有真实运行结果前，页面不会生成候选或模拟调用数据。</p>
+              <p>点击“执行真实模型识别”后，后端将把全文、销售知识规则包和证据规则组装为模型请求。没有真实运行结果前，页面不会生成对象提议或模拟调用数据。</p>
             </div>
           </div>
 
@@ -546,7 +571,7 @@ onMounted(() => {
           <div>
             <p class="eyebrow-small">SALES KNOWLEDGE MODEL</p>
             <h2>销售知识模型规则包</h2>
-            <p>这份规则包是模型识别和程序分类校验共同使用的事实源，不是从 PostgreSQL 动态读取的业务数据。</p>
+            <p>左侧选销售域，中间选知识模块，右侧审阅当前生效的完整规则。规则文件是模型识别和程序校验共同使用的事实源。</p>
           </div>
           <dl class="rules-version">
             <div><dt>版本</dt><dd>{{ catalogInfo?.version ?? '-' }}</dd></div>
@@ -554,52 +579,87 @@ onMounted(() => {
             <div><dt>来源</dt><dd class="mono">{{ catalogInfo?.source ?? '-' }}</dd></div>
             <div><dt>指纹</dt><dd class="mono hash-value">{{ catalogInfo?.fingerprint ?? '-' }}</dd></div>
           </dl>
+          <div class="rule-scope-legend">
+            <p><b>核心范围</b>{{ catalogInfo?.scopeDefinitions.core }}</p>
+            <p><b>可选范围</b>{{ catalogInfo?.scopeDefinitions.optional }}</p>
+          </div>
         </div>
 
-        <div class="domain-rule-grid">
-          <article v-for="domain in catalogInfo?.domains ?? []" :key="domain.code" class="panel domain-rule-card">
-            <div class="domain-rule-head"><span>{{ domain.code }}</span><div><strong>{{ domain.name }}</strong><em>{{ domain.question }}</em></div></div>
-            <p>{{ domain.meaning }}</p>
-            <div class="domain-boundary"><span>边界</span>{{ domain.boundary }}</div>
-          </article>
-        </div>
+        <div class="panel rules-workspace">
+          <nav class="rule-domain-nav" aria-label="销售知识域">
+            <p>销售知识域</p>
+            <button
+              v-for="domain in catalogInfo?.domains ?? []"
+              :key="domain.code"
+              type="button"
+              :class="{ active: selectedRuleDomainCode === domain.code }"
+              @click="selectRuleDomain(domain.code)"
+            >
+              <span>{{ domain.code }}</span>
+              <div><strong>{{ domain.name }}</strong><em>{{ domain.question }}</em></div>
+            </button>
+          </nav>
 
-        <div class="rule-module-groups">
-          <section v-for="group in groupedModules" :key="group.domain" class="panel rule-module-group">
-            <div class="section-title-row">
-              <div><p class="eyebrow-small">{{ group.domain }}</p><h2>{{ group.label }}</h2></div>
-              <span class="pill">{{ group.modules.length }} 个模块</span>
+          <div class="rule-module-nav">
+            <div class="rule-pane-head">
+              <div><span>{{ selectedRuleDomain?.code }}</span><strong>{{ selectedRuleDomain?.name }}</strong></div>
+              <small>{{ selectedRuleModules.length }} 个模块</small>
             </div>
-            <details v-for="module in group.modules" :key="module.code" class="rule-module-item">
-              <summary>
+            <div class="rule-module-options">
+              <button
+                v-for="module in selectedRuleModules"
+                :key="module.code"
+                type="button"
+                :class="{ active: selectedRuleModule?.code === module.code }"
+                @click="selectedRuleModuleCode = module.code"
+              >
                 <code>{{ module.code }}</code>
-                <strong>{{ module.name }}</strong>
-                <span>{{ module.lifecycle === 'optional' ? '可选模块' : '计划建设' }}</span>
-              </summary>
-              <div class="rule-module-body">
-                <div><h3>业务含义</h3><p>{{ module.meaning }}</p></div>
-                <div><h3>对象边界与分类裁决</h3><p>{{ module.boundary }}</p></div>
-                <div><h3>允许对象类型</h3><div class="rule-chips"><code v-for="item in module.objectTypes" :key="item">{{ item }}</code></div></div>
-                <div><h3>核心对象</h3><p>{{ module.coreObjects.join('、') }}</p></div>
-                <div><h3>典型来源</h3><p>{{ module.sources.join('、') }}</p></div>
-                <div><h3>明确消费方</h3><p>{{ module.consumers.join('、') }}</p></div>
-              </div>
-            </details>
-          </section>
+                <div><strong>{{ module.name }}</strong><span>{{ module.scope === 'optional' ? '可选范围' : '核心范围' }}</span></div>
+              </button>
+            </div>
+          </div>
+
+          <article v-if="selectedRuleDomain && selectedRuleModule" class="rule-detail-pane">
+            <header>
+              <div><span>{{ selectedRuleModule.code }}</span><h2>{{ selectedRuleModule.name }}</h2></div>
+              <em>{{ selectedRuleModule.scope === 'optional' ? '可选范围模块' : '核心范围模块' }}</em>
+            </header>
+
+            <section class="domain-context">
+              <div><span>{{ selectedRuleDomain.question }}</span><strong>{{ selectedRuleDomain.meaning }}</strong></div>
+              <p><b>域边界</b>{{ selectedRuleDomain.boundary }}</p>
+            </section>
+
+            <div class="rule-detail-scroll">
+              <section><h3>模块业务含义</h3><p>{{ selectedRuleModule.meaning }}</p></section>
+              <section class="rule-emphasis"><h3>对象边界与分类裁决</h3><p>{{ selectedRuleModule.boundary }}</p></section>
+              <section><h3>允许形成的对象类型</h3><div class="rule-chips"><code v-for="item in selectedRuleModule.objectTypes" :key="item">{{ item }}</code></div></section>
+              <section><h3>核心对象表达</h3><p>{{ selectedRuleModule.coreObjects.join('、') }}</p></section>
+              <section><h3>典型来源资料</h3><p>{{ selectedRuleModule.sources.join('、') }}</p></section>
+              <section><h3>明确消费方</h3><p>{{ selectedRuleModule.consumers.join('、') }}</p></section>
+            </div>
+          </article>
         </div>
       </section>
 
       <section v-else-if="activeTab === 'candidates'" class="candidate-view">
         <template v-if="result">
+          <div class="object-formation-strip panel">
+            <div class="formation-step completed"><span>01</span><div><strong>候选知识</strong><p>{{ result.candidates.length }} 项对象提议，已完成分类、合同与证据校验</p></div></div>
+            <div class="formation-arrow">→</div>
+            <div class="formation-step pending"><span>02</span><div><strong>业务实体归一</strong><p>本节点未执行，实体提及还没有正式实体 ID</p></div></div>
+            <div class="formation-arrow">→</div>
+            <div class="formation-step pending"><span>03</span><div><strong>正式 KnowledgeObject</strong><p>当前 0 项；需经过跨资料归并和正式写入</p></div></div>
+          </div>
           <div class="candidate-layout">
             <div class="candidate-list panel">
-              <div class="section-title-row"><div><p class="eyebrow-small">VALIDATED CANDIDATES</p><h2>候选知识</h2></div><span class="pill pill-green">{{ result.candidates.length }} 通过</span></div>
+              <div class="section-title-row"><div><p class="eyebrow-small">OBJECT PROPOSALS</p><h2>候选知识</h2></div><span class="pill pill-green">{{ result.candidates.length }} 项提议</span></div>
               <button v-for="candidate in result.candidates" :key="candidate.candidateId" type="button" class="candidate-list-item" :class="{ selected: selectedCandidate?.candidateId === candidate.candidateId }" @click="selectCandidate(candidate.candidateId)"><span class="candidate-id">{{ candidate.candidateId }}</span><span class="candidate-text">{{ candidateSummary(candidate) }}</span><span class="candidate-module">{{ candidate.module }} · {{ candidate.objectType }}</span></button>
-              <div v-if="!result.candidates.length" class="empty-inline">本次运行没有通过校验的候选。</div>
+              <div v-if="!result.candidates.length" class="empty-inline">本次运行没有形成通过校验的对象提议。</div>
             </div>
             <div class="candidate-detail">
               <div v-if="selectedCandidate" class="panel detail-card">
-                <div class="detail-head"><div><p class="eyebrow-small">{{ selectedCandidate.candidateId }} / {{ selectedCandidate.domain }}</p><h2>{{ selectedCandidate.module }} <span>· {{ selectedCandidate.objectType }}</span></h2></div><span class="pill pill-green">证据有效</span></div>
+                <div class="detail-head"><div><p class="eyebrow-small">运行内提议 {{ selectedCandidate.candidateId }}</p><h2>{{ selectedCandidate.objectType }}</h2><p class="object-classification">{{ selectedCandidate.domain }} / {{ selectedCandidate.module }}</p></div><span class="pill pill-green">候选，不是正式对象</span></div>
                 <div class="content-block"><h3>类型化内容</h3><pre class="json-viewer">{{ prettyJson(selectedCandidate.content) }}</pre></div>
                 <div class="content-block"><h3>来源证据与原文片段</h3><div class="evidence-list"><div v-for="reference in selectedCandidate.evidence" :key="reference" class="evidence-item"><code>{{ evidenceLabel(reference) }}</code><span v-if="anchorFor(reference)" class="evidence-ok">可解析</span><span v-else class="evidence-missing">未找到锚点</span><p v-if="evidenceExcerpt(reference)" class="evidence-excerpt">{{ evidenceExcerpt(reference) }}</p></div></div></div>
                 <div v-if="selectedCandidate.entityMentions.length" class="content-block"><h3>实体提及与引用角色</h3><div class="mention-list"><div v-for="mention in selectedCandidate.entityMentions" :key="mention.mentionId" class="mention-item"><strong>{{ mention.text }}</strong><span>{{ mention.proposedType }} · {{ mention.referenceRole }}</span><code>{{ mention.sourceRef }}</code></div></div></div>
@@ -611,7 +671,7 @@ onMounted(() => {
           <div class="secondary-result-grid"><div class="panel secondary-card"><div class="section-title-row"><div><p class="eyebrow-small">REJECTED</p><h2>拒绝项</h2></div><span class="pill pill-red">{{ result.rejectedCandidates.length }}</span></div><div v-if="result.rejectedCandidates.length" class="rejected-list"><details v-for="item in result.rejectedCandidates" :key="item.candidateId"><summary><strong>{{ item.candidateId }}</strong><span>{{ item.reasons.length }} 个原因</span></summary><ul class="issue-list"><li v-for="reason in item.reasons" :key="reason">{{ reason }}</li></ul><pre class="json-viewer compact">{{ prettyJson(item.rawCandidate) }}</pre></details></div><p v-else class="muted">没有被程序拒绝的候选。</p></div><div class="panel secondary-card"><div class="section-title-row"><div><p class="eyebrow-small">WEAK / UNRESOLVED</p><h2>弱线索与未决项</h2></div><span class="pill">{{ result.weakSignals.length + result.unresolvedItems.length }}</span></div><div v-if="result.weakSignals.length || result.unresolvedItems.length" class="weak-list"><div v-for="(item, index) in result.weakSignals" :key="`weak-${index}`" class="weak-item"><span class="pill pill-amber">弱线索 · {{ item.module }}</span><p>{{ item.reason }}</p><div class="evidence-chips"><code v-for="reference in item.evidence" :key="reference">{{ reference }}</code></div></div><div v-for="(item, index) in result.unresolvedItems" :key="`unresolved-${index}`" class="weak-item"><span class="pill pill-purple">未决{{ item.module ? ` · ${item.module}` : '' }}</span><p>{{ item.description }}：{{ item.reason }}</p></div></div><p v-else class="muted">本次没有弱线索或未决项。</p></div></div>
           <div v-if="result.normalizations.length" class="panel secondary-card"><div class="section-title-row"><div><p class="eyebrow-small">DETERMINISTIC NORMALIZATION</p><h2>公开规范化记录</h2></div><span class="pill pill-amber">{{ result.normalizations.length }}</span></div><div class="weak-list"><div v-for="item in result.normalizations" :key="`${item.candidateId}-${item.field}`" class="weak-item"><strong>{{ item.candidateId }}</strong><p>{{ item.field }}：{{ item.originalValue }} → {{ item.normalizedValue }}</p><span class="muted">{{ item.reason }}</span></div></div></div>
         </template>
-        <div v-else class="panel empty-state"><span class="empty-index">03</span><div><h2>运行后查看候选与证据</h2><p>当前只读取了原始资料及其代理解析结果。执行一次真实模型识别后，这里会展示通过项、拒绝项、弱线索和未决项。</p></div></div>
+        <div v-else class="panel empty-state"><span class="empty-index">03</span><div><h2>运行后查看对象提议</h2><p>销售知识识别会形成带域、模块、对象类型、内容和证据的候选知识；正式 KnowledgeObject 要在后续实体归一与知识归并后形成。</p></div></div>
       </section>
 
       <section v-else-if="activeTab === 'coverage'" class="coverage-view">
@@ -635,7 +695,7 @@ onMounted(() => {
     </template>
     <section v-else class="panel empty-state initial-state"><span class="empty-index">01</span><div><h2>先选择一份原始资料</h2><p>资料选择器只展示已经放入项目、完成代理解析并绑定全文 Markdown 的原件；内部证据包标识由后端维护。</p></div></section>
 
-    <footer class="workbench-footer"><span>STKB 方案验证切片</span><span>候选知识不等同于正式知识</span><span v-if="lastRunId" class="mono">{{ lastRunId }}</span></footer>
+    <footer class="workbench-footer"><span>STKB 方案验证切片</span><span>候选知识是对象提议，不等同于正式 KnowledgeObject</span><span v-if="lastRunId" class="mono">{{ lastRunId }}</span></footer>
     </section>
   </main>
 </template>

@@ -171,7 +171,7 @@ export type KnowledgeModule = {
   domainName: string
   code: string
   name: string
-  lifecycle: 'planned' | 'optional'
+  scope: 'core' | 'optional'
   meaning: string
   objectTypes: string[]
   coreObjects: string[]
@@ -193,6 +193,7 @@ export type IdentificationCatalog = {
   fingerprint: string
   status: 'sample_validation'
   source: string
+  scopeDefinitions: Record<'core' | 'optional', string>
   domains: KnowledgeDomain[]
   modules: KnowledgeModule[]
 }
