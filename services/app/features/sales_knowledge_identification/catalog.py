@@ -6,7 +6,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Literal
 
-RULE_PACKAGE_PATH = Path(__file__).with_name("rules") / "d1-d5-v0.3.toml"
+RULE_PACKAGE_PATH = Path(__file__).with_name("rules") / "d1-d5-v0.4.toml"
 EXPECTED_MODULE_COUNT = 22
 EXPECTED_DOMAINS = {"D1", "D2", "D3", "D4", "D5"}
 
@@ -16,7 +16,7 @@ class KnowledgeModule:
     domain: str
     code: str
     name: str
-    lifecycle: Literal["planned", "optional"]
+    scope: Literal["core", "optional"]
     meaning: str
     object_types: tuple[str, ...]
     core_objects: tuple[str, ...]
@@ -39,11 +39,13 @@ def _load_rule_package() -> tuple[
     str,
     str,
     str,
+    dict[str, str],
     tuple[KnowledgeDomain, ...],
     tuple[KnowledgeModule, ...],
 ]:
     rule_content = RULE_PACKAGE_PATH.read_bytes()
     payload = tomllib.loads(rule_content.decode("utf-8"))
+    scope_definitions = payload["scope_definitions"]
     domains = tuple(
         KnowledgeDomain(
             code=item["code"],
@@ -59,7 +61,7 @@ def _load_rule_package() -> tuple[
             domain=item["domain"],
             code=item["code"],
             name=item["name"],
-            lifecycle=item["lifecycle"],
+            scope=item["scope"],
             meaning=item["meaning"],
             object_types=tuple(item["object_types"]),
             core_objects=tuple(item["core_objects"]),
@@ -69,21 +71,26 @@ def _load_rule_package() -> tuple[
         )
         for item in payload["modules"]
     )
-    _validate_rule_package(domains, modules)
+    _validate_rule_package(scope_definitions, domains, modules)
     fingerprint = sha256(rule_content).hexdigest()
     return (
         payload["version"],
         payload["status"],
         payload["source"],
         fingerprint,
+        scope_definitions,
         domains,
         modules,
     )
 
 
 def _validate_rule_package(
-    domains: tuple[KnowledgeDomain, ...], modules: tuple[KnowledgeModule, ...]
+    scope_definitions: dict[str, str],
+    domains: tuple[KnowledgeDomain, ...],
+    modules: tuple[KnowledgeModule, ...],
 ) -> None:
+    if set(scope_definitions) != {"core", "optional"} or not all(scope_definitions.values()):
+        raise RuntimeError("knowledge rule package must define core and optional scopes")
     if {domain.code for domain in domains} != EXPECTED_DOMAINS:
         raise RuntimeError("knowledge rule package must define D1-D5 domain rules")
     if any(
@@ -121,6 +128,7 @@ def _validate_rule_package(
     CATALOG_STATUS,
     CATALOG_SOURCE,
     CATALOG_FINGERPRINT,
+    MODULE_SCOPE_DEFINITIONS,
     KNOWLEDGE_DOMAINS,
     KNOWLEDGE_MODULES,
 ) = _load_rule_package()
@@ -143,11 +151,11 @@ def validate_candidate_classification(domain: str, module: str, object_type: str
 def render_catalog_for_prompt() -> str:
     sections = []
     for module in KNOWLEDGE_MODULES:
-        lifecycle = "可选模块" if module.lifecycle == "optional" else "计划建设模块"
+        scope = "可选范围模块" if module.scope == "optional" else "核心范围模块"
         sections.append(
             "\n".join(
                 [
-                    f"### {module.code} {module.name}（{lifecycle}）",
+                    f"### {module.code} {module.name}（{scope}）",
                     f"- 业务含义：{module.meaning}",
                     f"- 允许对象类型：{', '.join(module.object_types)}",
                     f"- 核心对象：{'、'.join(module.core_objects)}",

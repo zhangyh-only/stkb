@@ -18,6 +18,7 @@ from app.features.sales_knowledge_identification.catalog import (
     DOMAIN_BY_CODE,
     KNOWLEDGE_DOMAINS,
     KNOWLEDGE_MODULES,
+    MODULE_SCOPE_DEFINITIONS,
 )
 from app.features.sales_knowledge_identification.models import (
     DocumentPackage,
@@ -52,6 +53,7 @@ def identification_catalog() -> dict[str, object]:
         "fingerprint": CATALOG_FINGERPRINT,
         "status": CATALOG_STATUS,
         "source": CATALOG_SOURCE,
+        "scopeDefinitions": MODULE_SCOPE_DEFINITIONS,
         "domains": [
             {
                 "code": domain.code,
@@ -68,7 +70,7 @@ def identification_catalog() -> dict[str, object]:
                 "domainName": DOMAIN_BY_CODE[module.domain].name,
                 "code": module.code,
                 "name": module.name,
-                "lifecycle": module.lifecycle,
+                "scope": module.scope,
                 "meaning": module.meaning,
                 "objectTypes": module.object_types,
                 "coreObjects": module.core_objects,
@@ -215,6 +217,6 @@ def identification_evaluation(
 ) -> dict[str, str]:
     try:
         markdown = repository.get_evaluation_report(document_package_id)
-    except IdentificationRecordNotFound as error:
-        raise HTTPException(status_code=404, detail="evaluation report not found") from error
+    except IdentificationRecordNotFound:
+        markdown = ""
     return {"documentPackageId": document_package_id, "markdown": markdown}

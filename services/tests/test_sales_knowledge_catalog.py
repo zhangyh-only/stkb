@@ -6,12 +6,13 @@ from app.features.sales_knowledge_identification.catalog import (
     KNOWLEDGE_DOMAINS,
     KNOWLEDGE_MODULES,
     MODULE_BY_CODE,
+    MODULE_SCOPE_DEFINITIONS,
     render_catalog_for_prompt,
 )
 
 
 def test_rule_package_defines_complete_versioned_d1_d5_catalog() -> None:
-    assert CATALOG_VERSION == "d1-d5-v0.3"
+    assert CATALOG_VERSION == "d1-d5-v0.4"
     assert CATALOG_STATUS == "sample_validation"
     assert len(CATALOG_FINGERPRINT) == 64
     assert CATALOG_SOURCE.endswith("STKB-D1-D5知识对象与业务图模型映射矩阵.md")
@@ -38,8 +39,11 @@ def test_rule_package_defines_complete_versioned_d1_d5_catalog() -> None:
         "D5",
     }
     assert {
-        module.code for module in KNOWLEDGE_MODULES if module.lifecycle == "optional"
+        module.code for module in KNOWLEDGE_MODULES if module.scope == "optional"
     } == {"D1.4", "D2.5"}
+    assert sum(module.scope == "core" for module in KNOWLEDGE_MODULES) == 20
+    assert "20个知识模块" in MODULE_SCOPE_DEFINITIONS["core"]
+    assert "2个模块" in MODULE_SCOPE_DEFINITIONS["optional"]
     assert all(module.meaning and module.boundary for module in KNOWLEDGE_MODULES)
     assert all(module.object_types and module.sources for module in KNOWLEDGE_MODULES)
 

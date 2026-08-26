@@ -13,6 +13,9 @@ from app.features.sales_knowledge_identification.models import (
     SourceAnchor,
     SourceMaterial,
 )
+from app.features.sales_knowledge_identification.repository import (
+    IdentificationRecordNotFound,
+)
 from app.main import app
 
 
@@ -79,6 +82,11 @@ class ApiStubGateway:
         )
 
 
+class NoEvaluationRepository(InMemoryRepository):
+    def get_evaluation_report(self, document_package_id: str) -> str:
+        raise IdentificationRecordNotFound(document_package_id)
+
+
 def test_api_runs_identification_and_reads_the_saved_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -130,7 +138,7 @@ def test_api_runs_identification_and_reads_the_saved_result(
     assert materials_response.json()[0]["documentPackageId"] == "DP-API"
     assert catalog_response.status_code == 200
     assert len(catalog_response.json()["modules"]) == 22
-    assert catalog_response.json()["version"] == "d1-d5-v0.3"
+    assert catalog_response.json()["version"] == "d1-d5-v0.4"
     assert catalog_response.json()["status"] == "sample_validation"
     assert len(catalog_response.json()["fingerprint"]) == 64
     assert catalog_response.json()["source"].endswith(
@@ -140,6 +148,7 @@ def test_api_runs_identification_and_reads_the_saved_result(
     assert catalog_response.json()["modules"][0]["boundary"]
     assert len(catalog_response.json()["domains"]) == 5
     assert catalog_response.json()["domains"][0]["question"] == "卖什么"
+    assert set(catalog_response.json()["scopeDefinitions"]) == {"core", "optional"}
     assert run_response.status_code == 200
     assert run_response.json()["status"] == "completed"
     assert run_response.json()["modelConfiguration"]["documentMaxChars"] == 3500
@@ -188,3 +197,36 @@ def test_api_rejects_an_unavailable_document_package(
     assert response.status_code == 409
     assert response.json()["detail"] == "DocumentPackage is unavailable"
     assert repository.runs == {}
+
+
+def test_missing_optional_evaluation_returns_an_empty_report() -> None:
+    package = DocumentPackage(
+        document_package_id="DP-NO-EVALUATION",
+        workspace_id="WS-TEST",
+        source_file_name="sample.md",
+        source_sha256="source-checksum",
+        full_markdown_path="workspace/documents/DP-NO-EVALUATION/full.md",
+        full_markdown_sha256="markdown-checksum",
+        full_markdown="# 示例",
+        processing_method="agent_assisted",
+        status="available",
+        anchors=[],
+        quality_issues=[],
+    )
+    app.dependency_overrides[get_identification_repository] = lambda: NoEvaluationRepository(
+        package
+    )
+    client = TestClient(app)
+
+    try:
+        response = client.get(
+            "/api/sales-knowledge-identification/evaluations/DP-NO-EVALUATION"
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "documentPackageId": "DP-NO-EVALUATION",
+        "markdown": "",
+    }
