@@ -2,6 +2,7 @@ import type {
   DocumentPackage,
   IdentificationCatalog,
   IdentificationResult,
+  KnowledgeFormationResult,
   SourceMaterial,
 } from './types'
 import { resolveApiBaseUrl } from '../../core/api-base'
@@ -69,6 +70,13 @@ export function runIdentification(documentPackageId: string): Promise<Identifica
     method: 'POST',
     body: JSON.stringify({ documentPackageId }),
   })
+}
+
+export function formKnowledgeObjects(runId: string): Promise<KnowledgeFormationResult> {
+  return request<KnowledgeFormationResult>(
+    `/sales-knowledge-identification/runs/${encodeURIComponent(runId)}/knowledge-objects`,
+    { method: 'POST' },
+  )
 }
 
 export function listIdentificationRuns(

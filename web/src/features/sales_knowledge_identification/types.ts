@@ -107,6 +107,8 @@ export type ModelCallTrace = {
   promptTokens: number
   completionTokens: number
   error: string | null
+  systemPrompt: string | null
+  userPrompt: string | null
   rawOutput: string | null
   finishReason: string | null
   segment: string | null
@@ -168,6 +170,59 @@ export type IdentificationResult = {
   completionTokens: number
   modelConfiguration: ModelConfigurationSnapshot | null
   storageImpact: StorageImpact
+}
+
+export type ResolvedBusinessEntity = {
+  entityId: string
+  entityType: string
+  canonicalName: string
+  sourceMentions: string[]
+  action: 'created' | 'reused'
+}
+
+export type KnowledgeObjectEntityReference = {
+  entityId: string
+  referenceRole: string
+  evidence: string[]
+}
+
+export type FormalKnowledgeObject = {
+  knowledgeObjectId: string
+  revision: number
+  action: 'created' | 'updated' | 'reused'
+  title: string
+  domain: string
+  module: string
+  objectType: string
+  identityKey: string
+  contentFingerprint: string
+  content: Record<string, unknown>
+  entityReferences: KnowledgeObjectEntityReference[]
+  evidence: string[]
+  sourceCandidateIds: string[]
+  filePath: string
+  fileSha256: string
+}
+
+export type KnowledgeFormationStage = {
+  key: 'entity_resolution' | 'knowledge_merge' | 'formal_write'
+  name: string
+  status: 'completed' | 'failed'
+  detail: string
+}
+
+export type KnowledgeFormationResult = {
+  buildId: string
+  runId: string
+  documentPackageId: string
+  status: 'completed' | 'failed'
+  entities: ResolvedBusinessEntity[]
+  knowledgeObjects: FormalKnowledgeObject[]
+  stages: KnowledgeFormationStage[]
+  createdCount: number
+  updatedCount: number
+  reusedCount: number
+  formalKnowledgeFiles: number
 }
 
 export type KnowledgeModule = {
