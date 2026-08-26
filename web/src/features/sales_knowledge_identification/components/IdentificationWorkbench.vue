@@ -2,6 +2,7 @@
 import {
   IconActivityHeartbeat,
   IconAlertCircle,
+  IconBook2,
   IconBrain,
   IconDatabase,
   IconFileText,
@@ -36,6 +37,7 @@ import {
   type CoverageStatus,
   type DocumentPackage,
   type IdentificationResult,
+  type IdentificationCatalog,
   type KnowledgeModule,
   type ModelCallTrace,
   type ProcessingStage,
@@ -43,11 +45,12 @@ import {
   type SourceMaterial,
 } from '../types'
 
-type WorkbenchTab = 'overview' | 'source' | 'candidates' | 'coverage' | 'evaluation' | 'traces'
+type WorkbenchTab = 'overview' | 'source' | 'rules' | 'candidates' | 'coverage' | 'evaluation' | 'traces'
 
 const tabItems: { key: WorkbenchTab; label: string; icon: Component }[] = [
   { key: 'overview', label: '运行总览', icon: IconActivityHeartbeat },
   { key: 'source', label: '输入资料', icon: IconFileText },
+  { key: 'rules', label: '规则审阅', icon: IconBook2 },
   { key: 'candidates', label: '候选与证据', icon: IconStack2 },
   { key: 'coverage', label: '模块覆盖', icon: IconTable },
   { key: 'evaluation', label: '代理评估', icon: IconShieldCheck },
@@ -71,6 +74,7 @@ const lastRunId = ref('')
 const runHistory = ref<IdentificationResult[]>([])
 const proxyEvaluation = ref('')
 const catalogModules = ref<KnowledgeModule[]>([])
+const catalogInfo = ref<Omit<IdentificationCatalog, 'modules'> | null>(null)
 
 const selectedCandidate = computed<CandidateKnowledge | null>(() => {
   const candidates = result.value?.candidates ?? []
@@ -185,6 +189,13 @@ async function probeApi(): Promise<void> {
       listSourceMaterials(),
     ])
     catalogModules.value = catalog.modules
+    catalogInfo.value = {
+      version: catalog.version,
+      fingerprint: catalog.fingerprint,
+      status: catalog.status,
+      source: catalog.source,
+      domains: catalog.domains,
+    }
     sourceMaterials.value = materials
     apiState.value = 'ready'
   } catch (reason) {
@@ -215,6 +226,13 @@ async function loadPackage(): Promise<void> {
     selectedCandidateId.value = null
     proxyEvaluation.value = ''
     catalogModules.value = catalog.modules
+    catalogInfo.value = {
+      version: catalog.version,
+      fingerprint: catalog.fingerprint,
+      status: catalog.status,
+      source: catalog.source,
+      domains: catalog.domains,
+    }
     apiState.value = 'ready'
     activeTab.value = 'overview'
     packageNotice.value = `已读取《${nextPackage.sourceFileName}》。历史运行结果未自动载入，请执行识别查看本轮结果。`
@@ -417,7 +435,7 @@ onMounted(() => {
       </button>
     </nav>
 
-    <template v-if="documentPackage">
+    <template v-if="documentPackage || activeTab === 'rules'">
       <section v-if="activeTab === 'overview'" class="view-grid">
         <div class="main-column">
           <div v-if="result" class="metrics-grid">
@@ -514,13 +532,61 @@ onMounted(() => {
         </aside>
       </section>
 
-      <section v-else-if="activeTab === 'source'" class="source-view">
+      <section v-else-if="activeTab === 'source' && documentPackage" class="source-view">
         <div class="source-meta-grid">
           <div class="panel source-card"><p class="eyebrow-small">SOURCE FILE</p><h2>{{ documentPackage.sourceFileName }}</h2><dl class="detail-list"><div><dt>项目内原件</dt><dd class="mono">{{ documentPackage.sourceFilePath }}</dd></div><div><dt>原件 SHA-256</dt><dd class="mono hash-value">{{ documentPackage.sourceSha256 }}</dd></div><div><dt>全文路径</dt><dd class="mono">{{ documentPackage.fullMarkdownPath }}</dd></div><div><dt>全文 SHA-256</dt><dd class="mono hash-value">{{ documentPackage.fullMarkdownSha256 }}</dd></div></dl></div>
           <div class="panel source-card"><p class="eyebrow-small">QUALITY NOTES</p><h2>{{ documentPackage.qualityIssues.length ? '需要留意' : '暂无质量问题' }}</h2><ul v-if="documentPackage.qualityIssues.length" class="issue-list"><li v-for="issue in documentPackage.qualityIssues" :key="issue">{{ issue }}</li></ul><p v-else class="muted">代理解析结果未登记质量问题。</p><div class="method-stamp">{{ documentPackage.processingMethod === 'agent_assisted' ? 'AGENT ASSISTED' : 'CAPABILITY OUTPUT' }}</div></div>
         </div>
         <div class="panel source-document"><div class="section-title-row"><div><p class="eyebrow-small">FULL MARKDOWN</p><h2>可定位的全文输入</h2></div><span class="pill">只读</span></div><pre class="markdown-viewer">{{ documentPackage.fullMarkdown }}</pre></div>
         <div class="panel source-anchors"><div class="section-title-row"><div><p class="eyebrow-small">EVIDENCE ANCHORS</p><h2>来源锚点</h2></div><span class="muted">{{ documentPackage.anchors.length }} 个</span></div><div class="anchor-grid"><div v-for="anchor in documentPackage.anchors" :key="anchor.anchorId" class="anchor-item"><code>{{ anchor.anchorId }}</code><span>{{ anchor.kind }}<template v-if="anchor.page"> · 第 {{ anchor.page }} 页</template></span></div></div></div>
+      </section>
+
+      <section v-else-if="activeTab === 'rules'" class="rules-view">
+        <div class="panel rules-meta">
+          <div>
+            <p class="eyebrow-small">SALES KNOWLEDGE MODEL</p>
+            <h2>销售知识模型规则包</h2>
+            <p>这份规则包是模型识别和程序分类校验共同使用的事实源，不是从 PostgreSQL 动态读取的业务数据。</p>
+          </div>
+          <dl class="rules-version">
+            <div><dt>版本</dt><dd>{{ catalogInfo?.version ?? '-' }}</dd></div>
+            <div><dt>状态</dt><dd>{{ catalogInfo?.status === 'sample_validation' ? '样本验证中' : '-' }}</dd></div>
+            <div><dt>来源</dt><dd class="mono">{{ catalogInfo?.source ?? '-' }}</dd></div>
+            <div><dt>指纹</dt><dd class="mono hash-value">{{ catalogInfo?.fingerprint ?? '-' }}</dd></div>
+          </dl>
+        </div>
+
+        <div class="domain-rule-grid">
+          <article v-for="domain in catalogInfo?.domains ?? []" :key="domain.code" class="panel domain-rule-card">
+            <div class="domain-rule-head"><span>{{ domain.code }}</span><div><strong>{{ domain.name }}</strong><em>{{ domain.question }}</em></div></div>
+            <p>{{ domain.meaning }}</p>
+            <div class="domain-boundary"><span>边界</span>{{ domain.boundary }}</div>
+          </article>
+        </div>
+
+        <div class="rule-module-groups">
+          <section v-for="group in groupedModules" :key="group.domain" class="panel rule-module-group">
+            <div class="section-title-row">
+              <div><p class="eyebrow-small">{{ group.domain }}</p><h2>{{ group.label }}</h2></div>
+              <span class="pill">{{ group.modules.length }} 个模块</span>
+            </div>
+            <details v-for="module in group.modules" :key="module.code" class="rule-module-item">
+              <summary>
+                <code>{{ module.code }}</code>
+                <strong>{{ module.name }}</strong>
+                <span>{{ module.lifecycle === 'optional' ? '可选模块' : '计划建设' }}</span>
+              </summary>
+              <div class="rule-module-body">
+                <div><h3>业务含义</h3><p>{{ module.meaning }}</p></div>
+                <div><h3>对象边界与分类裁决</h3><p>{{ module.boundary }}</p></div>
+                <div><h3>允许对象类型</h3><div class="rule-chips"><code v-for="item in module.objectTypes" :key="item">{{ item }}</code></div></div>
+                <div><h3>核心对象</h3><p>{{ module.coreObjects.join('、') }}</p></div>
+                <div><h3>典型来源</h3><p>{{ module.sources.join('、') }}</p></div>
+                <div><h3>明确消费方</h3><p>{{ module.consumers.join('、') }}</p></div>
+              </div>
+            </details>
+          </section>
+        </div>
       </section>
 
       <section v-else-if="activeTab === 'candidates'" class="candidate-view">

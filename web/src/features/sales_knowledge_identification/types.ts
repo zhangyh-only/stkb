@@ -180,11 +180,20 @@ export type KnowledgeModule = {
   consumers: string[]
 }
 
+export type KnowledgeDomain = {
+  code: string
+  name: string
+  question: string
+  meaning: string
+  boundary: string
+}
+
 export type IdentificationCatalog = {
   version: string
   fingerprint: string
   status: 'sample_validation'
   source: string
+  domains: KnowledgeDomain[]
   modules: KnowledgeModule[]
 }
 
