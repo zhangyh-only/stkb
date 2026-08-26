@@ -33,7 +33,7 @@ import {
   coverageCount,
   formatDuration,
   prettyJson,
-  type CandidateKnowledge,
+  type CandidateKnowledgeObject,
   type CoverageStatus,
   type DocumentPackage,
   type IdentificationResult,
@@ -46,6 +46,7 @@ import {
 } from '../types'
 
 type WorkbenchTab = 'overview' | 'source' | 'rules' | 'candidates' | 'coverage' | 'evaluation' | 'traces'
+type ProposalView = 'accepted' | 'rejected' | 'signals' | 'normalizations'
 
 const tabItems: { key: WorkbenchTab; label: string; icon: Component }[] = [
   { key: 'overview', label: '运行总览', icon: IconActivityHeartbeat },
@@ -62,6 +63,8 @@ const sourceMaterials = ref<SourceMaterial[]>([])
 const documentPackage = ref<DocumentPackage | null>(null)
 const result = ref<IdentificationResult | null>(null)
 const selectedCandidateId = ref<string | null>(null)
+const selectedEvidenceRef = ref<string | null>(null)
+const proposalView = ref<ProposalView>('accepted')
 const activeTab = ref<WorkbenchTab>('overview')
 const packageLoading = ref(false)
 const runLoading = ref(false)
@@ -78,10 +81,16 @@ const catalogInfo = ref<Omit<IdentificationCatalog, 'modules'> | null>(null)
 const selectedRuleDomainCode = ref('D1')
 const selectedRuleModuleCode = ref('D1.1')
 
-const selectedCandidate = computed<CandidateKnowledge | null>(() => {
+const selectedCandidate = computed<CandidateKnowledgeObject | null>(() => {
   const candidates = result.value?.candidates ?? []
   return candidates.find((candidate) => candidate.candidateId === selectedCandidateId.value) ?? candidates[0] ?? null
 })
+
+const selectedEvidence = computed(() =>
+  selectedCandidate.value?.evidence.find((reference) => reference === selectedEvidenceRef.value)
+    ?? selectedCandidate.value?.evidence[0]
+    ?? null,
+)
 
 const groupedModules = computed(() => {
   const domains = new Map<string, { domain: string; label: string; modules: KnowledgeModule[] }>()
@@ -166,7 +175,8 @@ function evidenceExcerpt(reference: string): string {
   return markdown.slice(contentStart, contentEnd).trim().slice(0, 900)
 }
 
-function candidateSummary(candidate: CandidateKnowledge): string {
+function candidateSummary(candidate: CandidateKnowledgeObject): string {
+  if (candidate.title) return candidate.title
   const values = Object.values(candidate.content)
   const firstText = values.find((value) => typeof value === 'string')
   return typeof firstText === 'string' ? firstText : `${candidate.objectType} · ${candidate.module}`
@@ -241,6 +251,8 @@ async function loadPackage(): Promise<void> {
     runHistory.value = []
     lastRunId.value = ''
     selectedCandidateId.value = null
+    selectedEvidenceRef.value = null
+    proposalView.value = 'accepted'
     proxyEvaluation.value = ''
     catalogModules.value = catalog.modules
     catalogInfo.value = {
@@ -287,6 +299,8 @@ async function executeRun(): Promise<void> {
     proxyEvaluation.value = evaluation?.markdown ?? ''
     lastRunId.value = nextResult.runId
     selectedCandidateId.value = nextResult.candidates[0]?.candidateId ?? null
+    selectedEvidenceRef.value = nextResult.candidates[0]?.evidence[0] ?? null
+    proposalView.value = 'accepted'
     activeTab.value = nextResult.status === 'completed' ? 'candidates' : 'traces'
     runNotice.value = nextResult.status === 'completed'
       ? `运行 ${nextResult.runId} 已完成，模型调用 ${nextResult.callCount} 次。`
@@ -309,6 +323,7 @@ async function reloadRun(): Promise<void> {
       result.value,
     ].slice(-5)
     selectedCandidateId.value = result.value.candidates[0]?.candidateId ?? null
+    selectedEvidenceRef.value = result.value.candidates[0]?.evidence[0] ?? null
     runNotice.value = `已回读运行 ${lastRunId.value}`
   } catch (reason) {
     error.value = loadErrorMessage(reason)
@@ -319,6 +334,10 @@ async function reloadRun(): Promise<void> {
 
 function selectCandidate(candidateId: string): void {
   selectedCandidateId.value = candidateId
+  selectedEvidenceRef.value = result.value?.candidates.find(
+    (candidate) => candidate.candidateId === candidateId,
+  )?.evidence[0] ?? null
+  proposalView.value = 'accepted'
   activeTab.value = 'candidates'
 }
 
@@ -645,33 +664,66 @@ onMounted(() => {
       <section v-else-if="activeTab === 'candidates'" class="candidate-view">
         <template v-if="result">
           <div class="object-formation-strip panel">
-            <div class="formation-step completed"><span>01</span><div><strong>候选知识</strong><p>{{ result.candidates.length }} 项对象提议，已完成分类、合同与证据校验</p></div></div>
+            <div class="formation-step completed"><span>01</span><div><strong>候选知识对象</strong><p>{{ result.candidates.length }} 项，已完成对象边界、分类、合同与证据校验</p></div></div>
             <div class="formation-arrow">→</div>
             <div class="formation-step pending"><span>02</span><div><strong>业务实体归一</strong><p>本节点未执行，实体提及还没有正式实体 ID</p></div></div>
             <div class="formation-arrow">→</div>
             <div class="formation-step pending"><span>03</span><div><strong>正式 KnowledgeObject</strong><p>当前 0 项；需经过跨资料归并和正式写入</p></div></div>
           </div>
-          <div class="candidate-layout">
-            <div class="candidate-list panel">
-              <div class="section-title-row"><div><p class="eyebrow-small">OBJECT PROPOSALS</p><h2>候选知识</h2></div><span class="pill pill-green">{{ result.candidates.length }} 项提议</span></div>
-              <button v-for="candidate in result.candidates" :key="candidate.candidateId" type="button" class="candidate-list-item" :class="{ selected: selectedCandidate?.candidateId === candidate.candidateId }" @click="selectCandidate(candidate.candidateId)"><span class="candidate-id">{{ candidate.candidateId }}</span><span class="candidate-text">{{ candidateSummary(candidate) }}</span><span class="candidate-module">{{ candidate.module }} · {{ candidate.objectType }}</span></button>
-              <div v-if="!result.candidates.length" class="empty-inline">本次运行没有形成通过校验的对象提议。</div>
-            </div>
-            <div class="candidate-detail">
-              <div v-if="selectedCandidate" class="panel detail-card">
-                <div class="detail-head"><div><p class="eyebrow-small">运行内提议 {{ selectedCandidate.candidateId }}</p><h2>{{ selectedCandidate.objectType }}</h2><p class="object-classification">{{ selectedCandidate.domain }} / {{ selectedCandidate.module }}</p></div><span class="pill pill-green">候选，不是正式对象</span></div>
-                <div class="content-block"><h3>类型化内容</h3><pre class="json-viewer">{{ prettyJson(selectedCandidate.content) }}</pre></div>
-                <div class="content-block"><h3>来源证据与原文片段</h3><div class="evidence-list"><div v-for="reference in selectedCandidate.evidence" :key="reference" class="evidence-item"><code>{{ evidenceLabel(reference) }}</code><span v-if="anchorFor(reference)" class="evidence-ok">可解析</span><span v-else class="evidence-missing">未找到锚点</span><p v-if="evidenceExcerpt(reference)" class="evidence-excerpt">{{ evidenceExcerpt(reference) }}</p></div></div></div>
-                <div v-if="selectedCandidate.entityMentions.length" class="content-block"><h3>实体提及与引用角色</h3><div class="mention-list"><div v-for="mention in selectedCandidate.entityMentions" :key="mention.mentionId" class="mention-item"><strong>{{ mention.text }}</strong><span>{{ mention.proposedType }} · {{ mention.referenceRole }}</span><code>{{ mention.sourceRef }}</code></div></div></div>
-                <div v-if="selectedCandidate.relations.length" class="content-block"><h3>关系建议</h3><div class="relation-list"><div v-for="(relation, index) in selectedCandidate.relations" :key="`${relation.relationType}-${index}`"><span class="relation-kind">{{ relation.relationKind }}</span><strong>{{ relation.sourceRef }}</strong><span>→</span><strong>{{ relation.targetRef }}</strong><span class="muted">{{ relation.relationType }}</span></div></div></div>
-              </div>
-              <div v-else class="panel empty-state"><span class="empty-index">03</span><div><h2>暂无候选详情</h2><p>模型结果中的有效候选会在这里和原文证据并排展示。</p></div></div>
-            </div>
+          <nav class="proposal-result-nav panel" aria-label="识别结果类型">
+            <button type="button" :class="{ active: proposalView === 'accepted' }" @click="proposalView = 'accepted'"><span>候选对象</span><strong>{{ result.candidates.length }}</strong></button>
+            <button type="button" :class="{ active: proposalView === 'rejected' }" @click="proposalView = 'rejected'"><span>拒绝项</span><strong>{{ result.rejectedCandidates.length }}</strong></button>
+            <button type="button" :class="{ active: proposalView === 'signals' }" @click="proposalView = 'signals'"><span>弱线索 / 未决</span><strong>{{ result.weakSignals.length + result.unresolvedItems.length }}</strong></button>
+            <button type="button" :class="{ active: proposalView === 'normalizations' }" @click="proposalView = 'normalizations'"><span>规范化</span><strong>{{ result.normalizations.length }}</strong></button>
+          </nav>
+
+          <div class="panel proposal-workspace">
+            <template v-if="proposalView === 'accepted'">
+              <aside class="proposal-list-pane">
+                <div class="proposal-pane-head"><div><p>OBJECT PROPOSALS</p><h2>候选知识对象</h2></div><span>{{ result.candidates.length }} 项</span></div>
+                <div class="proposal-list-scroll">
+                  <button v-for="candidate in result.candidates" :key="candidate.candidateId" type="button" :class="{ active: selectedCandidate?.candidateId === candidate.candidateId }" @click="selectCandidate(candidate.candidateId)">
+                    <span>{{ candidate.candidateId }}</span>
+                    <div><strong>{{ candidateSummary(candidate) }}</strong><small>{{ candidate.module }} · {{ candidate.objectType }}</small></div>
+                  </button>
+                  <p v-if="!result.candidates.length" class="empty-inline">本次运行没有形成通过校验的候选知识对象。</p>
+                </div>
+              </aside>
+
+              <article v-if="selectedCandidate" class="proposal-detail-pane">
+                <header>
+                  <div><p>{{ selectedCandidate.candidateId }} · {{ selectedCandidate.domain }} / {{ selectedCandidate.module }}</p><h2>{{ selectedCandidate.title || selectedCandidate.objectType }}</h2><span>{{ selectedCandidate.objectType }}</span></div>
+                  <em>运行内候选身份</em>
+                </header>
+                <div class="proposal-detail-scroll">
+                  <section class="proposal-contract-grid">
+                    <div><h3>对象边界</h3><p>{{ selectedCandidate.objectBoundary || '旧运行未提供对象边界，需重新识别。' }}</p></div>
+                    <div><h3>分类依据</h3><p>{{ selectedCandidate.classificationBasis || '旧运行未提供分类依据，需重新识别。' }}</p></div>
+                  </section>
+                  <section><h3>身份线索（供后续归并比较）</h3><pre class="json-viewer compact-object">{{ prettyJson(selectedCandidate.identityHints) }}</pre></section>
+                  <section><h3>类型化业务内容</h3><pre class="json-viewer compact-object">{{ prettyJson(selectedCandidate.content) }}</pre></section>
+                  <section>
+                    <h3>来源证据</h3>
+                    <div class="evidence-selector">
+                      <button v-for="reference in selectedCandidate.evidence" :key="reference" type="button" :class="{ active: selectedEvidence === reference }" @click="selectedEvidenceRef = reference">{{ evidenceLabel(reference) }}</button>
+                    </div>
+                    <div v-if="selectedEvidence" class="single-evidence-view"><span :class="anchorFor(selectedEvidence) ? 'evidence-ok' : 'evidence-missing'">{{ anchorFor(selectedEvidence) ? '锚点有效' : '锚点缺失' }}</span><p>{{ evidenceExcerpt(selectedEvidence) || '当前锚点没有可展示的文本片段。' }}</p></div>
+                  </section>
+                  <section v-if="selectedCandidate.entityMentions.length"><h3>实体提及与引用角色</h3><div class="mention-list"><div v-for="mention in selectedCandidate.entityMentions" :key="mention.mentionId" class="mention-item"><strong>{{ mention.text }}</strong><span>{{ mention.proposedType }} · {{ mention.referenceRole }}</span><code>{{ mention.sourceRef }}</code></div></div></section>
+                  <section v-if="selectedCandidate.relations.length"><h3>关系建议</h3><div class="relation-list"><div v-for="(relation, index) in selectedCandidate.relations" :key="`${relation.relationType}-${index}`"><span class="relation-kind">{{ relation.relationKind }}</span><strong>{{ relation.sourceRef }}</strong><span>→</span><strong>{{ relation.targetRef }}</strong><span class="muted">{{ relation.relationType }}</span></div></div></section>
+                </div>
+              </article>
+              <div v-else class="proposal-empty">没有可展示的候选知识对象。</div>
+            </template>
+
+            <section v-else-if="proposalView === 'rejected'" class="proposal-aux-pane"><div class="proposal-pane-head"><div><p>REJECTED</p><h2>被程序拒绝的对象提议</h2></div><span>{{ result.rejectedCandidates.length }} 项</span></div><div class="proposal-aux-scroll"><details v-for="item in result.rejectedCandidates" :key="item.candidateId"><summary><strong>{{ item.candidateId }}</strong><span>{{ item.reasons.join('；') }}</span></summary><pre class="json-viewer compact-object">{{ prettyJson(item.rawCandidate) }}</pre></details><p v-if="!result.rejectedCandidates.length" class="proposal-empty">本次没有被程序拒绝的对象提议。</p></div></section>
+
+            <section v-else-if="proposalView === 'signals'" class="proposal-aux-pane"><div class="proposal-pane-head"><div><p>WEAK / UNRESOLVED</p><h2>弱线索与未决项</h2></div><span>{{ result.weakSignals.length + result.unresolvedItems.length }} 项</span></div><div class="proposal-aux-scroll"><div v-for="(item, index) in result.weakSignals" :key="`weak-${index}`" class="proposal-signal"><span>弱线索 · {{ item.module }}</span><p>{{ item.reason }}</p><code v-for="reference in item.evidence" :key="reference">{{ reference }}</code></div><div v-for="(item, index) in result.unresolvedItems" :key="`unresolved-${index}`" class="proposal-signal unresolved"><span>未决{{ item.module ? ` · ${item.module}` : '' }}</span><p>{{ item.description }}：{{ item.reason }}</p></div><p v-if="!result.weakSignals.length && !result.unresolvedItems.length" class="proposal-empty">本次没有弱线索或未决项。</p></div></section>
+
+            <section v-else class="proposal-aux-pane"><div class="proposal-pane-head"><div><p>DETERMINISTIC NORMALIZATION</p><h2>程序规范化记录</h2></div><span>{{ result.normalizations.length }} 项</span></div><div class="proposal-aux-scroll"><div v-for="item in result.normalizations" :key="`${item.candidateId}-${item.field}`" class="normalization-row"><strong>{{ item.candidateId }}</strong><code>{{ item.field }}：{{ item.originalValue }} → {{ item.normalizedValue }}</code><p>{{ item.reason }}</p></div><p v-if="!result.normalizations.length" class="proposal-empty">本次没有程序规范化记录。</p></div></section>
           </div>
-          <div class="secondary-result-grid"><div class="panel secondary-card"><div class="section-title-row"><div><p class="eyebrow-small">REJECTED</p><h2>拒绝项</h2></div><span class="pill pill-red">{{ result.rejectedCandidates.length }}</span></div><div v-if="result.rejectedCandidates.length" class="rejected-list"><details v-for="item in result.rejectedCandidates" :key="item.candidateId"><summary><strong>{{ item.candidateId }}</strong><span>{{ item.reasons.length }} 个原因</span></summary><ul class="issue-list"><li v-for="reason in item.reasons" :key="reason">{{ reason }}</li></ul><pre class="json-viewer compact">{{ prettyJson(item.rawCandidate) }}</pre></details></div><p v-else class="muted">没有被程序拒绝的候选。</p></div><div class="panel secondary-card"><div class="section-title-row"><div><p class="eyebrow-small">WEAK / UNRESOLVED</p><h2>弱线索与未决项</h2></div><span class="pill">{{ result.weakSignals.length + result.unresolvedItems.length }}</span></div><div v-if="result.weakSignals.length || result.unresolvedItems.length" class="weak-list"><div v-for="(item, index) in result.weakSignals" :key="`weak-${index}`" class="weak-item"><span class="pill pill-amber">弱线索 · {{ item.module }}</span><p>{{ item.reason }}</p><div class="evidence-chips"><code v-for="reference in item.evidence" :key="reference">{{ reference }}</code></div></div><div v-for="(item, index) in result.unresolvedItems" :key="`unresolved-${index}`" class="weak-item"><span class="pill pill-purple">未决{{ item.module ? ` · ${item.module}` : '' }}</span><p>{{ item.description }}：{{ item.reason }}</p></div></div><p v-else class="muted">本次没有弱线索或未决项。</p></div></div>
-          <div v-if="result.normalizations.length" class="panel secondary-card"><div class="section-title-row"><div><p class="eyebrow-small">DETERMINISTIC NORMALIZATION</p><h2>公开规范化记录</h2></div><span class="pill pill-amber">{{ result.normalizations.length }}</span></div><div class="weak-list"><div v-for="item in result.normalizations" :key="`${item.candidateId}-${item.field}`" class="weak-item"><strong>{{ item.candidateId }}</strong><p>{{ item.field }}：{{ item.originalValue }} → {{ item.normalizedValue }}</p><span class="muted">{{ item.reason }}</span></div></div></div>
         </template>
-        <div v-else class="panel empty-state"><span class="empty-index">03</span><div><h2>运行后查看对象提议</h2><p>销售知识识别会形成带域、模块、对象类型、内容和证据的候选知识；正式 KnowledgeObject 要在后续实体归一与知识归并后形成。</p></div></div>
+        <div v-else class="panel empty-state"><span class="empty-index">03</span><div><h2>运行后查看候选知识对象</h2><p>每项候选对象必须包含标题、对象边界、分类依据、身份线索、类型化内容和来源证据；正式 KnowledgeObject 仍由后续归并节点形成。</p></div></div>
       </section>
 
       <section v-else-if="activeTab === 'coverage'" class="coverage-view">

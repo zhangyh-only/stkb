@@ -51,11 +51,15 @@ export type ProposedRelation = {
   evidence: string[]
 }
 
-export type CandidateKnowledge = {
+export type CandidateKnowledgeObject = {
   candidateId: string
+  title: string
   domain: string
   module: string
   objectType: string
+  objectBoundary: string
+  classificationBasis: string
+  identityHints: Record<string, unknown>
   content: Record<string, unknown>
   entityMentions: EntityMention[]
   evidence: string[]
@@ -152,7 +156,7 @@ export type IdentificationResult = {
   rawModelOutput: string
   modelCalls: ModelCallTrace[]
   processingStages: ProcessingStage[]
-  candidates: CandidateKnowledge[]
+  candidates: CandidateKnowledgeObject[]
   rejectedCandidates: RejectedCandidate[]
   rejectedAuxiliaryItems: RejectedAuxiliaryItem[]
   normalizations: CandidateNormalization[]
