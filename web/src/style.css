@@ -850,6 +850,13 @@ a { color: inherit; text-decoration: none; }
 .domain-definition p { color: #727b74; font-size: 11px; }
 .rule-highlight { margin: 8px 0; padding: 14px !important; background: #fff6e7; border: 1px solid #ecd09e !important; border-radius: 8px; }
 .rule-highlight h3 { color: #9a661b; }
+.contract-decision-grid, .contract-example { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.contract-decision-grid > div, .contract-example > div { padding: 12px; background: #f5f7f5; border-radius: 7px; }
+.contract-decision-grid > div:last-child { background: #fff3f0; }
+.contract-decision-grid > div:last-child h3 { color: #a2463e; }
+.contract-example > div:first-child { background: #edf5f0; }
+.contract-example > div:last-child { background: #fff5e7; }
+.contract-minimum, .contract-consumers { margin-top: 8px !important; color: #6f7871; font-size: 11px !important; }
 .rule-type-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .rule-type-list code { padding: 5px 7px; color: #24543d; background: #e8f0eb; border-radius: 5px; font-size: 10px; }
 .evidence-layout { display: grid; grid-template-columns: 210px minmax(0, 1fr) 190px; height: min(700px, calc(100dvh - 190px)); min-height: 580px; overflow: hidden; background: #fff; border: 1px solid #dfe3df; border-radius: 12px; }

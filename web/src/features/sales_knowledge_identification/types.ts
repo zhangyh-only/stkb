@@ -237,6 +237,15 @@ export type KnowledgeModule = {
   boundary: string
   sources: string[]
   consumers: string[]
+  contentContract: {
+    requiredFields: string[]
+    minimumContentChars: number
+    granularity: string
+    inclusion: string
+    exclusion: string
+    positiveExample: string
+    negativeExample: string
+  }
 }
 
 export type KnowledgeDomain = {
@@ -252,6 +261,7 @@ export type IdentificationCatalog = {
   fingerprint: string
   status: 'sample_validation'
   source: string
+  contentContractVersion: string
   scopeDefinitions: Record<'core' | 'optional', string>
   domains: KnowledgeDomain[]
   modules: KnowledgeModule[]
