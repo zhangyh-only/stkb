@@ -3,6 +3,7 @@ from app.features.sales_knowledge_identification.catalog import (
     CATALOG_SOURCE,
     CATALOG_STATUS,
     CATALOG_VERSION,
+    KNOWLEDGE_DOMAINS,
     KNOWLEDGE_MODULES,
     MODULE_BY_CODE,
     render_catalog_for_prompt,
@@ -10,11 +11,25 @@ from app.features.sales_knowledge_identification.catalog import (
 
 
 def test_rule_package_defines_complete_versioned_d1_d5_catalog() -> None:
-    assert CATALOG_VERSION == "d1-d5-v0.2"
+    assert CATALOG_VERSION == "d1-d5-v0.3"
     assert CATALOG_STATUS == "sample_validation"
     assert len(CATALOG_FINGERPRINT) == 64
     assert CATALOG_SOURCE.endswith("STKB-D1-D5知识对象与业务图模型映射矩阵.md")
     assert len(KNOWLEDGE_MODULES) == 22
+    assert [domain.code for domain in KNOWLEDGE_DOMAINS] == [
+        "D1",
+        "D2",
+        "D3",
+        "D4",
+        "D5",
+    ]
+    assert [domain.question for domain in KNOWLEDGE_DOMAINS] == [
+        "卖什么",
+        "卖给谁",
+        "怎么卖",
+        "具体怎么说",
+        "卖得怎么样",
+    ]
     assert {module.domain for module in KNOWLEDGE_MODULES} == {
         "D1",
         "D2",

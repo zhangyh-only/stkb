@@ -130,7 +130,7 @@ def test_api_runs_identification_and_reads_the_saved_result(
     assert materials_response.json()[0]["documentPackageId"] == "DP-API"
     assert catalog_response.status_code == 200
     assert len(catalog_response.json()["modules"]) == 22
-    assert catalog_response.json()["version"] == "d1-d5-v0.2"
+    assert catalog_response.json()["version"] == "d1-d5-v0.3"
     assert catalog_response.json()["status"] == "sample_validation"
     assert len(catalog_response.json()["fingerprint"]) == 64
     assert catalog_response.json()["source"].endswith(
@@ -138,6 +138,8 @@ def test_api_runs_identification_and_reads_the_saved_result(
     )
     assert catalog_response.json()["modules"][0]["meaning"]
     assert catalog_response.json()["modules"][0]["boundary"]
+    assert len(catalog_response.json()["domains"]) == 5
+    assert catalog_response.json()["domains"][0]["question"] == "卖什么"
     assert run_response.status_code == 200
     assert run_response.json()["status"] == "completed"
     assert run_response.json()["modelConfiguration"]["documentMaxChars"] == 3500

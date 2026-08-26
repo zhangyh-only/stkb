@@ -6,7 +6,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Literal
 
-RULE_PACKAGE_PATH = Path(__file__).with_name("rules") / "d1-d5-v0.2.toml"
+RULE_PACKAGE_PATH = Path(__file__).with_name("rules") / "d1-d5-v0.3.toml"
 EXPECTED_MODULE_COUNT = 22
 EXPECTED_DOMAINS = {"D1", "D2", "D3", "D4", "D5"}
 
@@ -25,9 +25,35 @@ class KnowledgeModule:
     consumers: tuple[str, ...]
 
 
-def _load_rule_package() -> tuple[str, str, str, str, tuple[KnowledgeModule, ...]]:
+@dataclass(frozen=True)
+class KnowledgeDomain:
+    code: str
+    name: str
+    question: str
+    meaning: str
+    boundary: str
+
+
+def _load_rule_package() -> tuple[
+    str,
+    str,
+    str,
+    str,
+    tuple[KnowledgeDomain, ...],
+    tuple[KnowledgeModule, ...],
+]:
     rule_content = RULE_PACKAGE_PATH.read_bytes()
     payload = tomllib.loads(rule_content.decode("utf-8"))
+    domains = tuple(
+        KnowledgeDomain(
+            code=item["code"],
+            name=item["name"],
+            question=item["question"],
+            meaning=item["meaning"],
+            boundary=item["boundary"],
+        )
+        for item in payload["domains"]
+    )
     modules = tuple(
         KnowledgeModule(
             domain=item["domain"],
@@ -43,12 +69,28 @@ def _load_rule_package() -> tuple[str, str, str, str, tuple[KnowledgeModule, ...
         )
         for item in payload["modules"]
     )
-    _validate_rule_package(modules)
+    _validate_rule_package(domains, modules)
     fingerprint = sha256(rule_content).hexdigest()
-    return payload["version"], payload["status"], payload["source"], fingerprint, modules
+    return (
+        payload["version"],
+        payload["status"],
+        payload["source"],
+        fingerprint,
+        domains,
+        modules,
+    )
 
 
-def _validate_rule_package(modules: tuple[KnowledgeModule, ...]) -> None:
+def _validate_rule_package(
+    domains: tuple[KnowledgeDomain, ...], modules: tuple[KnowledgeModule, ...]
+) -> None:
+    if {domain.code for domain in domains} != EXPECTED_DOMAINS:
+        raise RuntimeError("knowledge rule package must define D1-D5 domain rules")
+    if any(
+        not all((domain.name, domain.question, domain.meaning, domain.boundary))
+        for domain in domains
+    ):
+        raise RuntimeError("knowledge rule package contains incomplete domain rules")
     if len(modules) != EXPECTED_MODULE_COUNT:
         raise RuntimeError(
             f"knowledge rule package must define {EXPECTED_MODULE_COUNT} modules"
@@ -79,16 +121,11 @@ def _validate_rule_package(modules: tuple[KnowledgeModule, ...]) -> None:
     CATALOG_STATUS,
     CATALOG_SOURCE,
     CATALOG_FINGERPRINT,
+    KNOWLEDGE_DOMAINS,
     KNOWLEDGE_MODULES,
 ) = _load_rule_package()
 MODULE_BY_CODE = {module.code: module for module in KNOWLEDGE_MODULES}
-DOMAIN_NAMES = {
-    "D1": "业务事实",
-    "D2": "客户与动因",
-    "D3": "销售策略",
-    "D4": "话术与案例",
-    "D5": "评估与训练",
-}
+DOMAIN_BY_CODE = {domain.code: domain for domain in KNOWLEDGE_DOMAINS}
 
 
 def validate_candidate_classification(domain: str, module: str, object_type: str) -> list[str]:

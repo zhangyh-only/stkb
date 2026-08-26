@@ -15,7 +15,8 @@ from app.features.sales_knowledge_identification.catalog import (
     CATALOG_SOURCE,
     CATALOG_STATUS,
     CATALOG_VERSION,
-    DOMAIN_NAMES,
+    DOMAIN_BY_CODE,
+    KNOWLEDGE_DOMAINS,
     KNOWLEDGE_MODULES,
 )
 from app.features.sales_knowledge_identification.models import (
@@ -51,10 +52,20 @@ def identification_catalog() -> dict[str, object]:
         "fingerprint": CATALOG_FINGERPRINT,
         "status": CATALOG_STATUS,
         "source": CATALOG_SOURCE,
+        "domains": [
+            {
+                "code": domain.code,
+                "name": domain.name,
+                "question": domain.question,
+                "meaning": domain.meaning,
+                "boundary": domain.boundary,
+            }
+            for domain in KNOWLEDGE_DOMAINS
+        ],
         "modules": [
             {
                 "domain": module.domain,
-                "domainName": DOMAIN_NAMES[module.domain],
+                "domainName": DOMAIN_BY_CODE[module.domain].name,
                 "code": module.code,
                 "name": module.name,
                 "lifecycle": module.lifecycle,
