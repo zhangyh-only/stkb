@@ -148,6 +148,8 @@ class ModelCallTrace(ApiModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     error: str | None = None
+    system_prompt: str | None = None
+    user_prompt: str | None = None
     raw_output: str | None = None
     finish_reason: str | None = None
     segment: str | None = None
@@ -209,3 +211,56 @@ class IdentificationResult(ApiModel):
     completion_tokens: int
     model_configuration: ModelConfigurationSnapshot | None = None
     storage_impact: StorageImpact = Field(default_factory=StorageImpact)
+
+
+class ResolvedBusinessEntity(ApiModel):
+    entity_id: str
+    entity_type: str
+    canonical_name: str
+    source_mentions: list[str]
+    action: Literal["created", "reused"]
+
+
+class KnowledgeObjectEntityReference(ApiModel):
+    entity_id: str
+    reference_role: str
+    evidence: list[str]
+
+
+class FormalKnowledgeObject(ApiModel):
+    knowledge_object_id: str
+    revision: int
+    action: Literal["created", "updated", "reused"]
+    title: str
+    domain: str
+    module: str
+    object_type: str
+    identity_key: str
+    content_fingerprint: str
+    content: dict[str, Any]
+    entity_references: list[KnowledgeObjectEntityReference]
+    evidence: list[str]
+    source_candidate_ids: list[str]
+    file_path: str
+    file_sha256: str
+
+
+class KnowledgeFormationStage(ApiModel):
+    key: Literal["entity_resolution", "knowledge_merge", "formal_write"]
+    name: str
+    status: Literal["completed", "failed"]
+    detail: str
+
+
+class KnowledgeFormationResult(ApiModel):
+    build_id: str = Field(default_factory=lambda: str(uuid4()))
+    run_id: str
+    document_package_id: str
+    status: Literal["completed", "failed"] = "completed"
+    entities: list[ResolvedBusinessEntity]
+    knowledge_objects: list[FormalKnowledgeObject]
+    stages: list[KnowledgeFormationStage]
+    created_count: int
+    updated_count: int
+    reused_count: int
+    formal_knowledge_files: int

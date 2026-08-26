@@ -11,7 +11,12 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from .models import DocumentPackage, SourceMaterial
+from .formalizer import ExistingKnowledgeObjectState
+from .models import (
+    DocumentPackage,
+    KnowledgeFormationResult,
+    SourceMaterial,
+)
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
@@ -196,6 +201,157 @@ class PsycopgIdentificationRepository:
         if not report_path.is_file():
             raise IdentificationRecordNotFound(document_package_id)
         return report_path.read_text(encoding="utf-8")
+
+    def get_existing_entity_ids(self, entity_ids: set[str]) -> set[str]:
+        if not entity_ids:
+            return set()
+        with psycopg.connect(self.postgres_dsn, row_factory=dict_row) as connection:
+            rows = connection.execute(
+                "SELECT entity_id FROM business_entities WHERE entity_id = ANY(%s)",
+                (list(entity_ids),),
+            ).fetchall()
+        return {row["entity_id"] for row in rows}
+
+    def get_existing_object_states(
+        self, object_ids: set[str]
+    ) -> dict[str, ExistingKnowledgeObjectState]:
+        if not object_ids:
+            return {}
+        with psycopg.connect(self.postgres_dsn, row_factory=dict_row) as connection:
+            rows = connection.execute(
+                """
+                SELECT knowledge_object_id, revision, content_fingerprint
+                FROM knowledge_objects
+                WHERE knowledge_object_id = ANY(%s)
+                """,
+                (list(object_ids),),
+            ).fetchall()
+        return {
+            row["knowledge_object_id"]: ExistingKnowledgeObjectState(
+                revision=row["revision"],
+                content_fingerprint=row["content_fingerprint"],
+            )
+            for row in rows
+        }
+
+    def save_knowledge_formation(
+        self,
+        *,
+        workspace_id: str,
+        formation: KnowledgeFormationResult,
+    ) -> None:
+        with psycopg.connect(self.postgres_dsn) as connection:
+            for entity in formation.entities:
+                connection.execute(
+                    """
+                    INSERT INTO business_entities (
+                        entity_id, workspace_id, entity_type, canonical_name, source_mentions
+                    ) VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (entity_id) DO UPDATE SET
+                        canonical_name = EXCLUDED.canonical_name,
+                        source_mentions = EXCLUDED.source_mentions,
+                        updated_at = NOW()
+                    """,
+                    (
+                        entity.entity_id,
+                        workspace_id,
+                        entity.entity_type,
+                        entity.canonical_name,
+                        Jsonb(entity.source_mentions),
+                    ),
+                )
+            for item in formation.knowledge_objects:
+                connection.execute(
+                    """
+                    INSERT INTO knowledge_objects (
+                        knowledge_object_id, workspace_id, revision, domain, module,
+                        object_type, title, identity_key, content_fingerprint, content,
+                        entity_references, evidence, file_path, file_sha256
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    )
+                    ON CONFLICT (knowledge_object_id) DO UPDATE SET
+                        revision = EXCLUDED.revision,
+                        domain = EXCLUDED.domain,
+                        module = EXCLUDED.module,
+                        object_type = EXCLUDED.object_type,
+                        title = EXCLUDED.title,
+                        identity_key = EXCLUDED.identity_key,
+                        content_fingerprint = EXCLUDED.content_fingerprint,
+                        content = EXCLUDED.content,
+                        entity_references = EXCLUDED.entity_references,
+                        evidence = EXCLUDED.evidence,
+                        file_path = EXCLUDED.file_path,
+                        file_sha256 = EXCLUDED.file_sha256,
+                        updated_at = NOW()
+                    """,
+                    (
+                        item.knowledge_object_id,
+                        workspace_id,
+                        item.revision,
+                        item.domain,
+                        item.module,
+                        item.object_type,
+                        item.title,
+                        item.identity_key,
+                        item.content_fingerprint,
+                        Jsonb(item.content),
+                        Jsonb(
+                            [
+                                reference.model_dump(mode="json", by_alias=True)
+                                for reference in item.entity_references
+                            ]
+                        ),
+                        Jsonb(item.evidence),
+                        item.file_path,
+                        item.file_sha256,
+                    ),
+                )
+                for candidate_id in item.source_candidate_ids:
+                    connection.execute(
+                        """
+                        INSERT INTO knowledge_object_sources (
+                            knowledge_object_id, document_package_id, candidate_id, evidence
+                        ) VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (knowledge_object_id, document_package_id, candidate_id)
+                        DO UPDATE SET evidence = EXCLUDED.evidence
+                        """,
+                        (
+                            item.knowledge_object_id,
+                            formation.document_package_id,
+                            candidate_id,
+                            Jsonb(item.evidence),
+                        ),
+                    )
+            serialized = formation.model_dump(mode="json", by_alias=True)
+            connection.execute(
+                """
+                INSERT INTO knowledge_build_results (
+                    build_id, run_id, document_package_id, status, result_json
+                ) VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (run_id) DO UPDATE SET
+                    build_id = EXCLUDED.build_id,
+                    status = EXCLUDED.status,
+                    result_json = EXCLUDED.result_json
+                """,
+                (
+                    formation.build_id,
+                    formation.run_id,
+                    formation.document_package_id,
+                    formation.status,
+                    Jsonb(serialized),
+                ),
+            )
+
+    def get_knowledge_formation(self, run_id: str) -> dict[str, Any]:
+        with psycopg.connect(self.postgres_dsn, row_factory=dict_row) as connection:
+            row = connection.execute(
+                "SELECT result_json FROM knowledge_build_results WHERE run_id = %s",
+                (run_id,),
+            ).fetchone()
+        if row is None:
+            raise IdentificationRecordNotFound(run_id)
+        return row["result_json"]
 
     def _resolve_workspace_path(self, relative_path: str) -> Path:
         path = (self.project_root / relative_path).resolve()

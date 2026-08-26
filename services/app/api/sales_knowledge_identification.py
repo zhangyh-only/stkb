@@ -20,9 +20,13 @@ from app.features.sales_knowledge_identification.catalog import (
     KNOWLEDGE_MODULES,
     MODULE_SCOPE_DEFINITIONS,
 )
+from app.features.sales_knowledge_identification.formalizer import (
+    KnowledgeObjectFormationService,
+)
 from app.features.sales_knowledge_identification.models import (
     DocumentPackage,
     IdentificationResult,
+    KnowledgeFormationResult,
     ModelConfigurationSnapshot,
     SourceMaterial,
     to_camel,
@@ -117,6 +121,11 @@ def get_model_gateway() -> ModelGateway:
     )
 
 
+@lru_cache
+def get_knowledge_formation_service() -> KnowledgeObjectFormationService:
+    return KnowledgeObjectFormationService(project_root=PROJECT_ROOT)
+
+
 @router.get(
     "/source-materials",
     response_model=list[SourceMaterial],
@@ -188,6 +197,53 @@ def run_identification(
     serialized = result.model_dump(mode="json", by_alias=True)
     repository.save_run(serialized)
     return result
+
+
+@router.post(
+    "/runs/{run_id}/knowledge-objects",
+    response_model=KnowledgeFormationResult,
+)
+def form_knowledge_objects(
+    run_id: str,
+    repository: Annotated[PsycopgIdentificationRepository, Depends(get_identification_repository)],
+    service: Annotated[
+        KnowledgeObjectFormationService, Depends(get_knowledge_formation_service)
+    ],
+) -> KnowledgeFormationResult:
+    try:
+        identification = IdentificationResult.model_validate(repository.get_run(run_id))
+        package = repository.get_document_package(identification.document_package_id)
+    except IdentificationRecordNotFound as error:
+        raise HTTPException(status_code=404, detail="identification run not found") from error
+    if identification.status != "completed":
+        raise HTTPException(status_code=409, detail="identification run is not completed")
+    entity_ids = service.candidate_entity_ids(package.workspace_id, identification.candidates)
+    object_ids = service.candidate_object_ids(package.workspace_id, identification.candidates)
+    formation = service.form(
+        document_package=package,
+        identification=identification,
+        existing_entities=repository.get_existing_entity_ids(entity_ids),
+        existing_objects=repository.get_existing_object_states(object_ids),
+    )
+    repository.save_knowledge_formation(
+        workspace_id=package.workspace_id,
+        formation=formation,
+    )
+    return formation
+
+
+@router.get(
+    "/runs/{run_id}/knowledge-objects",
+    response_model=KnowledgeFormationResult,
+)
+def knowledge_formation(
+    run_id: str,
+    repository: Annotated[PsycopgIdentificationRepository, Depends(get_identification_repository)],
+) -> dict[str, object]:
+    try:
+        return repository.get_knowledge_formation(run_id)
+    except IdentificationRecordNotFound as error:
+        raise HTTPException(status_code=404, detail="knowledge formation not found") from error
 
 
 @router.get("/runs", response_model=list[IdentificationResult])

@@ -242,6 +242,8 @@ def test_identification_accepts_only_candidates_with_valid_catalog_and_evidence(
     assert result.coverage_by_module["D1.1"] == "not_found"
     assert result.call_count == 1
     assert len(result.catalog_fingerprint) == 64
+    assert result.model_calls[0].system_prompt == gateway.requests[0].system_prompt
+    assert result.model_calls[0].user_prompt == gateway.requests[0].user_prompt
     assert gateway.requests[0].document_package_id == "DP-TEST"
     assert "22个知识内容模块" in gateway.requests[0].system_prompt
     assert "对象边界与分类裁决" in gateway.requests[0].system_prompt

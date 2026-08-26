@@ -555,6 +555,8 @@ class SalesKnowledgeIdentificationService:
                         status="failed",
                         duration_ms=round((perf_counter() - started) * 1000),
                         error=str(error),
+                        system_prompt=request.system_prompt,
+                        user_prompt=request.user_prompt,
                     )
                 )
                 if retry_index == self.max_retries:
@@ -568,6 +570,8 @@ class SalesKnowledgeIdentificationService:
                     duration_ms=round((perf_counter() - started) * 1000),
                     prompt_tokens=completion.prompt_tokens,
                     completion_tokens=completion.completion_tokens,
+                    system_prompt=request.system_prompt,
+                    user_prompt=request.user_prompt,
                     raw_output=completion.content,
                     finish_reason=completion.finish_reason,
                 )

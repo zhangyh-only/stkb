@@ -6,6 +6,10 @@ from fastapi.testclient import TestClient
 from app.api import sales_knowledge_identification as identification_api
 from app.api.sales_knowledge_identification import (
     get_identification_repository,
+    get_knowledge_formation_service,
+)
+from app.features.sales_knowledge_identification.formalizer import (
+    KnowledgeObjectFormationService,
 )
 from app.features.sales_knowledge_identification.models import (
     DocumentPackage,
@@ -23,6 +27,7 @@ class InMemoryRepository:
     def __init__(self, document_package: DocumentPackage) -> None:
         self.document_package = document_package
         self.runs: dict[str, dict[str, object]] = {}
+        self.formations: dict[str, dict[str, object]] = {}
 
     def get_document_package(self, document_package_id: str) -> DocumentPackage:
         assert document_package_id == self.document_package.document_package_id
@@ -53,6 +58,18 @@ class InMemoryRepository:
     def get_evaluation_report(self, document_package_id: str) -> str:
         assert document_package_id == self.document_package.document_package_id
         return "# 代理评估\n\n节点机制阶段通过。"
+
+    def get_existing_entity_ids(self, entity_ids: set[str]) -> set[str]:
+        return set()
+
+    def get_existing_object_states(self, object_ids: set[str]) -> dict[str, object]:
+        return {}
+
+    def save_knowledge_formation(self, *, workspace_id: str, formation) -> None:  # type: ignore[no-untyped-def]
+        self.formations[formation.run_id] = formation.model_dump(mode="json", by_alias=True)
+
+    def get_knowledge_formation(self, run_id: str) -> dict[str, object]:
+        return self.formations[run_id]
 
 
 class ApiStubGateway:
@@ -93,6 +110,7 @@ class NoEvaluationRepository(InMemoryRepository):
 
 def test_api_runs_identification_and_reads_the_saved_result(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     document_package = DocumentPackage(
         document_package_id="DP-API",
@@ -109,6 +127,9 @@ def test_api_runs_identification_and_reads_the_saved_result(
     )
     repository = InMemoryRepository(document_package)
     app.dependency_overrides[get_identification_repository] = lambda: repository
+    app.dependency_overrides[get_knowledge_formation_service] = lambda: (
+        KnowledgeObjectFormationService(project_root=tmp_path)
+    )
     monkeypatch.setattr(identification_api, "get_model_gateway", lambda: ApiStubGateway())
     client = TestClient(app)
 
@@ -125,6 +146,9 @@ def test_api_runs_identification_and_reads_the_saved_result(
             json={"documentPackageId": "DP-API"},
         )
         run_id = run_response.json()["runId"]
+        formation_response = client.post(
+            f"/api/sales-knowledge-identification/runs/{run_id}/knowledge-objects"
+        )
         saved_response = client.get(f"/api/sales-knowledge-identification/runs/{run_id}")
         history_response = client.get(
             "/api/sales-knowledge-identification/runs",
@@ -157,6 +181,12 @@ def test_api_runs_identification_and_reads_the_saved_result(
     assert run_response.json()["status"] == "completed"
     assert run_response.json()["modelConfiguration"]["documentMaxChars"] == 3500
     assert run_response.json()["candidates"][0]["candidateId"] == "C1"
+    assert formation_response.status_code == 200
+    assert formation_response.json()["status"] == "completed"
+    assert formation_response.json()["createdCount"] == 1
+    assert formation_response.json()["knowledgeObjects"][0]["knowledgeObjectId"].startswith(
+        "KO-"
+    )
     assert saved_response.status_code == 200
     assert saved_response.json() == run_response.json()
     assert history_response.status_code == 200
