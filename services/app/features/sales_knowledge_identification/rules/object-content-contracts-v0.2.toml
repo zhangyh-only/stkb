@@ -1,0 +1,243 @@
+version = "object-content-contracts-v0.2"
+
+[[contracts]]
+module = "D1.1"
+object_types = ["PRODUCT_FACT", "PRODUCT_VERSION_FACT", "PRODUCT_COMPONENT_FACT"]
+required_fields = ["subject", "facts", "applicability", "limitations"]
+minimum_content_chars = 220
+granularity = "同一产品或版本、同一事实主题、适用范围和更新生命周期共同构成一项对象；参数不能逐字段拆对象。"
+inclusion = "具有明确产品或版本主体、可核验参数/责任/服务权益及来源证据。"
+exclusion = "销售建议、营销表达、客户反应、无版本或时点依据的宣传结论。"
+positive_example = "一个版本的保费、承保年龄、责任、限额、赔付比例及限制按主题聚合。"
+negative_example = "只输出‘产品保障全面’或把每个保额数字单独建对象。"
+
+[[contracts]]
+module = "D1.2"
+object_types = ["LIST_FACT", "LIST_ITEM_FACT", "ELIGIBILITY_FACT"]
+required_fields = ["listName", "versionScope", "entryStructure", "conditions"]
+minimum_content_chars = 180
+granularity = "以可独立查询和版本管理的清单为对象，成员是内部结构，不默认逐项建知识对象。"
+inclusion = "药品、疾病、机构、服务项目等明确集合及纳入/排除/资格条件。"
+exclusion = "销售客户名单、普通枚举、没有集合身份和版本范围的零散条目。"
+positive_example = "某产品版本适用的药品清单，保留清单范围、版本和成员结构。"
+negative_example = "因为出现‘名单’二字就把销售线索分类规则归入清单事实。"
+
+[[contracts]]
+module = "D1.3"
+object_types = ["POLICY_RULE_SET", "BUSINESS_PROCESS", "PROCESS_STEP"]
+required_fields = ["purpose", "preconditions", "rulesOrSteps", "exceptions"]
+minimum_content_chars = 220
+granularity = "同一业务目的、参与角色和完成边界下的规则/步骤形成一项对象；步骤默认保留在流程内部。"
+inclusion = "投保、核保、理赔、退保、续保或服务使用的条件、步骤、例外和完成结果。"
+exclusion = "销售阶段、实时会话状态、缺少业务办理目标的动作建议。"
+positive_example = "在线问诊购药流程包含入口、信息确认、医生问诊、支付和配送。"
+negative_example = "只写‘线上问诊很方便’或把每一步拆成独立对象。"
+
+[[contracts]]
+module = "D1.4"
+object_types = ["COMPETITOR_FACT", "COMPARISON_SNAPSHOT"]
+required_fields = ["subjects", "dimensions", "effectiveTime", "evidence"]
+minimum_content_chars = 180
+granularity = "同一对比主体、维度集合和有效时点构成对比快照。"
+inclusion = "有双方主体、同维度事实、证据和时点的客观比较。"
+exclusion = "主观贬损、无来源优劣判断、把历史差异写成永久事实。"
+positive_example = "在明确日期比较两款产品的保费、责任和限制。"
+negative_example = "竞品不如我们。"
+
+[[contracts]]
+module = "D2.1"
+object_types = ["PROFILE_DIMENSION", "PROFILE_DIMENSION_VALUE"]
+required_fields = ["dimensionName", "businessMeaning", "allowedValues", "usage"]
+minimum_content_chars = 160
+granularity = "一个可稳定复用的客户区分维度及其受控值域构成对象。"
+inclusion = "能支持画像、策略或评价的稳定客户维度。"
+exclusion = "单个客户临时状态、一次对话标签、无法复用的任意形容词。"
+positive_example = "价格敏感度维度及高/中/低值的业务含义。"
+negative_example = "客户今天有点着急。"
+
+[[contracts]]
+module = "D2.2"
+object_types = ["CUSTOMER_PROFILE", "PROFILE_BACKGROUND_FACT", "ROLEPLAY_RULE"]
+required_fields = ["profileName", "stableTraits", "decisionStyle", "behaviorBoundary"]
+minimum_content_chars = 240
+granularity = "一组稳定特征、决策方式和反应边界共同构成可复用画像。"
+inclusion = "有稳定特征组合、关注点、决策风格和可复用反应边界。"
+exclusion = "某次会话情绪、临时任务配置、只含人口属性的薄标签。"
+positive_example = "价敏客户画像包含关注点、决策逻辑、典型异议和行为边界。"
+negative_example = "客户：男性，35岁。"
+
+[[contracts]]
+module = "D2.3"
+object_types = ["CUSTOMER_NEED", "PAIN_POINT", "PURCHASE_MOTIVATION", "URGENCY_RULE"]
+required_fields = ["subject", "needOrMotivation", "context", "observableEvidence"]
+minimum_content_chars = 180
+granularity = "同一根本需求/动因、适用上下文和可观察证据形成对象；表象与根因需区分。"
+inclusion = "资料明确支持的问题、痛点、购买原因或紧迫判断。"
+exclusion = "从单一行为或培训谚语臆测客户心理根因、产品卖点本身、销售应对动作。"
+positive_example = "异地医保父母对便捷问诊购药的需求及其证据。"
+negative_example = "客户提异议，所以一定想买。"
+
+[[contracts]]
+module = "D2.4"
+object_types = ["PERSUASION_TRIGGER", "TRUST_TRIGGER", "REJECTION_TRIGGER", "RESPONSE_PATTERN"]
+required_fields = ["trigger", "conditions", "responsePattern", "evidenceScope"]
+minimum_content_chars = 180
+granularity = "同一触发条件、适用人群/场景和稳定反应模式形成对象。"
+inclusion = "跨证据支持的兴趣、信任或排斥触发机制。"
+exclusion = "一次偶然反应、销售话术文本、培训谚语或缺少客户研究证据的泛化心理判断。"
+positive_example = "对异地父母就医不便的描述在特定家庭照护场景下触发便利性关注。"
+negative_example = "依据‘嫌货才是买货人’断言提出异议的客户一定具有购买意愿。"
+
+[[contracts]]
+module = "D2.5"
+object_types = ["DECISION_ROLE", "INFLUENCE_RELATION", "ROLE_CONCERN"]
+required_fields = ["roleName", "decisionAuthority", "concerns", "influenceContext"]
+minimum_content_chars = 180
+granularity = "稳定决策角色及其权责、关注点和影响关系形成对象。"
+inclusion = "家庭或组织采购中的决策者、影响者、使用者及稳定关注点。"
+exclusion = "个人姓名、一次对话发言者、没有决策语义的普通角色。"
+positive_example = "家庭健康险购买中的付款者、使用者与影响者角色。"
+negative_example = "张三说价格贵，所以张三是决策者。"
+
+[[contracts]]
+module = "D3.1"
+object_types = ["SALES_SCENARIO", "SALES_STAGE", "STAGE_TRANSITION_RULE", "STAGE_COMPLETION_MARKER"]
+required_fields = ["name", "businessGoal", "entryConditions", "structure", "completionCriteria"]
+minimum_content_chars = 240
+granularity = "一个稳定销售场景骨架或阶段身份及其进入、推进、完成边界形成对象。"
+inclusion = "明确场景/阶段、目标、转移条件和到位标志。"
+exclusion = "某次会话当前阶段、特定条件下的单一行动建议、产品组合方案。"
+positive_example = "报价阶段包含进入条件、核心目标、关键动作和完成标志。"
+negative_example = "客户说贵时先解释价值。"
+
+[[contracts]]
+module = "D3.2"
+object_types = ["SALES_TECHNIQUE", "METHOD_STEP", "APPLICABILITY_CONDITION"]
+required_fields = ["techniqueName", "purpose", "mechanism", "steps", "applicability"]
+minimum_content_chars = 240
+granularity = "可跨产品/场景复用的完整方法及其机制、步骤和适用条件形成对象。"
+inclusion = "有方法目标、作用机制、执行步骤和跨材料支持。"
+exclusion = "产品专属策略、孤立话术、单个案例自动提升的通用方法。"
+positive_example = "LSCPA异议处理法包含各步骤目标、动作和适用条件。"
+negative_example = "嫌货才是买货人。"
+
+[[contracts]]
+module = "D3.3"
+object_types = ["SALES_STRATEGY", "DECISION_RULE", "NEXT_BEST_ACTION", "CLARIFYING_QUESTION"]
+required_fields = ["strategyName", "triggerConditions", "decisionLogic", "actions", "applicability"]
+minimum_content_chars = 240
+granularity = "同一适用上下文、判断逻辑和行动目标下的一组策略动作形成对象。"
+inclusion = "明确条件、判断、优先动作、适用产品/场景和退出条件。"
+exclusion = "纯产品事实、通用技巧、完整话术文本、无条件的营销口号。"
+positive_example = "忙碌上班族场景下基于时间成本判断并推荐线上问诊保障。"
+negative_example = "强调产品性价比。"
+
+[[contracts]]
+module = "D3.4"
+object_types = ["COMPLIANCE_RULE", "PROHIBITED_EXPRESSION", "RISK_PATTERN", "COMPLIANT_REWRITE_GUIDE"]
+required_fields = ["ruleName", "prohibitedOrRequiredBehavior", "legalOrPolicyBasis", "applicability", "compliantAction"]
+minimum_content_chars = 240
+granularity = "同一合规主题、依据、适用范围和正确做法形成对象。"
+inclusion = "有监管/制度依据的禁止、要求、风险模式及合规处理。"
+exclusion = "无依据经验、一次投诉结果、只写禁止但没有适用范围或正确做法。"
+positive_example = "返利合规规则包含禁止行为、监管依据、触发场景和正确应对。"
+negative_example = "不要乱说话。"
+
+[[contracts]]
+module = "D4.1"
+object_types = ["STANDARD_SCRIPT", "SCRIPT_VARIANT"]
+required_fields = ["communicationGoal", "applicability", "script", "factReferences", "complianceConstraints"]
+minimum_content_chars = 260
+granularity = "同一沟通目标、策略方法和适用范围下的主话术及表达变体形成对象。"
+inclusion = "有明确目标、上下文、完整可复用表达、事实依据和合规边界。"
+exclusion = "把多种客群/目标/策略的话术压成摘要，或把原始案例原话直接发布。"
+positive_example = "针对忙碌上班族的药享保引入话术，保留目标、适用条件、完整表达和事实引用。"
+negative_example = "包含尊享版、全能版等多种话术。"
+
+[[contracts]]
+module = "D4.2"
+object_types = ["CUSTOMER_OBJECTION", "ROOT_CONCERN_HYPOTHESIS", "RESOLUTION_ELEMENT"]
+required_fields = ["objectionTheme", "expressions", "context", "rootConcernHypotheses", "resolutionElements"]
+minimum_content_chars = 220
+granularity = "同一根本关切和处理方向的异议表达变体形成对象；不同关切不得压成一个异议库摘要。"
+inclusion = "有具体客户表达、规范异议主题、可能根因和化解要素。"
+exclusion = "只讲异议的泛化认知、完整应对话术、将多类异议压成编号摘要。"
+positive_example = "‘价格贵’异议对象包含表达变体、出现上下文、根因假设和化解要素。"
+negative_example = "常见异议包括价格贵、没需要、考虑一下。"
+
+[[contracts]]
+module = "D4.3"
+object_types = ["QA_PAIR", "TERM", "STANDARD_EXPLANATION"]
+required_fields = ["items", "factReferences", "applicability"]
+minimum_content_chars = 180
+granularity = "同一主题和事实依据下可一起更新、检索的一组问答或术语形成对象；跨主题应拆分。"
+inclusion = "具体问题、销售术语或谚语，以及对应标准答案/解释、事实引用和适用范围。"
+exclusion = "只列问题主题摘要、答案无事实依据、跨多个独立主题的大杂烩。"
+positive_example = "在线问诊问答组保留question、answer和依据；销售谚语对象保留termText、standardExplanation和适用语境。"
+negative_example = "常见问题包括药品、价格、问诊和发票。"
+
+[[contracts]]
+module = "D4.4"
+object_types = ["SALES_CASE", "KEY_EVENT", "CASE_OUTCOME", "SUCCESS_FAILURE_CAUSE", "LESSON_LEARNED"]
+required_fields = ["caseContext", "participants", "events", "outcome", "lessons", "evidenceLimit"]
+minimum_content_chars = 260
+granularity = "同一真实/教学案例的上下文、事件链、结果和经验形成对象。"
+inclusion = "具有明确上下文、有序关键事件、结果和有证据范围的经验。"
+exclusion = "单句轶事、没有结果的片段、把单案例结论直接当通用规则。"
+positive_example = "一次续保案例包含客户背景、关键对话事件、结果、成败原因和适用限制。"
+negative_example = "小X买了以后觉得很方便。"
+
+[[contracts]]
+module = "D4.5"
+object_types = ["SALES_MATERIAL", "SCRIPT_CARD", "MICRO_LESSON_CARD"]
+required_fields = ["assetName", "contentSummary", "applicability", "knowledgeReferences", "deliveryFormat"]
+minimum_content_chars = 180
+granularity = "一个可独立分发或编排的物料/卡片及其适用范围形成对象。"
+inclusion = "有稳定资产身份、内容摘要、交付形态、适用范围和知识引用。"
+exclusion = "原始文件本身、没有分发价值的文档片段、把多个独立课程压成一个对象。"
+positive_example = "药享保销售卡包含用途、适用客群、引用知识和展示格式。"
+negative_example = "这是一份PPT。"
+
+[[contracts]]
+module = "D5.1"
+object_types = ["SELLING_POINT", "CHECK_UNIT", "TRIGGER_CONDITION"]
+required_fields = ["name", "customerValue", "factReferences", "triggerConditions", "observableChecks"]
+minimum_content_chars = 200
+granularity = "同一客户价值主张、事实依据和触发/检测条件形成对象。"
+inclusion = "由D1事实支撑、能匹配客户条件并可观察验证的卖点或检测点。"
+exclusion = "无事实依据营销口号、产品参数照抄、具体销售策略。"
+positive_example = "线上购药直赔卖点包含客户价值、产品事实、适用客群和表达检测点。"
+negative_example = "方便快捷、性价比高。"
+
+[[contracts]]
+module = "D5.2"
+object_types = ["COMPETENCY_DIMENSION", "BEHAVIOR_ANCHOR", "PROFICIENCY_LEVEL"]
+required_fields = ["dimensionName", "capabilityDefinition", "observableBehaviors", "levels", "applicableScenarios"]
+minimum_content_chars = 240
+granularity = "一个稳定能力维度及其可观察行为和等级标准形成对象。"
+inclusion = "跨场景稳定的能力本质、行为锚点和等级差异。"
+exclusion = "某学员当前分数、一次会话表现、只含抽象能力名称。"
+positive_example = "需求挖掘能力包含定义、好坏分水岭、行为锚点和等级标准。"
+negative_example = "沟通能力：优秀。"
+
+[[contracts]]
+module = "D5.3"
+object_types = ["EVALUATION_METRIC", "SCORING_RULE", "EVIDENCE_REQUIREMENT", "TOLERANCE_RULE"]
+required_fields = ["evaluationTarget", "criteria", "evidenceRequirements", "scoringLogic", "tolerance"]
+minimum_content_chars = 240
+granularity = "同一评价目标、证据要求和评分逻辑形成对象；运行分数不进入规则对象。"
+inclusion = "可操作的评价目标、判断标准、证据和宽容边界。"
+exclusion = "某次分数、机械关键词命中、无证据的主观评价。"
+positive_example = "异议处理评分规则定义评价目标、优秀/不足标准、证据要求和严重错误。"
+negative_example = "说到产品卖点得10分。"
+
+[[contracts]]
+module = "D5.4"
+object_types = ["EVALUATION_BENCHMARK", "GOLDEN_SAMPLE", "REGRESSION_PROBE", "ACCEPTANCE_CHECKLIST"]
+required_fields = ["benchmarkName", "targetVersion", "inputs", "expectedResults", "checks"]
+minimum_content_chars = 220
+granularity = "同一验证目标、绑定版本、样本集合和检查标准形成对象。"
+inclusion = "有稳定输入证据、预期结果、检查项和被验证版本。"
+exclusion = "未经确认的生产记录、只有输入没有预期、脱离版本的永久答案。"
+positive_example = "药享保产品识别回归集绑定规则版本、输入资料、预期对象和禁止项。"
+negative_example = "用这份资料测试一下。"

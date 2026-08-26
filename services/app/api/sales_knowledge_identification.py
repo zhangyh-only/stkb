@@ -20,6 +20,10 @@ from app.features.sales_knowledge_identification.catalog import (
     KNOWLEDGE_MODULES,
     MODULE_SCOPE_DEFINITIONS,
 )
+from app.features.sales_knowledge_identification.content_contracts import (
+    CONTENT_CONTRACT_BY_MODULE,
+    CONTENT_CONTRACT_VERSION,
+)
 from app.features.sales_knowledge_identification.formalizer import (
     KnowledgeObjectFormationService,
 )
@@ -57,6 +61,7 @@ def identification_catalog() -> dict[str, object]:
         "fingerprint": CATALOG_FINGERPRINT,
         "status": CATALOG_STATUS,
         "source": CATALOG_SOURCE,
+        "contentContractVersion": CONTENT_CONTRACT_VERSION,
         "scopeDefinitions": MODULE_SCOPE_DEFINITIONS,
         "domains": [
             {
@@ -81,6 +86,21 @@ def identification_catalog() -> dict[str, object]:
                 "boundary": module.boundary,
                 "sources": module.sources,
                 "consumers": module.consumers,
+                "contentContract": {
+                    "requiredFields": CONTENT_CONTRACT_BY_MODULE[module.code].required_fields,
+                    "minimumContentChars": CONTENT_CONTRACT_BY_MODULE[
+                        module.code
+                    ].minimum_content_chars,
+                    "granularity": CONTENT_CONTRACT_BY_MODULE[module.code].granularity,
+                    "inclusion": CONTENT_CONTRACT_BY_MODULE[module.code].inclusion,
+                    "exclusion": CONTENT_CONTRACT_BY_MODULE[module.code].exclusion,
+                    "positiveExample": CONTENT_CONTRACT_BY_MODULE[
+                        module.code
+                    ].positive_example,
+                    "negativeExample": CONTENT_CONTRACT_BY_MODULE[
+                        module.code
+                    ].negative_example,
+                },
             }
             for module in KNOWLEDGE_MODULES
         ],

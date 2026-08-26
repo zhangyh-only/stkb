@@ -15,6 +15,7 @@ from .catalog import (
     MODULE_BY_CODE,
     validate_candidate_classification,
 )
+from .content_contracts import validate_candidate_content
 from .models import (
     CandidateKnowledgeObject,
     CandidateNormalization,
@@ -279,6 +280,13 @@ class SalesKnowledgeIdentificationService:
 
             reasons = validate_candidate_classification(
                 candidate.domain, candidate.module, candidate.object_type
+            )
+            reasons.extend(
+                validate_candidate_content(
+                    candidate.module,
+                    candidate.object_type,
+                    candidate.content,
+                )
             )
             if not candidate.title.strip():
                 reasons.append("candidate title is required")

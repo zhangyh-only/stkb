@@ -8,6 +8,9 @@ from app.api.sales_knowledge_identification import (
     get_identification_repository,
     get_knowledge_formation_service,
 )
+from app.features.sales_knowledge_identification.content_contracts import (
+    CONTENT_CONTRACT_BY_MODULE,
+)
 from app.features.sales_knowledge_identification.formalizer import (
     KnowledgeObjectFormationService,
 )
@@ -89,7 +92,9 @@ class ApiStubGateway:
                             "domain": "D1",
                             "module": "D1.1",
                             "objectType": "PRODUCT_FACT",
-                            "content": {"summary": "药享保提供在线问诊服务"},
+                            "content": _api_contract_content(
+                                "D1.1", "药享保提供在线问诊服务"
+                            ),
                             "entityMentions": [],
                             "evidence": ["DP-API#page-1"],
                             "relations": [],
@@ -106,6 +111,17 @@ class ApiStubGateway:
 class NoEvaluationRepository(InMemoryRepository):
     def get_evaluation_report(self, document_package_id: str) -> str:
         raise IdentificationRecordNotFound(document_package_id)
+
+
+def _api_contract_content(module: str, summary: str) -> dict[str, object]:
+    contract = CONTENT_CONTRACT_BY_MODULE[module]
+    content: dict[str, object] = {
+        field: f"测试字段 {field}"
+        for field in contract.required_fields
+    }
+    content["summary"] = summary
+    content["contractDetail"] = "用于验证内容合同的结构化测试详情。" * 20
+    return content
 
 
 def test_api_runs_identification_and_reads_the_saved_result(
@@ -177,6 +193,12 @@ def test_api_runs_identification_and_reads_the_saved_result(
     assert len(catalog_response.json()["domains"]) == 5
     assert catalog_response.json()["domains"][0]["question"] == "卖什么"
     assert set(catalog_response.json()["scopeDefinitions"]) == {"core", "optional"}
+    assert catalog_response.json()["contentContractVersion"] == (
+        "object-content-contracts-v0.2"
+    )
+    assert catalog_response.json()["modules"][0]["contentContract"][
+        "requiredFields"
+    ]
     assert run_response.status_code == 200
     assert run_response.json()["status"] == "completed"
     assert run_response.json()["modelConfiguration"]["documentMaxChars"] == 3500

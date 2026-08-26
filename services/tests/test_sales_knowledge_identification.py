@@ -1,7 +1,11 @@
 import json
+from copy import deepcopy
 
 import pytest
 
+from app.features.sales_knowledge_identification.content_contracts import (
+    CONTENT_CONTRACT_BY_MODULE,
+)
 from app.features.sales_knowledge_identification.models import (
     DocumentPackage,
     ModelCompletion,
@@ -17,7 +21,20 @@ from app.features.sales_knowledge_identification.service import (
 
 class StubModelGateway:
     def __init__(self, payload: dict[str, object]) -> None:
-        self.payload = payload
+        self.payload = deepcopy(payload)
+        for candidate in self.payload.get("candidates", []):
+            if not isinstance(candidate, dict):
+                continue
+            module = candidate.get("module")
+            if (
+                isinstance(module, str)
+                and module in CONTENT_CONTRACT_BY_MODULE
+                and candidate.get("candidateId") != "C-INCOMPLETE"
+            ):
+                candidate["content"] = _contract_content(
+                    module,
+                    candidate.get("content", {}),
+                )
         self.requests: list[ModelRequest] = []
 
     def complete(self, request: ModelRequest) -> ModelCompletion:
@@ -117,7 +134,7 @@ class SegmentAwareGateway:
                             "domain": module.split(".")[0],
                             "module": module,
                             "objectType": object_type,
-                            "content": {"summary": anchor},
+                            "content": _contract_content(module, {"summary": anchor}),
                             "entityMentions": [],
                             "evidence": [anchor],
                             "relations": [],
@@ -145,7 +162,9 @@ class CrossSegmentEvidenceGateway:
                     "domain": "D1",
                     "module": "D1.1",
                     "objectType": "PRODUCT_FACT",
-                    "content": {"summary": "错误引用另一分段"},
+                    "content": _contract_content(
+                        "D1.1", {"summary": "错误引用另一分段"}
+                    ),
                     "entityMentions": [],
                     "evidence": ["DP-CROSS#page-2"],
                     "relations": [],
@@ -158,6 +177,18 @@ class CrossSegmentEvidenceGateway:
                 {"candidates": candidates, "weakSignals": [], "unresolvedItems": []}
             ),
         )
+
+
+def _contract_content(module: str, original: object) -> dict[str, object]:
+    contract = CONTENT_CONTRACT_BY_MODULE[module]
+    content = {
+        field: f"测试字段 {field}"
+        for field in contract.required_fields
+    }
+    if isinstance(original, dict):
+        content.update(original)
+    content["contractDetail"] = "用于验证内容合同的结构化测试详情。" * 20
+    return content
 
 
 def test_identification_accepts_only_candidates_with_valid_catalog_and_evidence() -> None:
@@ -443,7 +474,9 @@ def test_identification_uses_an_explicit_repair_call_for_invalid_json() -> None:
                 "domain": "D1",
                 "module": "D1.1",
                 "objectType": "PRODUCT_FACT",
-                "content": {"summary": "药享保提供在线问诊"},
+                "content": _contract_content(
+                    "D1.1", {"summary": "药享保提供在线问诊"}
+                ),
                 "entityMentions": [],
                 "evidence": ["DP-REPAIR#page-1"],
                 "relations": [],

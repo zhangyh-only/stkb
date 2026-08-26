@@ -1,8 +1,9 @@
 from .catalog import render_catalog_for_prompt
+from .content_contracts import render_content_contracts_for_prompt
 from .models import DocumentPackage, ModelRequest
 
-PROMPT_VERSION = "sales-identification-v0.3"
-SCHEMA_VERSION = "candidate-knowledge-object-v0.2"
+PROMPT_VERSION = "sales-identification-v0.4"
+SCHEMA_VERSION = "candidate-knowledge-object-v0.3"
 
 
 def build_model_request(
@@ -33,9 +34,14 @@ def build_model_request(
     身份线索只描述后续归并需要比较的业务维度，不能创建正式 ID。
 12. classificationBasis 只说明引用了哪项模块职责和边界，不输出隐藏推理过程；
     objectBoundary 说明为什么这些内容应作为一项对象共同更新和复用。
+13. content 必须严格满足所选模块的内容合同，不能只输出 summary；资料未提供必填信息时，
+    应缩小对象范围或放入 unresolvedItems，不能用空值、常识或泛化描述补齐。
 
 当前 D1-D5 / 22个知识内容模块识别规则包：
 {render_catalog_for_prompt()}
+
+当前22个模块的对象内容合同：
+{render_content_contracts_for_prompt()}
 
 输出对象形态：
 {{
@@ -48,7 +54,12 @@ def build_model_request(
     "objectBoundary": "共享同一业务身份、适用范围和更新生命周期，因此作为一项对象提议",
     "classificationBasis": "内容属于产品可核验事实，按 D1.1 业务含义和边界归类",
     "identityHints": {{"subject": "原文中的业务主体", "scope": "适用范围或上下文"}},
-    "content": {{"summary": "按对象类型组织的非空业务内容"}},
+    "content": {{
+      "subject": "原文中的产品或版本主体",
+      "facts": [{{"name": "事实名称", "value": "事实值", "evidence": ["文档包锚点"]}}],
+      "applicability": {{"scope": "适用范围", "effectiveTime": "原文明确时填写"}},
+      "limitations": ["限制与例外"]
+    }},
     "entityMentions": [{{
       "mentionId": "M1",
       "text": "原文称呼",
