@@ -10,8 +10,8 @@ from .content_contracts import (
 from .identity_contracts import IDENTITY_CONTRACT_BY_MODULE
 from .models import AtomicClaim, CandidateObjectPlan, DocumentPackage, ModelRequest
 
-PROMPT_VERSION = "sales-identification-v0.6"
-SCHEMA_VERSION = "candidate-knowledge-object-v0.5"
+PROMPT_VERSION = "sales-identification-v0.7"
+SCHEMA_VERSION = "candidate-knowledge-object-v0.6"
 
 
 def render_planning_contracts_for_prompt() -> str:
@@ -258,13 +258,27 @@ def build_content_realization_request(
 7. relations 只记录本批明确且有证据的关系，每项必须严格为
    {{"relationKind":"entity|object","relationType":"关系类型","sourceRef":"P1或P1-M1",
    "targetRef":"P2或P2-M1","evidence":["真实anchorId"]}}。无法同时满足引用和证据时不输出。
-8. 只输出合法 JSON，不输出额外字段。
+8. sourceClaimIds 只是本任务可用的证据范围，不代表已经写入正文。必须用 claimUsage 逐条声明正文
+   实际吸收了哪些主张：claimId 必须来自本任务，role 只能是 primary 或 supporting，contentPaths
+   必须指向 content 中真实存在且承载该主张的 JSONPath（如 $.facts[0].description、
+   $.items[2].answer、$.script），explanation 用一句话说明该路径如何表达主张。禁止把根级
+   factReferences 或来源 ID 列表
+   当作正文消费证明；同一主张可以有多个路径，但不能指向空值。
+   content 中每个非空业务叶子字段都必须有精确 claimUsage 路径；路径必须落到字符串、数字或布尔值，
+   不能用 $.facts[0]、$.items 之类父级对象一次覆盖多项内容。来源没有支持的步骤、适用场景、
+   限制、心理原因或行动建议必须删除或按合同留空，不得为了填满合同而推演。
+9. 计划内没有真实写入正文的主张必须进入 omittedClaims，逐条给出 claimId 与具体业务原因；
+   不能既出现在 claimUsage 又出现在 omittedClaims，不能为了覆盖率虚报已消费。
+10. 只输出合法 JSON，不输出额外字段。
 
 当前本批对象内容合同：
 {render_content_contracts_for_prompt({plan.module for plan in plans})}
 
 输出形态：
-{{"realizations":[{{"planId":"P1","content":{{}},"entityMentions":[],"relations":[]}}]}}"""
+{{"realizations":[{{"planId":"P1","content":{{}},"claimUsage":[{{"claimId":"CL1",
+"role":"primary","contentPaths":["$.facts[0].description"],"explanation":"该事实已写入事实条目"}}],
+"omittedClaims":[{{"claimId":"CL2","reason":"与对象身份不同，应另行规划"}}],
+"entityMentions":[],"relations":[]}}]}}"""
     return ModelRequest(
         document_package_id=document_package_id,
         system_prompt=system_prompt,

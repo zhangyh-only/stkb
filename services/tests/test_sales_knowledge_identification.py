@@ -31,6 +31,7 @@ from app.features.sales_knowledge_identification.service import (
     _automatic_uncovered_claim_ids,
     _enforce_plan_granularity,
     _expand_compact_object_plan,
+    _expand_content_path_to_leaf_paths,
     _merge_repair_plans,
     _normalize_content_shape,
     _plan_satisfies_primary_claim_role,
@@ -74,7 +75,13 @@ class TwoStageGateway:
                     continue
                 plan = deepcopy(candidate)
                 plan["planId"] = plan.pop("candidateId")
-                for field in ("content", "entityMentions", "relations"):
+                for field in (
+                    "content",
+                    "claimUsage",
+                    "omittedClaims",
+                    "entityMentions",
+                    "relations",
+                ):
                     plan.pop(field, None)
                 plans.append(plan)
             payload = {
@@ -94,6 +101,16 @@ class TwoStageGateway:
                     {
                         "planId": candidate["candidateId"],
                         "content": candidate.get("content", {}),
+                        **(
+                            {"claimUsage": candidate["claimUsage"]}
+                            if "claimUsage" in candidate
+                            else {}
+                        ),
+                        **(
+                            {"omittedClaims": candidate["omittedClaims"]}
+                            if "omittedClaims" in candidate
+                            else {}
+                        ),
                         "entityMentions": candidate.get("entityMentions", []),
                         "relations": candidate.get("relations", []),
                     }
@@ -309,6 +326,89 @@ def _package(
         anchors=anchors
         or [SourceAnchor(anchor_id=f"{package_id}#page-1", kind="page", page=1)],
         quality_issues=[],
+    )
+
+
+def test_content_claim_usage_distinguishes_planned_evidence_from_written_content() -> None:
+    package_id = "DP-CONTENT-USAGE"
+    anchor = f"{package_id}#page-1"
+    candidate = _candidate("D1.1", "PRODUCT_FACT", ["CL1", "CL2"])
+    content_paths = [
+        f"$.{field}"
+        for field, value in candidate["content"].items()
+        if value not in (None, "", [], {})
+    ]
+    object_payload = {
+        "candidates": [
+            {
+                **candidate,
+                "claimUsage": [
+                    {
+                        "claimId": "CL1",
+                        "role": "primary",
+                        "contentPaths": content_paths,
+                        "explanation": "正文详情表达了该产品事实",
+                    }
+                ],
+                "omittedClaims": [
+                    {"claimId": "CL2", "reason": "该主张未实际写入当前对象正文"}
+                ],
+            }
+        ],
+        "weakSignals": [],
+        "unresolvedItems": [],
+    }
+    gateway = TwoStageGateway(
+        [
+            _claim(anchor, "事实一", claim_id="CL1"),
+            _claim(anchor, "事实二", claim_id="CL2"),
+        ],
+        object_payload,
+    )
+    service = SalesKnowledgeIdentificationService(gateway)
+
+    result = service.identify(_package(package_id, "事实一；事实二"))
+
+    assert result.status == "completed"
+    assert result.candidates[0].planned_source_claim_ids == ["CL1", "CL2"]
+    assert result.candidates[0].source_claim_ids == ["CL1"]
+    assert [item.claim_id for item in result.candidates[0].claim_usage] == ["CL1"]
+    assert any(
+        item.claim_id == "CL2" and "未实际写入" in item.reason
+        for item in result.unresolved_items
+    )
+    assert sum(item.claim_id == "CL2" for item in result.unresolved_items) == 1
+
+
+def test_invalid_claim_usage_path_cannot_count_as_written_content() -> None:
+    package_id = "DP-INVALID-USAGE"
+    anchor = f"{package_id}#page-1"
+    candidate = _candidate("D1.1", "PRODUCT_FACT", ["CL1"])
+    candidate["claimUsage"] = [
+        {
+            "claimId": "CL1",
+            "role": "primary",
+            "contentPaths": ["$.factReferences"],
+            "explanation": "只引用来源编号",
+        }
+    ]
+    candidate["content"] = {
+        **candidate["content"],
+        "factReferences": ["CL1"],
+    }
+    gateway = TwoStageGateway(
+        [_claim(anchor, "事实一", claim_id="CL1")],
+        {"candidates": [candidate], "weakSignals": [], "unresolvedItems": []},
+    )
+    service = SalesKnowledgeIdentificationService(gateway)
+
+    result = service.identify(_package(package_id, "事实一"))
+
+    assert result.candidates == []
+    assert result.rejected_candidates[0].candidate_id == "C1"
+    assert any(
+        item.claim_id == "CL1" and "claimUsage" in item.reason
+        for item in result.unresolved_items
     )
 
 
@@ -1079,9 +1179,39 @@ def test_structured_table_completeness_adds_missing_qa_and_inherited_objection()
     assert [(claim.claim_kind, claim.subject) for claim in supplemented] == [
         ("objection", "价格贵"),
         ("objection", "一次能买几年"),
+        ("qa", "一次能买几年"),
         ("qa", "如何问诊"),
     ]
     assert supplemented[-1].evidence[1].source_text == "进入服务页发起问诊。"
+
+
+def test_structured_table_completeness_adds_explicit_strategy_column() -> None:
+    package = _package(
+        "DP-STRATEGY",
+        (
+            "### 第 1 行\n\n<!-- source-anchor: DP-STRATEGY#row-1 -->\n\n"
+            "- **B列**：客群引入\n- **C列**：面向异地医保父母推荐\n"
+            "- **D列**：完整销售话术。"
+        ),
+        [SourceAnchor(anchor_id="DP-STRATEGY#row-1", kind="table")],
+    )
+
+    supplemented = supplement_structured_table_claims(package, [])
+
+    assert [(claim.claim_kind, claim.subject) for claim in supplemented] == [
+        ("strategy", "客群引入")
+    ]
+    assert supplemented[0].attributes["strategyDescription"] == (
+        "面向异地医保父母推荐"
+    )
+
+
+def test_content_path_container_and_content_prefix_expand_to_leaf_paths() -> None:
+    content = {"applicability": {"products": ["车险", "药享保"]}}
+
+    assert _expand_content_path_to_leaf_paths(
+        content, "$.applicability.products"
+    ) == ["$.applicability.products[0]", "$.applicability.products[1]"]
 
 
 def test_global_planning_can_merge_cross_kind_claims_into_one_object() -> None:

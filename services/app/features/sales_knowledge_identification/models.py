@@ -143,6 +143,13 @@ class CandidateObjectPlan(ApiModel):
     source_claim_ids: list[str] = Field(min_length=1)
 
 
+class ContentClaimUsage(ApiModel):
+    claim_id: str
+    role: Literal["primary", "supporting"]
+    content_paths: list[str] = Field(min_length=1)
+    explanation: str = Field(min_length=2)
+
+
 class RejectedObjectPlan(ApiModel):
     plan_id: str
     reasons: list[str]
@@ -158,7 +165,12 @@ class CandidateKnowledgeObject(ApiModel):
     object_boundary: str = ""
     classification_basis: str = ""
     identity_hints: dict[str, Any] = Field(default_factory=dict)
+    planned_source_claim_ids: list[str] = Field(default_factory=list)
     source_claim_ids: list[str] = Field(default_factory=list)
+    claim_usage: list[ContentClaimUsage] = Field(default_factory=list)
+    content_leaf_count: int = 0
+    attributed_content_leaf_count: int = 0
+    unattributed_content_paths: list[str] = Field(default_factory=list)
     content: dict[str, Any]
     entity_mentions: list[EntityMention] = Field(default_factory=list)
     evidence: list[str] = Field(min_length=1)
@@ -295,6 +307,7 @@ class IdentificationQualityReport(ApiModel):
     evidence_backed_rate: float
     claim_consumption_rate: float
     claim_accounting_rate: float
+    content_attribution_rate: float
     median_content_chars: int
     groups: list[GoldGroupEvaluation]
     findings: list[str]

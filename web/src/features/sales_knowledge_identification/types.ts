@@ -108,7 +108,17 @@ export type CandidateKnowledgeObject = {
   objectBoundary: string
   classificationBasis: string
   identityHints: Record<string, unknown>
+  plannedSourceClaimIds: string[]
   sourceClaimIds: string[]
+  claimUsage: Array<{
+    claimId: string
+    role: 'primary' | 'supporting'
+    contentPaths: string[]
+    explanation: string
+  }>
+  contentLeafCount: number
+  attributedContentLeafCount: number
+  unattributedContentPaths: string[]
   content: Record<string, unknown>
   entityMentions: EntityMention[]
   evidence: string[]
@@ -225,6 +235,7 @@ export type IdentificationQualityReport = {
   evidenceBackedRate: number
   claimConsumptionRate: number
   claimAccountingRate: number
+  contentAttributionRate: number
   medianContentChars: number
   groups: GoldGroupEvaluation[]
   findings: string[]

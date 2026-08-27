@@ -21,7 +21,7 @@ def evaluate_against_gold(
     expected_total = sum(item.expected_count for item in group_results)
     matched_total = sum(item.matched_count for item in group_results)
     used_claim_ids = {
-        claim_id for candidate in result.candidates for claim_id in candidate.source_claim_ids
+        usage.claim_id for candidate in result.candidates for usage in candidate.claim_usage
     }
     unresolved_evidence = {
         evidence
@@ -40,7 +40,7 @@ def evaluate_against_gold(
         for candidate in result.candidates
     ]
     evidence_backed = sum(
-        bool(candidate.source_claim_ids and candidate.evidence)
+        bool(candidate.claim_usage and candidate.evidence)
         for candidate in result.candidates
     )
     summary_only_count = sum(
@@ -48,6 +48,12 @@ def evaluate_against_gold(
     )
     findings = _build_findings(group_results, result)
     groups_met = sum(item.status == "met" for item in group_results)
+    total_content_leaves = sum(
+        candidate.content_leaf_count for candidate in result.candidates
+    )
+    attributed_content_leaves = sum(
+        candidate.attributed_content_leaf_count for candidate in result.candidates
+    )
     overall_status = "pass" if groups_met == len(group_results) else "fail"
     if gold.get("status") != "approved" and overall_status == "pass":
         overall_status = "review"
@@ -73,6 +79,11 @@ def evaluate_against_gold(
             len(accounted_claim_ids) / len(result.atomic_claims), 4
         )
         if result.atomic_claims
+        else 0.0,
+        content_attribution_rate=round(
+            attributed_content_leaves / total_content_leaves, 4
+        )
+        if total_content_leaves
         else 0.0,
         median_content_chars=int(statistics.median(content_lengths))
         if content_lengths
@@ -223,4 +234,19 @@ def _build_findings(
         findings.append(f"有 {len(result.rejected_atomic_claims)} 条主张未通过逐字证据校验")
     if result.rejected_candidates:
         findings.append(f"有 {len(result.rejected_candidates)} 项对象提议未通过合同校验")
+    candidates_without_usage = sum(
+        not candidate.claim_usage for candidate in result.candidates
+    )
+    if candidates_without_usage:
+        findings.append(
+            f"有 {candidates_without_usage} 项对象没有正文级主张消费路径，"
+            "不能按计划来源计入消费率"
+        )
+    unattributed_fields = sum(
+        len(candidate.unattributed_content_paths) for candidate in result.candidates
+    )
+    if unattributed_fields:
+        findings.append(
+            f"有 {unattributed_fields} 个正文业务字段尚未建立 claimUsage 归因路径"
+        )
     return findings

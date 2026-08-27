@@ -106,6 +106,7 @@ def test_quality_report_detects_group_recall_and_over_split(tmp_path) -> None:
     assert report.object_recall_proxy == 0.6667
     assert report.claim_consumption_rate == 0.75
     assert report.claim_accounting_rate == 1.0
+    assert report.content_attribution_rate == 0.0
     assert report.groups[0].status == "under_split_or_recall"
     assert report.groups[1].status == "over_split"
     assert report.groups[1].predicted_item_count == 2
@@ -211,6 +212,15 @@ def _candidate(
         "classificationBasis": "依据模块规则归类",
         "identityHints": {"subject": candidate_id},
         "sourceClaimIds": claim_ids,
+        "claimUsage": [
+            {
+                "claimId": claim_id,
+                "role": "primary",
+                "contentPaths": ["$.body"],
+                "explanation": "测试正文表达该主张",
+            }
+            for claim_id in claim_ids
+        ],
         "content": content,
         "evidence": evidence,
     }

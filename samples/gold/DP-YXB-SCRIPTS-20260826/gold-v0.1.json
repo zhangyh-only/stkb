@@ -30,7 +30,8 @@
       "objectTypes": ["POLICY_RULE_SET"],
       "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-2-row-7", "DP-YXB-SCRIPTS-20260826#sheet-2-row-8"],
       "requireAllEvidence": true,
-      "requiredContentFields": ["purpose", "preconditions", "rulesOrSteps"]
+      "requiredContentFields": ["purpose", "preconditions", "rulesOrSteps"],
+      "mergeRule": "处方种类与用量限制、同功效药品禁开同属线上处方开具政策，在主体、范围和更新生命周期一致时形成一个规则集"
     },
     {
       "key": "product-introduction-strategies",

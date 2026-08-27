@@ -6,7 +6,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Literal
 
-RULE_PACKAGE_PATH = Path(__file__).with_name("rules") / "d1-d5-v0.5.toml"
+RULE_PACKAGE_PATH = Path(__file__).with_name("rules") / "d1-d5-v0.6.toml"
 EXPECTED_MODULE_COUNT = 22
 EXPECTED_DOMAINS = {"D1", "D2", "D3", "D4", "D5"}
 

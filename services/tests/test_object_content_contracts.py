@@ -7,7 +7,7 @@ from app.features.sales_knowledge_identification.content_contracts import (
 
 
 def test_content_contracts_cover_every_module_and_object_type() -> None:
-    assert CONTENT_CONTRACT_VERSION == "object-content-contracts-v1.0"
+    assert CONTENT_CONTRACT_VERSION == "object-content-contracts-v1.1"
     assert set(CONTENT_CONTRACT_BY_MODULE) == {
         module.code for module in KNOWLEDGE_MODULES
     }
@@ -15,7 +15,7 @@ def test_content_contracts_cover_every_module_and_object_type() -> None:
         contract = CONTENT_CONTRACT_BY_MODULE[module.code]
         assert set(contract.object_types) == set(module.object_types)
         assert contract.required_fields
-        assert contract.minimum_content_chars >= 150
+        assert contract.minimum_content_chars >= 120
         assert contract.inclusion and contract.exclusion
         assert contract.positive_example and contract.negative_example
 

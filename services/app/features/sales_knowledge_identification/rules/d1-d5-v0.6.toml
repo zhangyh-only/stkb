@@ -1,4 +1,4 @@
-version = "d1-d5-v0.5"
+version = "d1-d5-v0.6"
 status = "sample_validation"
 source = "docs/current/STKB-D1-D5知识对象与业务图模型映射矩阵.md"
 
@@ -169,7 +169,7 @@ scope = "core"
 meaning = "管理可跨表达复用的销售技巧、方法步骤和适用条件。"
 object_types = ["SALES_TECHNIQUE", "METHOD_STEP", "APPLICABILITY_CONDITION"]
 core_objects = ["技巧模式", "方法步骤", "适用条件"]
-boundary = "方法包含步骤；只有得到跨材料支持时才提升为跨产品通用技巧。带明确产品或场景条件的行动判断优先作为D3.3策略，不与通用技巧混为同一对象。"
+boundary = "方法必须由来源明确给出机制和可执行步骤；只有得到跨材料支持时才提升为跨产品通用技巧。仅表达一个切入意图、带明确产品/客群/场景条件，或需要模型补造步骤的内容归D3.3策略，不得包装成通用技巧。"
 sources = ["销售方法论", "培训课件", "优秀案例", "标准话术"]
 consumers = ["销售指导", "教学", "策略生成", "行为评价", "改进建议"]
 

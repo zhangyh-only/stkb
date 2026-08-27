@@ -12,7 +12,7 @@ from app.features.sales_knowledge_identification.catalog import (
 
 
 def test_rule_package_defines_complete_versioned_d1_d5_catalog() -> None:
-    assert CATALOG_VERSION == "d1-d5-v0.5"
+    assert CATALOG_VERSION == "d1-d5-v0.6"
     assert CATALOG_STATUS == "sample_validation"
     assert len(CATALOG_FINGERPRINT) == 64
     assert CATALOG_SOURCE.endswith("STKB-D1-D5知识对象与业务图模型映射矩阵.md")

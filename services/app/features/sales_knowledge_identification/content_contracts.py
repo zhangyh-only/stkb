@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 CONTRACTS_PATH = (
-    Path(__file__).with_name("rules") / "object-content-contracts-v1.0.toml"
+    Path(__file__).with_name("rules") / "object-content-contracts-v1.1.toml"
 )
 
 STRING_FIELDS_BY_OBJECT_TYPE: dict[str, tuple[str, ...]] = {

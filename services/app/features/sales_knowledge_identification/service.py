@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from time import perf_counter
@@ -31,6 +32,7 @@ from .models import (
     CandidateKnowledgeObject,
     CandidateNormalization,
     CandidateObjectPlan,
+    ContentClaimUsage,
     DocumentPackage,
     IdentificationResult,
     ModelCallTrace,
@@ -686,6 +688,12 @@ class SalesKnowledgeIdentificationService:
                 candidate_payload["candidateId"] = plan.plan_id
                 candidate_payload.pop("planId", None)
                 candidate_payload["content"] = realization.get("content", {})
+                if "claimUsage" in realization:
+                    candidate_payload["claimUsage"] = realization.get("claimUsage")
+                if "omittedClaims" in realization:
+                    candidate_payload["omittedClaims"] = realization.get(
+                        "omittedClaims"
+                    )
                 candidate_payload["entityMentions"] = realization.get("entityMentions", [])
                 candidate_payload["relations"] = realization.get("relations", [])
                 raw_candidates.append(candidate_payload)
@@ -715,6 +723,8 @@ class SalesKnowledgeIdentificationService:
         normalizations: list[CandidateNormalization] = []
         seen_candidate_ids: set[str] = set()
         seen_fingerprints: set[str] = set()
+        content_unresolved_inputs: list[tuple[Any, set[str]]] = []
+        usage_contract_candidate_ids: set[str] = set()
         for index, raw_candidate in enumerate(raw_candidates, start=1):
             candidate_id = _candidate_id(raw_candidate, index)
             candidate_payload = raw_candidate.copy()
@@ -736,14 +746,6 @@ class SalesKnowledgeIdentificationService:
                 for claim_id in source_claim_ids
                 if isinstance(claim_id, str) and claim_id in claim_by_id
             ]
-            candidate_payload["evidence"] = sorted(
-                {
-                    evidence.anchor_id
-                    for claim in source_claims
-                    for evidence in claim.evidence
-                }
-            )
-            valid_anchors = set(candidate_payload["evidence"])
             resolved_content, macro_reasons = resolve_verbatim_claim_references(
                 candidate_payload.get("content", {}), claim_by_id
             )
@@ -753,6 +755,67 @@ class SalesKnowledgeIdentificationService:
                 resolved_content,
             )
             reasons.extend(macro_reasons)
+            raw_claim_usage = candidate_payload.get("claimUsage", [])
+            if "claimUsage" in raw_candidate:
+                usage_contract_candidate_ids.add(candidate_id)
+            valid_claim_usage, usage_unresolved = _validate_content_claim_usage(
+                raw_claim_usage,
+                candidate_payload["content"],
+                claim_by_id,
+                candidate_id,
+            )
+            candidate_payload["claimUsage"] = [
+                item.model_dump(by_alias=True) for item in valid_claim_usage
+            ]
+            used_claim_ids = list(
+                dict.fromkeys(item.claim_id for item in valid_claim_usage)
+            )
+            content = candidate_payload["content"]
+            if isinstance(content, dict) and "factReferences" in content and used_claim_ids:
+                candidate_payload["content"] = {
+                    **content,
+                    "factReferences": used_claim_ids,
+                }
+            if "claimUsage" in raw_candidate:
+                covered_content_paths = {
+                    path for item in valid_claim_usage for path in item.content_paths
+                }
+                content_leaf_paths = _business_content_leaf_paths(
+                    candidate_payload["content"]
+                )
+                unsupported_content_paths = sorted(
+                    set(content_leaf_paths) - covered_content_paths
+                )
+                candidate_payload["contentLeafCount"] = len(content_leaf_paths)
+                candidate_payload["attributedContentLeafCount"] = (
+                    len(content_leaf_paths) - len(unsupported_content_paths)
+                )
+                candidate_payload["unattributedContentPaths"] = (
+                    unsupported_content_paths
+                )
+            candidate_payload["plannedSourceClaimIds"] = source_claim_ids
+            # 新合同明确输出 claimUsage 时，sourceClaimIds 收紧为真正进入正文的主张；
+            # 旧运行与测试载荷没有该字段时保留兼容读取，但质量指标不会再按它计分。
+            if "claimUsage" in raw_candidate:
+                candidate_payload["sourceClaimIds"] = used_claim_ids
+                source_claims = [claim_by_id[claim_id] for claim_id in used_claim_ids]
+            candidate_payload["evidence"] = sorted(
+                {
+                    evidence.anchor_id
+                    for claim in source_claims
+                    for evidence in claim.evidence
+                }
+            )
+            valid_anchors = set(candidate_payload["evidence"])
+            content_unresolved_inputs.extend(usage_unresolved)
+            content_unresolved_inputs.extend(
+                _validate_omitted_claims(
+                    candidate_payload.pop("omittedClaims", []),
+                    claim_by_id,
+                    used_claim_ids,
+                    candidate_id,
+                )
+            )
 
             raw_mentions = candidate_payload.get("entityMentions", [])
             if isinstance(raw_mentions, list):
@@ -908,6 +971,73 @@ class SalesKnowledgeIdentificationService:
             accepted.append(candidate)
 
         accepted = _drop_dangling_relations(accepted, normalizations)
+        used_content_claim_ids = {
+            usage.claim_id for candidate in accepted for usage in candidate.claim_usage
+        }
+        accepted_by_id = {candidate.candidate_id: candidate for candidate in accepted}
+        for candidate_id in usage_contract_candidate_ids:
+            candidate = accepted_by_id.get(candidate_id)
+            if candidate is None:
+                continue
+            for claim_id in candidate.planned_source_claim_ids:
+                if claim_id in used_content_claim_ids:
+                    continue
+                claim = candidate_claim_scopes.get(candidate_id, {}).get(claim_id)
+                if claim is None:
+                    continue
+                content_unresolved_inputs.append(
+                    (
+                        {
+                            "claimId": claim_id,
+                            "description": (
+                                f"{claim_id}：已进入对象计划 {candidate_id}，"
+                                "但未证明写入对象正文"
+                            ),
+                            "reason": (
+                                "内容编制结果未提供指向真实正文值的 claimUsage；"
+                                "不能仅凭计划 sourceClaimIds 计为已消费"
+                            ),
+                            "evidence": sorted(
+                                {item.anchor_id for item in claim.evidence}
+                            ),
+                            "module": candidate.module,
+                        },
+                        {item.anchor_id for item in claim.evidence},
+                    )
+                )
+        unresolved_inputs = [
+            item
+            for item in unresolved_inputs
+            if not (
+                isinstance(item[0], dict)
+                and item[0].get("claimId") in used_content_claim_ids
+            )
+        ]
+        deduplicated_content_unresolved: list[tuple[Any, set[str]]] = []
+        seen_content_unresolved_claim_ids: set[str] = set()
+        for item in content_unresolved_inputs:
+            claim_id = item[0].get("claimId") if isinstance(item[0], dict) else None
+            if isinstance(claim_id, str):
+                if claim_id in seen_content_unresolved_claim_ids:
+                    continue
+                seen_content_unresolved_claim_ids.add(claim_id)
+            deduplicated_content_unresolved.append(item)
+        unresolved_inputs = [
+            item
+            for item in unresolved_inputs
+            if not (
+                isinstance(item[0], dict)
+                and item[0].get("claimId") in seen_content_unresolved_claim_ids
+            )
+        ]
+        unresolved_inputs.extend(
+            item
+            for item in deduplicated_content_unresolved
+            if not (
+                isinstance(item[0], dict)
+                and item[0].get("claimId") in used_content_claim_ids
+            )
+        )
         coverage: dict[
             str, Literal["hit", "weak_signal", "not_found", "unresolved"]
         ] = {module.code: "not_found" for module in KNOWLEDGE_MODULES}
@@ -1192,6 +1322,12 @@ def _validate_object_plans(
             )
             if not has_source_script:
                 reasons.append("standard script source text is not provided")
+        if plan.module == "D3.2":
+            if not any(claim.claim_kind == "method" for claim in plan_claims):
+                reasons.append(
+                    "D3.2 requires an explicit source method with steps; "
+                    "a product or audience strategy belongs to D3.3"
+                )
         if plan.module == "D1.3" and plan.object_type == "BUSINESS_PROCESS":
             has_embedded_sequence = any(
                 isinstance(claim.attributes.get(field), list)
@@ -1370,6 +1506,166 @@ def _normalize_content_shape(
         else:
             normalized_items.append(item)
     return {**content, "items": normalized_items}
+
+
+_CONTENT_PATH_PATTERN = re.compile(
+    r"^\$(?:(?:\.[A-Za-z_][A-Za-z0-9_-]*)|(?:\[[0-9]+\]))+$"
+)
+_NON_CONTENT_REFERENCE_KEYS = {
+    "claimRef",
+    "evidenceRefs",
+    "factReferences",
+    "sourceClaimIds",
+    "sourceClaimId",
+    "evidenceRef",
+    "elementId",
+    "stepId",
+    "stepOrder",
+    "category",
+    "type",
+}
+
+
+def _validate_content_claim_usage(
+    raw_usage: Any,
+    content: dict[str, Any],
+    claim_by_id: dict[str, AtomicClaim],
+    candidate_id: str,
+) -> tuple[list[ContentClaimUsage], list[tuple[Any, set[str]]]]:
+    if not isinstance(raw_usage, list):
+        return [], []
+    accepted: list[ContentClaimUsage] = []
+    unresolved: list[tuple[Any, set[str]]] = []
+    seen_claim_paths: set[tuple[str, tuple[str, ...]]] = set()
+    for raw_item in raw_usage:
+        try:
+            usage = ContentClaimUsage.model_validate(raw_item)
+        except ValidationError:
+            continue
+        claim = claim_by_id.get(usage.claim_id)
+        expanded_paths: list[str] = []
+        invalid_paths: list[str] = []
+        for path in usage.content_paths:
+            if path.startswith("$.content."):
+                path = "$." + path.removeprefix("$.content.")
+            expanded = _expand_content_path_to_leaf_paths(content, path)
+            if not expanded:
+                invalid_paths.append(path)
+            else:
+                expanded_paths.extend(expanded)
+        if not invalid_paths:
+            usage = usage.model_copy(
+                update={"content_paths": list(dict.fromkeys(expanded_paths))}
+            )
+        key = (usage.claim_id, tuple(usage.content_paths))
+        if claim is not None and not invalid_paths and key not in seen_claim_paths:
+            accepted.append(usage)
+            seen_claim_paths.add(key)
+            continue
+        if claim is None:
+            continue
+        anchors = {item.anchor_id for item in claim.evidence}
+        unresolved.append(
+            (
+                {
+                    "claimId": usage.claim_id,
+                    "description": (
+                        f"{usage.claim_id}：对象 {candidate_id} 的正文消费声明无效"
+                    ),
+                    "reason": (
+                        "claimUsage 未指向真实、非空且承载业务知识的 content 路径："
+                        + "、".join(invalid_paths or usage.content_paths)
+                    ),
+                    "evidence": sorted(anchors),
+                    "module": None,
+                },
+                anchors,
+            )
+        )
+    return accepted, unresolved
+
+
+def _expand_content_path_to_leaf_paths(
+    content: dict[str, Any], path: str
+) -> list[str]:
+    if not isinstance(path, str) or not _CONTENT_PATH_PATTERN.fullmatch(path):
+        return []
+    current: Any = content
+    tokens = re.findall(r"\.([A-Za-z_][A-Za-z0-9_-]*)|\[([0-9]+)\]", path)
+    for field, index_text in tokens:
+        if field:
+            if field in _NON_CONTENT_REFERENCE_KEYS:
+                return []
+            if not isinstance(current, dict) or field not in current:
+                return []
+            current = current[field]
+        else:
+            index = int(index_text)
+            if not isinstance(current, list) or index >= len(current):
+                return []
+            current = current[index]
+    paths: list[str] = []
+    _collect_business_leaf_paths(current, path, paths)
+    return paths
+
+
+def _business_content_leaf_paths(content: dict[str, Any]) -> list[str]:
+    leaf_paths: list[str] = []
+    _collect_business_leaf_paths(content, "$", leaf_paths)
+    return sorted(leaf_paths)
+
+
+def _collect_business_leaf_paths(value: Any, path: str, output: list[str]) -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in _NON_CONTENT_REFERENCE_KEYS:
+                continue
+            _collect_business_leaf_paths(item, f"{path}.{key}", output)
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _collect_business_leaf_paths(item, f"{path}[{index}]", output)
+        return
+    if value not in (None, ""):
+        output.append(path)
+
+
+def _validate_omitted_claims(
+    raw_omissions: Any,
+    claim_by_id: dict[str, AtomicClaim],
+    used_claim_ids: list[str],
+    candidate_id: str,
+) -> list[tuple[Any, set[str]]]:
+    if not isinstance(raw_omissions, list):
+        return []
+    unresolved: list[tuple[Any, set[str]]] = []
+    for raw_item in raw_omissions:
+        if not isinstance(raw_item, dict):
+            continue
+        claim_id = raw_item.get("claimId")
+        reason = raw_item.get("reason")
+        claim = claim_by_id.get(claim_id) if isinstance(claim_id, str) else None
+        if (
+            claim is None
+            or claim_id in used_claim_ids
+            or not isinstance(reason, str)
+            or len(reason.strip()) < 2
+        ):
+            continue
+        anchors = {item.anchor_id for item in claim.evidence}
+        unresolved.append(
+            (
+                {
+                    "claimId": claim_id,
+                    "description": f"{claim_id}：对象 {candidate_id} 明确未写入正文",
+                    "reason": reason.strip(),
+                    "evidence": sorted(anchors),
+                    "module": None,
+                },
+                anchors,
+            )
+        )
+    return unresolved
 
 
 def _automatic_uncovered_claim_ids(

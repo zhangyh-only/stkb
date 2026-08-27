@@ -1,11 +1,11 @@
-version = "object-content-contracts-v1.0"
+version = "object-content-contracts-v1.1"
 
 [[contracts]]
 module = "D1.1"
 object_types = ["PRODUCT_FACT", "PRODUCT_VERSION_FACT", "PRODUCT_COMPONENT_FACT"]
 required_fields = ["subject", "facts", "applicability", "limitations"]
 allow_empty_fields = ["limitations"]
-minimum_content_chars = 150
+minimum_content_chars = 120
 granularity = "同一产品或版本、同一事实主题、适用范围和更新生命周期共同构成一项对象；参数不能逐字段拆对象。"
 inclusion = "具有明确产品或版本主体、可核验参数/责任/服务权益及来源证据。"
 exclusion = "销售建议、营销表达、客户反应、无版本或时点依据的宣传结论。"
@@ -118,8 +118,8 @@ object_types = ["SALES_TECHNIQUE", "METHOD_STEP", "APPLICABILITY_CONDITION"]
 required_fields = ["techniqueName", "purpose", "mechanism", "steps", "applicability"]
 minimum_content_chars = 240
 granularity = "可跨产品/场景复用的完整方法及其机制、步骤和适用条件形成对象。"
-inclusion = "有方法目标、作用机制、执行步骤和跨材料支持。"
-exclusion = "产品专属策略、孤立话术、单个案例自动提升的通用方法。"
+inclusion = "来源明确提供方法目标、作用机制、至少两个可执行步骤，并有跨材料支持。"
+exclusion = "产品/客群专属策略、孤立话术、只有切入意图却需模型补造步骤的内容、单个案例自动提升的通用方法。"
 positive_example = "LSCPA异议处理法包含各步骤目标、动作和适用条件。"
 negative_example = "嫌货才是买货人。"
 

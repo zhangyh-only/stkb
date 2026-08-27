@@ -176,73 +176,131 @@ def supplement_structured_table_claims(
         script = _select_source_text(section, "D列")
         if question in {"问题", "客户问题"} and answer in {"解答", "答案"}:
             continue
-        claim_kind: str | None = None
-        module_hint = ""
-        source_values: list[tuple[str, str]] = []
+        if answer and script and "异议" not in active_group:
+            strategy_indexes = [
+                index
+                for index, claim in enumerate(supplemented)
+                if claim.claim_kind == "strategy"
+                and any(
+                    evidence.anchor_id == anchor.anchor_id
+                    for evidence in claim.evidence
+                )
+            ]
+            strategy_evidence = [
+                ClaimEvidence(
+                    anchor_id=anchor.anchor_id,
+                    exact_quote=answer,
+                    selector="C列",
+                    source_text=answer,
+                )
+            ]
+            if strategy_indexes:
+                strategy_index = strategy_indexes[0]
+                current = supplemented[strategy_index]
+                supplemented[strategy_index] = current.model_copy(
+                    update={
+                        "attributes": {
+                            **current.attributes,
+                            "strategyDescription": answer,
+                        },
+                        "module_hints": list(
+                            dict.fromkeys([*current.module_hints, "D3.3"])
+                        ),
+                        "evidence": strategy_evidence,
+                    }
+                )
+            else:
+                sequence += 1
+                supplemented.append(
+                    AtomicClaim(
+                        claim_id=f"STRUCTURED-STRATEGY-{sequence}",
+                        claim_kind="strategy",
+                        statement=f"资料明确的销售策略：{answer}",
+                        subject=question or answer,
+                        attributes={"strategyDescription": answer},
+                        module_hints=["D3.3"],
+                        evidence=strategy_evidence,
+                    )
+                )
+        duties: list[tuple[str, str, str, str]] = []
         if question and answer and any(label in active_group for label in ("FAQ", "问答")):
-            claim_kind = "qa"
-            module_hint = "D4.3"
-            source_values = [("B列", question), ("C列", answer)]
-        elif question and script and "异议" in active_group:
-            claim_kind = "objection"
-            module_hint = "D4.2"
-            source_values = [("B列", question), ("D列", script)]
-        if claim_kind is None:
-            continue
-        matching_indexes = [
-            index
-            for index, claim in enumerate(supplemented)
-            if claim.claim_kind == claim_kind
-            and any(
-                evidence.anchor_id == anchor.anchor_id
-                for evidence in claim.evidence
-            )
-        ]
-        structured_attributes = {
-            "question" if claim_kind == "qa" else "expression": question,
-            "answer" if claim_kind == "qa" else "responseContext": (
-                answer if claim_kind == "qa" else script
-            ),
-        }
-        structured_evidence = [
-            ClaimEvidence(
-                anchor_id=anchor.anchor_id,
-                exact_quote=value,
-                selector=selector,
-                source_text=value,
-            )
-            for selector, value in source_values
-        ]
-        if matching_indexes:
-            primary_index = matching_indexes[0]
-            current = supplemented[primary_index]
-            supplemented[primary_index] = current.model_copy(
-                update={
-                    "attributes": {**current.attributes, **structured_attributes},
-                    "module_hints": list(
-                        dict.fromkeys([*current.module_hints, module_hint])
+            duties.append(("qa", "D4.3", answer, "C列"))
+        if question and script and "异议" in active_group:
+            # 同一行既是“客户异议”证据，也是可直接消费的标准问答。
+            # 两种知识对象职责不同，重叠使用同一来源是明确允许的。
+            duties.append(("objection", "D4.2", script, "D列"))
+            if _looks_like_information_question(question):
+                duties.append(("qa", "D4.3", script, "D列"))
+        for claim_kind, module_hint, response, response_selector in duties:
+            matching_indexes = [
+                index
+                for index, claim in enumerate(supplemented)
+                if claim.claim_kind == claim_kind
+                and any(
+                    evidence.anchor_id == anchor.anchor_id
+                    for evidence in claim.evidence
+                )
+            ]
+            structured_attributes = {
+                "question" if claim_kind == "qa" else "expression": question,
+                "answer" if claim_kind == "qa" else "responseContext": response,
+            }
+            structured_evidence = [
+                ClaimEvidence(
+                    anchor_id=anchor.anchor_id,
+                    exact_quote=value,
+                    selector=selector,
+                    source_text=value,
+                )
+                for selector, value in [
+                    ("B列", question),
+                    (response_selector, response),
+                ]
+            ]
+            if matching_indexes:
+                primary_index = matching_indexes[0]
+                current = supplemented[primary_index]
+                supplemented[primary_index] = current.model_copy(
+                    update={
+                        "attributes": {
+                            **current.attributes,
+                            **structured_attributes,
+                        },
+                        "module_hints": list(
+                            dict.fromkeys([*current.module_hints, module_hint])
+                        ),
+                        "evidence": structured_evidence,
+                    }
+                )
+                continue
+            sequence += 1
+            supplemented.append(
+                AtomicClaim(
+                    claim_id=f"STRUCTURED-{claim_kind.upper()}-{sequence}",
+                    claim_kind=claim_kind,
+                    statement=(
+                        f"标准问答：{question}"
+                        if claim_kind == "qa"
+                        else f"客户异议：{question}"
                     ),
-                    "evidence": structured_evidence,
-                }
+                    subject=question,
+                    attributes=structured_attributes,
+                    module_hints=[module_hint],
+                    evidence=structured_evidence,
+                )
             )
-            continue
-        sequence += 1
-        supplemented.append(
-            AtomicClaim(
-                claim_id=f"STRUCTURED-{claim_kind.upper()}-{sequence}",
-                claim_kind=claim_kind,
-                statement=(
-                    f"标准问答：{question}"
-                    if claim_kind == "qa"
-                    else f"客户异议：{question}"
-                ),
-                subject=question,
-                attributes=structured_attributes,
-                module_hints=[module_hint],
-                evidence=structured_evidence,
-            )
-        )
     return supplemented
+
+
+def _looks_like_information_question(value: str) -> bool:
+    normalized = value.strip()
+    return (
+        normalized.endswith(("?", "？", "吗", "呢"))
+        or normalized.startswith(
+            ("如何", "怎么", "为什么", "是否", "能否", "可以", "可不可以")
+        )
+        or any(marker in normalized for marker in ("几年", "多少", "多久", "多长"))
+    )
 
 
 def resolve_verbatim_claim_references(
