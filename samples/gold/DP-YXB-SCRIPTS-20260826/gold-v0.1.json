@@ -13,7 +13,7 @@
     },
     {
       "key": "service-process",
-      "expectedCount": 1,
+      "expectedCount": 2,
       "module": "D1.3",
       "objectTypes": ["BUSINESS_PROCESS"],
       "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-2-row-3"]
@@ -23,7 +23,8 @@
       "expectedCount": 1,
       "module": "D1.3",
       "objectTypes": ["POLICY_RULE_SET"],
-      "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-2-row-7", "DP-YXB-SCRIPTS-20260826#sheet-2-row-8", "DP-YXB-SCRIPTS-20260826#sheet-2-row-9"]
+      "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-2-row-7", "DP-YXB-SCRIPTS-20260826#sheet-2-row-8"],
+      "splitRule": "处方总量限制与同功效药品开具限制支持不同查询问题，应独立更新；药品目录范围由问答/清单职责承载"
     },
     {
       "key": "audience-strategies",

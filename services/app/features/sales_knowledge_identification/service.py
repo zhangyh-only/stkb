@@ -549,12 +549,6 @@ class SalesKnowledgeIdentificationService:
         normalizations: list[CandidateNormalization] = []
         seen_candidate_ids: set[str] = set()
         seen_fingerprints: set[str] = set()
-        known_relation_refs = {
-            reference
-            for raw_candidate in raw_candidates
-            for reference in _candidate_relation_refs(raw_candidate)
-        }
-
         for index, raw_candidate in enumerate(raw_candidates, start=1):
             candidate_id = _candidate_id(raw_candidate, index)
             candidate_payload = raw_candidate.copy()
@@ -702,9 +696,6 @@ class SalesKnowledgeIdentificationService:
             }
             for relation in candidate.relations:
                 referenced_anchors.update(relation.evidence)
-                for relation_ref in (relation.source_ref, relation.target_ref):
-                    if relation_ref not in known_relation_refs:
-                        reasons.append(f"unknown relation reference: {relation_ref}")
             invalid_anchors = referenced_anchors - valid_anchors
             if invalid_anchors:
                 reasons.append(
@@ -731,7 +722,7 @@ class SalesKnowledgeIdentificationService:
                 continue
             accepted.append(candidate)
 
-        accepted = _reject_dangling_relations(accepted, rejected)
+        accepted = _drop_dangling_relations(accepted, normalizations)
         coverage: dict[
             str, Literal["hit", "weak_signal", "not_found", "unresolved"]
         ] = {module.code: "not_found" for module in KNOWLEDGE_MODULES}
@@ -918,6 +909,29 @@ def _validate_object_plans(
                 )
             )
             continue
+        if plan.module == "D4.2" and plan.object_type == "CUSTOMER_OBJECTION":
+            objection_anchors = {
+                evidence.anchor_id
+                for claim_id in plan.source_claim_ids
+                if claim_id in claim_by_id
+                for evidence in claim_by_id[claim_id].evidence
+            }
+            supporting_claim_ids = [
+                claim.claim_id
+                for claim in claims
+                if claim.claim_kind in {"strategy", "script"}
+                and objection_anchors
+                & {evidence.anchor_id for evidence in claim.evidence}
+            ]
+            plan = plan.model_copy(
+                update={
+                    "source_claim_ids": list(
+                        dict.fromkeys(
+                            [*plan.source_claim_ids, *supporting_claim_ids]
+                        )
+                    )
+                }
+            )
         reasons.extend(
             validate_candidate_classification(plan.domain, plan.module, plan.object_type)
         )
@@ -1258,63 +1272,42 @@ def _candidate_id(raw_candidate: Any, index: int) -> str:
     return f"INVALID-{index}"
 
 
-def _candidate_relation_refs(raw_candidate: dict[str, Any]) -> set[str]:
-    refs: set[str] = set()
-    candidate_id = raw_candidate.get("candidateId")
-    if isinstance(candidate_id, str):
-        refs.add(candidate_id)
-    for mention in raw_candidate.get("entityMentions", []):
-        if isinstance(mention, dict) and isinstance(mention.get("mentionId"), str):
-            refs.add(mention["mentionId"])
-    return refs
-
-
-def _reject_dangling_relations(
+def _drop_dangling_relations(
     candidates: list[CandidateKnowledgeObject],
-    rejected: list[RejectedCandidate],
+    normalizations: list[CandidateNormalization],
 ) -> list[CandidateKnowledgeObject]:
-    remaining = candidates
-    while True:
-        valid_refs = {
-            reference
-            for candidate in remaining
-            for reference in (
-                candidate.candidate_id,
-                *(mention.mention_id for mention in candidate.entity_mentions),
-            )
-        }
-        invalid_candidates: list[tuple[CandidateKnowledgeObject, list[str]]] = []
-        for candidate in remaining:
-            invalid_refs = {
-                reference
-                for relation in candidate.relations
-                for reference in (relation.source_ref, relation.target_ref)
-                if reference not in valid_refs
-            }
-            if invalid_refs:
-                invalid_candidates.append(
-                    (
-                        candidate,
-                        [
-                            "relation references rejected or missing objects: "
-                            + ", ".join(sorted(invalid_refs))
-                        ],
-                    )
-                )
-        if not invalid_candidates:
-            return remaining
-        invalid_ids = {candidate.candidate_id for candidate, _ in invalid_candidates}
-        for candidate, reasons in invalid_candidates:
-            rejected.append(
-                RejectedCandidate(
-                    candidate_id=candidate.candidate_id,
-                    reasons=reasons,
-                    raw_candidate=candidate.model_dump(by_alias=True),
-                )
-            )
-        remaining = [
-            candidate for candidate in remaining if candidate.candidate_id not in invalid_ids
+    valid_refs = {
+        reference
+        for candidate in candidates
+        for reference in (
+            candidate.candidate_id,
+            *(mention.mention_id for mention in candidate.entity_mentions),
+        )
+    }
+    normalized: list[CandidateKnowledgeObject] = []
+    for candidate in candidates:
+        valid_relations = [
+            relation
+            for relation in candidate.relations
+            if relation.source_ref in valid_refs and relation.target_ref in valid_refs
         ]
+        discarded_count = len(candidate.relations) - len(valid_relations)
+        if discarded_count:
+            normalizations.append(
+                CandidateNormalization(
+                    candidate_id=candidate.candidate_id,
+                    field="relations",
+                    original_value=f"{discarded_count}个悬空关系建议",
+                    normalized_value="已隔离，保留对象内容与证据",
+                    reason=(
+                        "关系引用了未形成的对象或实体；辅助关系失败不应删除"
+                        "已通过内容合同的知识对象"
+                    ),
+                )
+            )
+            candidate = candidate.model_copy(update={"relations": valid_relations})
+        normalized.append(candidate)
+    return normalized
 
 
 def _validate_auxiliary_items(

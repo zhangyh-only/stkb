@@ -419,6 +419,42 @@ def test_planning_rejects_objection_built_from_expression_only() -> None:
     assert result.unresolved_items[0].evidence == ["DP-EXPRESSION#page-1"]
 
 
+def test_objection_plan_inherits_same_anchor_script_and_strategy_claims() -> None:
+    objection = _claim(
+        "DP-OBJECTION#row-1",
+        "价格太贵",
+        kind="objection",
+        claim_id="CL1",
+    )
+    script = _claim(
+        "DP-OBJECTION#row-1",
+        "先认可价格顾虑再说明价值",
+        kind="script",
+        claim_id="CL2",
+    )
+    gateway = TwoStageGateway(
+        [objection, script],
+        {
+            "candidates": [
+                _candidate("D4.2", "CUSTOMER_OBJECTION", ["CL1"])
+            ],
+            "weakSignals": [],
+            "unresolvedItems": [],
+        },
+    )
+
+    result = SalesKnowledgeIdentificationService(gateway=gateway).identify(
+        _package(
+            "DP-OBJECTION",
+            "# 示例\n\n价格太贵。先认可价格顾虑再说明价值。",
+            [SourceAnchor(anchor_id="DP-OBJECTION#row-1", kind="table")],
+        )
+    )
+
+    assert result.rejected_object_plans == []
+    assert result.candidates[0].source_claim_ids == ["CL1", "CL2"]
+
+
 def test_planning_rejects_list_only_action_rule() -> None:
     gateway = TwoStageGateway(
         [_claim("DP-LIST#page-1", "A、B、C三级", kind="list")],
@@ -479,7 +515,7 @@ def test_planning_rejects_single_compliance_action_as_business_process() -> None
     ]
 
 
-def test_identification_rejects_relations_to_a_rejected_candidate() -> None:
+def test_identification_drops_relation_to_rejected_candidate_but_keeps_object() -> None:
     first = _candidate("D1.1", "PRODUCT_FACT", ["CL1"])
     first["relations"] = [
         {
@@ -504,9 +540,14 @@ def test_identification_rejects_relations_to_a_rejected_candidate() -> None:
         _package("DP-REL", "# 示例\n\n关系验证。")
     )
 
-    assert result.candidates == []
-    rejected = {item.candidate_id: item for item in result.rejected_candidates}
-    assert "unknown relation reference: C2" in rejected["C1"].reasons
+    assert [candidate.candidate_id for candidate in result.candidates] == ["C1"]
+    assert result.candidates[0].relations == []
+    assert any(
+        item.candidate_id == "C1"
+        and item.field == "relations"
+        and "悬空关系" in item.original_value
+        for item in result.normalizations
+    )
 
 
 def test_identification_rejects_incomplete_candidate_object_contract() -> None:
@@ -803,6 +844,29 @@ def test_exact_quote_macro_does_not_expand_to_the_full_source_section() -> None:
 
     assert reasons == []
     assert resolved == {"expression": "不允许说返现"}
+
+
+def test_alternate_verbatim_reference_is_normalized_to_verified_source() -> None:
+    claim = AtomicClaim(
+        claim_id="CL1",
+        claim_kind="script",
+        statement="完整话术",
+        subject="价格异议",
+        evidence=[
+            ClaimEvidence(
+                anchor_id="DP-SCRIPT#row-1",
+                exact_quote="先认可价格顾虑",
+                source_text="先认可价格顾虑，再完整说明产品价值与适用边界。",
+            )
+        ],
+    )
+
+    resolved, reasons = resolve_verbatim_claim_references(
+        {"script": {"verbatim": True, "sourceRef": "CL1"}}, {"CL1": claim}
+    )
+
+    assert reasons == []
+    assert resolved == {"script": "先认可价格顾虑，再完整说明产品价值与适用边界。"}
 
 
 def test_validate_atomic_claims_rejects_non_verbatim_quote() -> None:
