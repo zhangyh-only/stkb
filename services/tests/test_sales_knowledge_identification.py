@@ -643,6 +643,17 @@ def test_validate_atomic_claims_rejects_non_verbatim_quote() -> None:
     assert rejected[0].reasons == ["exact quote not found in DP-QUOTE#page-1"]
 
 
+def test_blank_selector_from_model_is_treated_as_plain_markdown_evidence() -> None:
+    package = _package("DP-BLANK", "# 示例\n\n嫌货才是买货人。")
+    raw = _claim("DP-BLANK#page-1", "嫌货才是买货人")
+    raw["evidence"][0]["selector"] = ""
+
+    accepted, rejected = validate_atomic_claims([raw], package)
+
+    assert rejected == []
+    assert accepted[0].evidence[0].selector is None
+
+
 def test_claim_validation_uses_complete_selected_cell_when_model_paraphrases_quote() -> None:
     package = _package(
         "DP-CELL",

@@ -8,11 +8,16 @@ from app.features.sales_knowledge_identification.quality import (
 
 
 def test_find_gold_path_falls_back_to_reviewable_samples(tmp_path) -> None:
+    incompatible_dir = tmp_path / "workspace/evaluations/DP-SAMPLE"
+    incompatible_dir.mkdir(parents=True)
+    (incompatible_dir / "gold-v9.json").write_text(
+        '{"expectedObjects": []}', encoding="utf-8"
+    )
     samples_root = tmp_path / "samples"
     sample_dir = samples_root / "DP-SAMPLE"
     sample_dir.mkdir(parents=True)
     gold_path = sample_dir / "gold-v0.2.json"
-    gold_path.write_text("{}", encoding="utf-8")
+    gold_path.write_text('{"expectedObjectGroups": []}', encoding="utf-8")
 
     found = find_gold_path(tmp_path / "workspace", "DP-SAMPLE", samples_root)
 

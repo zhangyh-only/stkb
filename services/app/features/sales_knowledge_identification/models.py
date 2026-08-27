@@ -109,6 +109,11 @@ class ClaimEvidence(ApiModel):
     selector: str | None = None
     source_text: str = ""
 
+    @field_validator("selector", mode="before")
+    @classmethod
+    def blank_selector_is_absent(cls, value: Any) -> Any:
+        return None if isinstance(value, str) and not value.strip() else value
+
 
 class AtomicClaim(ApiModel):
     claim_id: str

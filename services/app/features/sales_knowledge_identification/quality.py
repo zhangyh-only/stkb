@@ -70,14 +70,23 @@ def find_gold_path(
     document_package_id: str,
     samples_root: Path | None = None,
 ) -> Path | None:
-    candidates = sorted(
+    workspace_candidates = sorted(
         (workspace_root / "evaluations" / document_package_id).glob("gold-v*.json")
     )
-    if not candidates and samples_root is not None:
-        candidates = sorted(
+    sample_candidates: list[Path] = []
+    if samples_root is not None:
+        sample_candidates = sorted(
             (samples_root / document_package_id).glob("gold-v*.json")
         )
-    return candidates[-1] if candidates else None
+    for candidates in (workspace_candidates, sample_candidates):
+        for candidate in reversed(candidates):
+            try:
+                payload = json.loads(candidate.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(payload.get("expectedObjectGroups"), list):
+                return candidate
+    return None
 
 
 def _evaluate_group(
