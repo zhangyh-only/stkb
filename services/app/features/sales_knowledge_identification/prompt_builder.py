@@ -114,6 +114,8 @@ def build_object_planning_request(
      不得因共同使用同一状态值域而合并。
    - 只有“客户原话参考”而没有来源支持的根本顾虑、处理要素或标准回应时，不足以形成 D4.2
      正式异议对象；应保留为未决素材，禁止模型补造心理原因和化解动作。
+   - 资料只说“按照范本/标准话术回应”但没有提供范本文字时，不得形成 D4.1 STANDARD_SCRIPT；
+     只能保留为流程要求或未决素材，禁止根据法规常识自行创作话术。
    - 单一培训材料中的谚语、经验性“往往/可能”或讲师判断，只能形成术语解释或待验证信号；
      没有跨样本证据、明确触发条件与可执行动作时，不得规划为 D2.4 客户反应规律或 D3.3 行动规则。
 7. 每条主张必须至少进入一个 plan，或在 unresolvedItems 中逐条列明 claimId 与原因；不得静默丢失。
@@ -171,8 +173,18 @@ def build_content_realization_request(
     claims: list[AtomicClaim],
     batch_label: str,
 ) -> ModelRequest:
-    plan_payload = [plan.model_dump(by_alias=True) for plan in plans]
-    claim_payload = [claim.model_dump(by_alias=True) for claim in claims]
+    claim_by_id = {claim.claim_id: claim for claim in claims}
+    object_tasks = [
+        {
+            "plan": plan.model_dump(by_alias=True),
+            "verifiedClaims": [
+                claim_by_id[claim_id].model_dump(by_alias=True)
+                for claim_id in plan.source_claim_ids
+                if claim_id in claim_by_id
+            ],
+        }
+        for plan in plans
+    ]
     system_prompt = f"""你是 STKB 销售知识对象内容编制器。对象边界、分类、身份要素和主张归属
 已经由全局规划阶段确定；你只能为计划填充可复用的类型化规范内容，不能新增、删除、合并计划，
 也不能改变计划的 module、objectType、identityHints 或 sourceClaimIds。
@@ -181,8 +193,11 @@ def build_content_realization_request(
 1. 每个计划必须输出一次，以 planId 回链。content 必须满足对应模块合同，不得只有 summary。
 2. 完整吸收计划内所有主张：FAQ 的 items 每条 qa claim 至少对应一项；产品版本对象要覆盖事实、
    限制、适用范围和权益；流程保留顺序与条件；话术保留完整原文。
+   每个任务只能使用该任务 verifiedClaims 中的证据，禁止借用同批其他任务的主张或法规依据。
 3. 需要保留某条主张的完整原文字段时输出 {{"$verbatimFromClaim":"主张ID"}}，系统会用已核验
-   sourceText 替换。不得把长话术压缩成几十字摘要。
+   sourceText 替换；只需引用具体禁用表达、术语或短句时输出
+   {{"$exactQuoteFromClaim":"主张ID"}}。不得把长话术压缩成几十字摘要，也不得用完整 sourceText
+   代替一个短语列表项。
 4. 不用常识补写来源未提供的事实。合同允许为空的字段可显式给空数组；其余缺失必须忠实说明
    unresolved，而不是编造。
 5. 资料中的培训谚语、讲师观点和经验性判断必须保留来源立场。TERM 的每个 terms 条目中，
@@ -205,10 +220,8 @@ def build_content_realization_request(
         document_package_id=document_package_id,
         system_prompt=system_prompt,
         user_prompt=(
-            f"内容编制批次：{batch_label}\n对象计划：\n"
-            + json.dumps(plan_payload, ensure_ascii=False, indent=2)
-            + "\n计划引用的已核验主张（sourceText 为程序回填的完整来源字段）：\n"
-            + json.dumps(claim_payload, ensure_ascii=False, indent=2)
+            f"内容编制批次：{batch_label}\n对象任务（每项计划与证据严格隔离）：\n"
+            + json.dumps(object_tasks, ensure_ascii=False, indent=2)
         ),
     )
 

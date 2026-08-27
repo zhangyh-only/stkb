@@ -523,7 +523,11 @@ class SalesKnowledgeIdentificationService:
                 candidate_payload["entityMentions"] = realization.get("entityMentions", [])
                 candidate_payload["relations"] = realization.get("relations", [])
                 raw_candidates.append(candidate_payload)
-                candidate_claim_scopes[plan.plan_id] = claim_by_id
+                candidate_claim_scopes[plan.plan_id] = {
+                    claim_id: claim_by_id[claim_id]
+                    for claim_id in plan.source_claim_ids
+                    if claim_id in claim_by_id
+                }
             for plan in plans:
                 if plan.plan_id in realized_plan_ids:
                     continue
@@ -534,7 +538,11 @@ class SalesKnowledgeIdentificationService:
                     {"content": {}, "entityMentions": [], "relations": []}
                 )
                 raw_candidates.append(missing_payload)
-                candidate_claim_scopes[plan.plan_id] = claim_by_id
+                candidate_claim_scopes[plan.plan_id] = {
+                    claim_id: claim_by_id[claim_id]
+                    for claim_id in plan.source_claim_ids
+                    if claim_id in claim_by_id
+                }
 
         accepted: list[CandidateKnowledgeObject] = []
         rejected: list[RejectedCandidate] = []
@@ -939,6 +947,15 @@ def _validate_object_plans(
                 reasons.append(
                     "customer objection lacks source-backed root concern or response"
                 )
+        if plan.module == "D4.1" and plan.object_type == "STANDARD_SCRIPT":
+            script_keys = {"script", "wording", "response", "verbatim"}
+            has_source_script = any(
+                claim.claim_kind == "script"
+                or script_keys.intersection(claim.attributes)
+                for claim in plan_claims
+            )
+            if not has_source_script:
+                reasons.append("standard script source text is not provided")
         if (
             plan.module == "D3.3"
             and plan_claims

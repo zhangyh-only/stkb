@@ -206,6 +206,8 @@ export type GoldGroupEvaluation = {
   missingItemFields: string[]
   requiredUnresolvedEvidence: string[]
   missingUnresolvedEvidence: string[]
+  requireAllEvidence: boolean
+  missingExpectedEvidence: string[]
 }
 
 export type IdentificationQualityReport = {

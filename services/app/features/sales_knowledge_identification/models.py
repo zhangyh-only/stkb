@@ -276,6 +276,8 @@ class GoldGroupEvaluation(ApiModel):
     missing_item_fields: list[str] = Field(default_factory=list)
     required_unresolved_evidence: list[str] = Field(default_factory=list)
     missing_unresolved_evidence: list[str] = Field(default_factory=list)
+    require_all_evidence: bool = False
+    missing_expected_evidence: list[str] = Field(default_factory=list)
 
 
 class IdentificationQualityReport(ApiModel):

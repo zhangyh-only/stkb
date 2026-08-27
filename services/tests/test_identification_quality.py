@@ -125,6 +125,8 @@ def test_quality_report_detects_missing_required_nested_item_fields(tmp_path) ->
                         "expectedCount": 1,
                         "module": "D4.3",
                         "objectTypes": ["TERM"],
+                        "evidence": ["A1", "A2"],
+                        "requireAllEvidence": True,
                         "requiredItemCount": 1,
                         "requiredItemField": "items",
                         "requiredItemFields": ["sourceStance", "usageBoundary"],
@@ -169,6 +171,7 @@ def test_quality_report_detects_missing_required_nested_item_fields(tmp_path) ->
         "sourceStance",
         "usageBoundary",
     ]
+    assert report.groups[0].missing_expected_evidence == ["A2"]
 
 
 def _claim(claim_id: str, anchor: str) -> dict[str, object]:

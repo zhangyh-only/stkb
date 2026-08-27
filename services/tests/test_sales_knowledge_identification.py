@@ -4,6 +4,7 @@ from copy import deepcopy
 import pytest
 
 from app.features.sales_knowledge_identification.claims import (
+    resolve_verbatim_claim_references,
     supplement_structured_table_claims,
     validate_atomic_claims,
 )
@@ -412,6 +413,26 @@ def test_planning_rejects_list_only_action_rule() -> None:
     ]
 
 
+def test_planning_rejects_standard_script_when_source_only_mentions_template() -> None:
+    gateway = TwoStageGateway(
+        [_claim("DP-TEMPLATE#page-1", "必须按照范本说", kind="rule")],
+        {
+            "candidates": [_candidate("D4.1", "STANDARD_SCRIPT", ["CL1"])],
+            "weakSignals": [],
+            "unresolvedItems": [],
+        },
+    )
+
+    result = SalesKnowledgeIdentificationService(gateway=gateway).identify(
+        _package("DP-TEMPLATE", "# 示例\n\n必须按照范本说。")
+    )
+
+    assert result.candidates == []
+    assert result.rejected_object_plans[0].reasons == [
+        "standard script source text is not provided"
+    ]
+
+
 def test_identification_rejects_relations_to_a_rejected_candidate() -> None:
     first = _candidate("D1.1", "PRODUCT_FACT", ["CL1"])
     first["relations"] = [
@@ -707,6 +728,29 @@ def test_claim_selector_and_verbatim_macro_preserve_complete_source_field() -> N
     assert result.candidates[0].content["script"] == (
         "先生您好，这是一段必须被完整保留的标准销售话术。"
     )
+
+
+def test_exact_quote_macro_does_not_expand_to_the_full_source_section() -> None:
+    claim = AtomicClaim(
+        claim_id="CL1",
+        claim_kind="rule",
+        statement="禁止表达",
+        subject="返现",
+        evidence=[
+            ClaimEvidence(
+                anchor_id="DP-QUOTE#section-1",
+                exact_quote="不允许说返现",
+                source_text="完整规则段落：不允许说返现，还应说明合规替代动作。",
+            )
+        ],
+    )
+
+    resolved, reasons = resolve_verbatim_claim_references(
+        {"expression": {"$exactQuoteFromClaim": "CL1"}}, {"CL1": claim}
+    )
+
+    assert reasons == []
+    assert resolved == {"expression": "不允许说返现"}
 
 
 def test_validate_atomic_claims_rejects_non_verbatim_quote() -> None:

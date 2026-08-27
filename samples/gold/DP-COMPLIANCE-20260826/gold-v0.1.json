@@ -1,7 +1,7 @@
 {
   "status": "proxy_draft",
   "documentPackageId": "DP-COMPLIANCE-20260826",
-  "reviewFocus": "每项合规主题保留禁止/要求行为、依据、适用范围和正确动作，不压成合规摘要",
+  "reviewFocus": "按独立消费职责形成合规规则、办理流程、条件策略、禁用表达和内部术语，并验证来源覆盖而非凑对象数量",
   "expectedObjectGroups": [
     {
       "key": "compliance-rule-themes",
@@ -19,15 +19,71 @@
         "DP-COMPLIANCE-20260826#rule-8",
         "DP-COMPLIANCE-20260826#rule-9",
         "DP-COMPLIANCE-20260826#rule-10",
-        "DP-COMPLIANCE-20260826#rule-11",
         "DP-COMPLIANCE-20260826#rule-12"
       ],
-      "splitRule": "资金往来、优惠沟通、误导骚扰、投保意愿、信息保护、呼叫频率等依据和消费检查点不同，独立更新"
+      "requireAllEvidence": true,
+      "splitRule": "规则1包含资金利益输送与条款费率变更两个独立主题；其余合规主题按依据、渠道和检查点独立更新，地域准入规则11由业务规则与条件策略承载"
+    },
+    {
+      "key": "compliance-business-processes",
+      "expectedCount": 3,
+      "module": "D1.3",
+      "objectTypes": ["BUSINESS_PROCESS", "POLICY_RULE_SET"],
+      "evidence": [
+        "DP-COMPLIANCE-20260826#rule-3",
+        "DP-COMPLIANCE-20260826#rule-4",
+        "DP-COMPLIANCE-20260826#rule-6",
+        "DP-COMPLIANCE-20260826#rule-11"
+      ],
+      "requireAllEvidence": true,
+      "splitRule": "禁呼屏蔽、投保下单资料告知、地域准入是三个不同业务目的和完成边界"
+    },
+    {
+      "key": "compliance-conditional-strategies",
+      "expectedCount": 2,
+      "module": "D3.3",
+      "objectTypes": ["SALES_STRATEGY", "DECISION_RULE"],
+      "evidence": [
+        "DP-COMPLIANCE-20260826#rule-5",
+        "DP-COMPLIANCE-20260826#rule-11"
+      ],
+      "requireAllEvidence": true,
+      "splitRule": "信息授权分支与受限客群产品选择是两个触发上下文"
+    },
+    {
+      "key": "prohibited-customer-data-expression",
+      "expectedCount": 1,
+      "module": "D3.4",
+      "objectTypes": ["PROHIBITED_EXPRESSION"],
+      "evidence": ["DP-COMPLIANCE-20260826#rule-5"],
+      "splitRule": "禁用表达作为合规规则的可检索检查项，不展开成整段来源材料"
+    },
+    {
+      "key": "internal-quality-term",
+      "expectedCount": 1,
+      "module": "D4.3",
+      "objectTypes": ["TERM"],
+      "evidence": ["DP-COMPLIANCE-20260826#rule-9"],
+      "requiredItemCount": 1,
+      "requiredItemField": "terms",
+      "requiredItemFields": ["termText", "standardExplanation", "sourceStance", "usageBoundary"],
+      "splitRule": "1010电话作为内部质检语境术语维护，不与禁止透露核保原因的合规规则混为一项"
+    },
+    {
+      "key": "missing-template-must-not-be-invented",
+      "expectedCount": 0,
+      "module": "D4.1",
+      "objectTypes": ["STANDARD_SCRIPT"],
+      "evidence": ["DP-COMPLIANCE-20260826#rule-5"],
+      "splitRule": "材料只要求按照范本回应但未提供范本文字，不能自行创作正式标准话术"
     }
   ],
   "prohibitedPatterns": [
-    "把12项规则压成一个只有禁止违规的summary",
+    "把全部规则压成一个只有禁止违规的summary",
+    "只按预测数量判定通过而不检查每个规则来源锚点是否覆盖",
     "为没有法规依据的内部经验补造监管文号",
+    "从同批其他对象借用不属于本对象来源主张的动作或法规依据",
+    "材料未提供范本文字时自行创作客户信息来源标准话术",
     "把某次质检分数写入合规规则对象"
   ]
 }

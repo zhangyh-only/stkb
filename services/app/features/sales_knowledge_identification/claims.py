@@ -232,6 +232,14 @@ def resolve_verbatim_claim_references(
 ) -> tuple[Any, list[str]]:
     """Resolve model macros to verified source text without asking it to copy long text."""
     if isinstance(value, dict):
+        if set(value) == {"$exactQuoteFromClaim"}:
+            claim_id = value["$exactQuoteFromClaim"]
+            if not isinstance(claim_id, str) or claim_id not in claim_by_id:
+                return value, [f"unknown exact quote claim reference: {claim_id}"]
+            quote_parts = [
+                evidence.exact_quote for evidence in claim_by_id[claim_id].evidence
+            ]
+            return "\n\n".join(dict.fromkeys(quote_parts)), []
         if set(value) == {"$verbatimFromClaim"}:
             claim_id = value["$verbatimFromClaim"]
             if not isinstance(claim_id, str) or claim_id not in claim_by_id:

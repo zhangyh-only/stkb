@@ -110,6 +110,7 @@ def _evaluate_group(
     group: dict[str, Any], result: IdentificationResult
 ) -> GoldGroupEvaluation:
     expected_evidence = set(group.get("evidence", []))
+    require_all_evidence = bool(group.get("requireAllEvidence", False))
     object_types = set(group.get("objectTypes", []))
     matched_candidates = [
         candidate
@@ -119,6 +120,14 @@ def _evaluate_group(
         and (not expected_evidence or expected_evidence.intersection(candidate.evidence))
     ]
     predicted_count = len(matched_candidates)
+    predicted_evidence = {
+        evidence
+        for candidate in matched_candidates
+        for evidence in candidate.evidence
+    }
+    missing_expected_evidence = (
+        sorted(expected_evidence - predicted_evidence) if require_all_evidence else []
+    )
     expected_count = int(group["expectedCount"])
     required_item_count = group.get("requiredItemCount")
     required_item_field = group.get("requiredItemField", "items")
@@ -164,6 +173,7 @@ def _evaluate_group(
         and not missing_content_fields
         and not missing_item_fields
         and not missing_unresolved_evidence
+        and not missing_expected_evidence
     ):
         status = "met"
     elif predicted_count == 0:
@@ -174,6 +184,7 @@ def _evaluate_group(
         missing_content_fields
         or missing_item_fields
         or missing_unresolved_evidence
+        or missing_expected_evidence
     ):
         status = "contract_failed"
     else:
@@ -195,6 +206,8 @@ def _evaluate_group(
         missing_item_fields=missing_item_fields,
         required_unresolved_evidence=required_unresolved_evidence,
         missing_unresolved_evidence=missing_unresolved_evidence,
+        require_all_evidence=require_all_evidence,
+        missing_expected_evidence=missing_expected_evidence,
     )
 
 
