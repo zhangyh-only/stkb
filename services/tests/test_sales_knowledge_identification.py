@@ -10,6 +10,7 @@ from app.features.sales_knowledge_identification.claims import (
 )
 from app.features.sales_knowledge_identification.content_contracts import (
     CONTENT_CONTRACT_BY_MODULE,
+    FIELD_TYPES_BY_OBJECT_TYPE,
 )
 from app.features.sales_knowledge_identification.identity_contracts import (
     IDENTITY_CONTRACT_BY_MODULE,
@@ -30,12 +31,15 @@ from app.features.sales_knowledge_identification.service import (
     _apply_plan_augmentations,
     _automatic_uncovered_claim_ids,
     _claim_explicitly_all_versions,
+    _constrain_plan_source_claim_scope,
     _enforce_plan_granularity,
     _expand_compact_object_plan,
     _expand_content_path_to_leaf_paths,
+    _group_claims_for_planning,
     _merge_repair_plans,
     _normalize_content_shape,
     _plan_satisfies_primary_claim_role,
+    _validate_object_plans,
 )
 
 
@@ -60,7 +64,9 @@ class TwoStageGateway:
                 and candidate.get("candidateId") != "C-INCOMPLETE"
             ):
                 candidate["content"] = _contract_content(
-                    module, candidate.get("content", {})
+                    module,
+                    candidate.get("content", {}),
+                    str(candidate.get("objectType", "")) or None,
                 )
         self.requests: list[ModelRequest] = []
 
@@ -249,9 +255,42 @@ class CrossSegmentClaimGateway:
         )
 
 
-def _contract_content(module: str, original: object) -> dict[str, object]:
+def _contract_content(
+    module: str, original: object, object_type: str | None = None
+) -> dict[str, object]:
     contract = CONTENT_CONTRACT_BY_MODULE[module]
-    content = {field: f"测试字段 {field}" for field in contract.required_fields}
+    selected_type = object_type or contract.object_types[0]
+    field_types = FIELD_TYPES_BY_OBJECT_TYPE.get(selected_type, {})
+    content: dict[str, object] = {}
+    for field in contract.required_fields_by_type.get(
+        selected_type, contract.required_fields
+    ):
+        expected_type = field_types.get(field, str)
+        if field == "items":
+            content[field] = [
+                {
+                    "question": "测试问题",
+                    "answer": "测试答案",
+                    "claimRef": "CL1",
+                }
+            ]
+        elif field == "facts":
+            content[field] = [{"description": "测试事实"}]
+        elif field == "rootConcernHypotheses":
+            content[field] = []
+        elif field == "resolutionElements":
+            content[field] = [
+                {
+                    "element": "先确认客户表达",
+                    "detail": "依据资料提供的回复说明处理方向和事实边界。",
+                }
+            ]
+        elif expected_type is list:
+            content[field] = [f"测试字段 {field}"]
+        elif expected_type is dict:
+            content[field] = {"scope": f"测试字段 {field}"}
+        else:
+            content[field] = f"测试字段 {field}"
     if isinstance(original, dict):
         content.update(original)
     content["contractDetail"] = "用于验证内容合同的结构化测试详情。" * 20
@@ -283,6 +322,234 @@ def _claim(
     }
 
 
+def test_planning_batches_keep_source_location_together() -> None:
+    claims = [
+        AtomicClaim.model_validate(_claim("DP-BATCH#row-1", "事实一", claim_id="CL1")),
+        AtomicClaim.model_validate(_claim("DP-BATCH#row-1", "事实二", claim_id="CL2")),
+        AtomicClaim.model_validate(_claim("DP-BATCH#row-2", "事实三", claim_id="CL3")),
+    ]
+
+    batches = _group_claims_for_planning(claims, max_claims=2)
+
+    assert [[claim.claim_id for claim in batch] for _label, batch in batches] == [
+        ["CL1", "CL2"],
+        ["CL3"],
+    ]
+
+
+def test_multiple_planning_batches_receive_unique_plan_ids() -> None:
+    first_claim = AtomicClaim.model_validate(
+        _claim("DP-BATCH#row-1", "产品事实", claim_id="CL1")
+    )
+    second_claim = AtomicClaim.model_validate(
+        _claim("DP-BATCH#row-2", "另一个产品事实", claim_id="CL2")
+    )
+    results = [
+        (
+            "planning-1",
+            [first_claim],
+            {
+                "objectPlans": [
+                    [
+                        "P1",
+                        "产品事实一",
+                        "D1.1",
+                        "PRODUCT_FACT",
+                        {
+                            "subject": "产品A",
+                            "versionScope": "版本A",
+                            "factTheme": "价格",
+                        },
+                        ["CL1"],
+                    ]
+                ]
+            },
+            None,
+            [],
+        ),
+        (
+            "planning-2",
+            [second_claim],
+            {
+                "objectPlans": [
+                    [
+                        "P1",
+                        "产品事实二",
+                        "D1.1",
+                        "PRODUCT_FACT",
+                        {
+                            "subject": "产品B",
+                            "versionScope": "版本B",
+                            "factTheme": "责任",
+                        },
+                        ["CL2"],
+                    ]
+                ]
+            },
+            None,
+            [],
+        ),
+    ]
+
+    plans, rejected, _weak, _unresolved = _validate_object_plans(
+        results, [first_claim, second_claim]
+    )
+
+    assert rejected == []
+    assert [plan.plan_id for plan in plans] == ["planning-1-P1", "planning-2-P1"]
+
+
+def test_named_version_product_fact_is_normalized_to_version_fact() -> None:
+    claim = AtomicClaim.model_validate(
+        _claim("DP-VERSION#row-1", "全能版药品覆盖", claim_id="CL1")
+    )
+    results = [
+        (
+            "planning-1",
+            [claim],
+            {
+                "objectPlans": [
+                    [
+                        "P1",
+                        "全能版药品覆盖事实",
+                        "D1.1",
+                        "PRODUCT_FACT",
+                        {
+                            "subject": "药享保",
+                            "versionScope": "全能版语境",
+                            "factTheme": "药品覆盖",
+                        },
+                        ["CL1"],
+                    ]
+                ]
+            },
+            None,
+            [],
+        )
+    ]
+
+    plans, rejected, _weak, _unresolved = _validate_object_plans(results, [claim])
+
+    assert rejected == []
+    assert plans[0].object_type == "PRODUCT_VERSION_FACT"
+
+
+def test_unknown_version_product_fact_stays_unresolved() -> None:
+    claim = AtomicClaim.model_validate(
+        _claim("DP-VERSION#row-1", "药享保年费180元", claim_id="CL1")
+    )
+    results = [
+        (
+            "planning-1",
+            [claim],
+            {
+                "objectPlans": [
+                    [
+                        "P1",
+                        "药享保价格事实",
+                        "D1.1",
+                        "PRODUCT_FACT",
+                        {
+                            "subject": "药享保",
+                            "versionScope": "未明确版本，需核实",
+                            "factTheme": "保费价格",
+                        },
+                        ["CL1"],
+                    ]
+                ]
+            },
+            None,
+            [],
+        )
+    ]
+
+    plans, rejected, _weak, unresolved = _validate_object_plans(results, [claim])
+
+    assert plans == []
+    assert any(
+        "unknown version must remain unresolved" in reason
+        for item in rejected
+        for reason in item.reasons
+    )
+    assert unresolved[0][0]["claimId"] == "CL1"
+
+
+def test_objection_identity_uses_observable_customer_expression() -> None:
+    raw_claim = _claim(
+        "DP-OBJECTION#row-1",
+        "可以一次性买几年的吗",
+        kind="objection",
+        claim_id="CL1",
+    )
+    raw_claim["attributes"] = {
+        "expression": "可以一次性买几年的吗",
+        "responseContext": "产品按年续交。",
+    }
+    claim = AtomicClaim.model_validate(raw_claim)
+    results = [
+        (
+            "planning-1",
+            [claim],
+            {
+                "objectPlans": [
+                    [
+                        "P1",
+                        "缴费周期异议",
+                        "D4.2",
+                        "CUSTOMER_OBJECTION",
+                        {
+                            "objectionIntent": "担心涨价并希望锁定长期权益",
+                            "context": "产品咨询",
+                        },
+                        ["CL1"],
+                    ]
+                ]
+            },
+            None,
+            [],
+        )
+    ]
+
+    plans, rejected, _weak, _unresolved = _validate_object_plans(results, [claim])
+
+    assert rejected == []
+    assert plans[0].identity_hints["objectionIntent"] == "可以一次性买几年的吗"
+
+
+def test_script_plan_drops_supporting_claims_from_unrelated_source_rows() -> None:
+    script_claim = AtomicClaim.model_validate(
+        _claim("DP-SCOPE#row-1", "完整销售话术", kind="script", claim_id="CL1")
+    )
+    same_row_fact = AtomicClaim.model_validate(
+        _claim("DP-SCOPE#row-1", "话术引用事实", claim_id="CL2")
+    )
+    unrelated_fact = AtomicClaim.model_validate(
+        _claim("DP-SCOPE#row-9", "其他场景事实", claim_id="CL3")
+    )
+    plan = CandidateObjectPlan(
+        plan_id="P1",
+        title="销售话术",
+        domain="D4",
+        module="D4.1",
+        object_type="STANDARD_SCRIPT",
+        object_boundary="同一沟通目标",
+        classification_basis="来源提供完整话术",
+        identity_hints={
+            "communicationGoal": "产品引入",
+            "method": "事实说明",
+            "applicability": "通用",
+        },
+        source_claim_ids=["CL1", "CL2", "CL3"],
+    )
+
+    constrained = _constrain_plan_source_claim_scope(
+        plan,
+        {claim.claim_id: claim for claim in [script_claim, same_row_fact, unrelated_fact]},
+    )
+
+    assert constrained.source_claim_ids == ["CL1", "CL2"]
+
+
 def _candidate(
     module: str,
     object_type: str,
@@ -303,7 +570,7 @@ def _candidate(
         "module": module,
         "objectType": object_type,
         "sourceClaimIds": source_claim_ids,
-        "content": _contract_content(module, {}),
+        "content": _contract_content(module, {}, object_type),
         "entityMentions": [],
         "relations": [],
     }
@@ -379,6 +646,86 @@ def test_content_claim_usage_distinguishes_planned_evidence_from_written_content
         for item in result.unresolved_items
     )
     assert sum(item.claim_id == "CL2" for item in result.unresolved_items) == 1
+
+
+def test_missing_critical_claim_attribution_blocks_formalization_quality() -> None:
+    package_id = "DP-CRITICAL-USAGE"
+    anchor = f"{package_id}#page-1"
+    candidate = _candidate("D1.1", "PRODUCT_FACT", ["CL1"])
+    candidate["claimUsage"] = [
+        {
+            "claimId": "CL1",
+            "role": "primary",
+            "contentPaths": ["$.summary"],
+            "explanation": "仅把主张写入摘要，没有逐项支撑事实正文",
+        }
+    ]
+    candidate["content"] = {
+        **candidate["content"],
+        "summary": "产品事实摘要",
+    }
+    gateway = TwoStageGateway(
+        [_claim(anchor, "药享保提供在线问诊", claim_id="CL1")],
+        {"candidates": [candidate], "weakSignals": [], "unresolvedItems": []},
+    )
+
+    result = SalesKnowledgeIdentificationService(gateway).identify(
+        _package(package_id, "药享保提供在线问诊")
+    )
+
+    assert len(result.candidates) == 1
+    assert result.candidates[0].quality_issues == [
+        "关键正文缺少主张归因：$.facts[0].description"
+    ]
+
+
+def test_objection_expression_is_normalized_to_customer_source_field() -> None:
+    package_id = "DP-OBJECTION-EXPRESSION"
+    anchor = f"{package_id}#page-1"
+    claim = _claim(
+        anchor,
+        "可以一次性买几年的吗",
+        kind="objection",
+        claim_id="CL1",
+    )
+    claim["attributes"] = {
+        "expression": "可以一次性买几年的吗",
+        "responseContext": "产品按年续交，次年可根据实际情况决定是否续保。",
+    }
+    candidate = _candidate("D4.2", "CUSTOMER_OBJECTION", ["CL1"])
+    candidate["content"] = {
+        "objectionTheme": "缴费周期咨询",
+        "expressions": [
+            "可以一次性买几年的吗\n\n产品按年续交，次年可根据实际情况决定是否续保。"
+        ],
+        "context": "客户询问缴费周期",
+        "rootConcernHypotheses": [],
+        "resolutionElements": [
+            {
+                "element": "说明按年续交",
+                "detail": "产品按年续交，次年可根据实际情况决定是否续保。",
+            }
+        ],
+        "contractDetail": "用于验证客户原话与销售回复必须分离。" * 20,
+    }
+    gateway = TwoStageGateway(
+        [claim],
+        {"candidates": [candidate], "weakSignals": [], "unresolvedItems": []},
+    )
+
+    result = SalesKnowledgeIdentificationService(gateway).identify(
+        _package(
+            package_id,
+            "可以一次性买几年的吗\n产品按年续交，次年可根据实际情况决定是否续保。",
+        )
+    )
+
+    assert result.candidates[0].content["expressions"] == [
+        "可以一次性买几年的吗"
+    ]
+    assert any(
+        item.field == "content.expressions" for item in result.normalizations
+    )
 
 
 def test_invalid_claim_usage_path_cannot_count_as_written_content() -> None:
@@ -580,6 +927,31 @@ def test_planning_rejects_list_only_action_rule() -> None:
     assert result.rejected_object_plans[0].reasons == [
         "category enumeration cannot become an action rule without source actions"
     ]
+
+
+def test_planning_rejects_service_guidance_as_sales_decision_rule() -> None:
+    gateway = TwoStageGateway(
+        [_claim("DP-QA#row-1", "库存不足时等待后重试", kind="method")],
+        {
+            "candidates": [_candidate("D3.3", "DECISION_RULE", ["CL1"])],
+            "weakSignals": [],
+            "unresolvedItems": [],
+        },
+    )
+
+    result = SalesKnowledgeIdentificationService(gateway=gateway).identify(
+        _package(
+            "DP-QA",
+            "# 示例\n\n库存不足时等待后重试。",
+            [SourceAnchor(anchor_id="DP-QA#row-1", kind="table")],
+        )
+    )
+
+    assert result.candidates == []
+    assert any(
+        "service operation guidance belongs to D1.3 or D4.3" in reason
+        for reason in result.rejected_object_plans[0].reasons
+    )
 
 
 def test_planning_rejects_standard_script_when_source_only_mentions_template() -> None:
@@ -951,6 +1323,76 @@ def test_exact_quote_macro_does_not_expand_to_the_full_source_section() -> None:
 
     assert reasons == []
     assert resolved == {"expression": "不允许说返现"}
+
+
+def test_objection_verbatim_macro_keeps_customer_expression_separate() -> None:
+    claim = AtomicClaim(
+        claim_id="CL-OBJECTION",
+        claim_kind="objection",
+        statement="客户咨询缴费周期",
+        subject="可以一次性买几年的吗",
+        attributes={
+            "expression": "可以一次性买几年的吗",
+            "responseContext": "产品按年续交，客户可以按实际情况决定是否续保。",
+        },
+        evidence=[
+            ClaimEvidence(
+                anchor_id="DP-OBJECTION#row-1",
+                exact_quote="可以一次性买几年的吗",
+                source_text="可以一次性买几年的吗",
+            ),
+            ClaimEvidence(
+                anchor_id="DP-OBJECTION#row-1",
+                exact_quote="产品按年续交",
+                source_text="产品按年续交，客户可以按实际情况决定是否续保。",
+            ),
+        ],
+    )
+
+    resolved, reasons = resolve_verbatim_claim_references(
+        {"expressions": [{"$verbatimFromClaim": "CL-OBJECTION"}]},
+        {"CL-OBJECTION": claim},
+    )
+
+    assert reasons == []
+    assert resolved == {"expressions": ["可以一次性买几年的吗"]}
+
+
+def test_claim_attribute_macro_selects_objection_response_only() -> None:
+    claim = AtomicClaim(
+        claim_id="CL-OBJECTION",
+        claim_kind="objection",
+        statement="客户咨询缴费周期",
+        subject="可以一次性买几年的吗",
+        attributes={
+            "expression": "可以一次性买几年的吗",
+            "responseContext": "产品按年续交，客户可以按实际情况决定是否续保。",
+        },
+        evidence=[
+            ClaimEvidence(
+                anchor_id="DP-OBJECTION#row-1",
+                exact_quote="可以一次性买几年的吗",
+                source_text="可以一次性买几年的吗",
+            )
+        ],
+    )
+
+    resolved, reasons = resolve_verbatim_claim_references(
+        {
+            "resolutionElement": {
+                "$attributeFromClaim": {
+                    "claimId": "CL-OBJECTION",
+                    "attribute": "responseContext",
+                }
+            }
+        },
+        {"CL-OBJECTION": claim},
+    )
+
+    assert reasons == []
+    assert resolved == {
+        "resolutionElement": "产品按年续交，客户可以按实际情况决定是否续保。"
+    }
 
 
 def test_alternate_verbatim_reference_is_normalized_to_verified_source() -> None:
@@ -1343,18 +1785,72 @@ def test_granularity_gate_splits_objections_sharing_one_source_anchor() -> None:
         object_type="CUSTOMER_OBJECTION",
         object_boundary="不同根本顾虑必须拆分",
         classification_basis="属于客户异议",
-        identity_hints={"rootConcern": "常见异议", "context": "通用"},
+        identity_hints={"objectionIntent": "常见异议", "context": "通用"},
         source_claim_ids=["CL1", "CL2"],
     )
 
     split = _enforce_plan_granularity([plan], claims)
 
     assert [item.plan_id for item in split] == ["P1-1", "P1-2"]
-    assert [item.identity_hints["rootConcern"] for item in split] == [
+    assert [item.identity_hints["objectionIntent"] for item in split] == [
         "价格贵",
         "已经有医保",
     ]
     assert [item.source_claim_ids for item in split] == [["CL1"], ["CL2"]]
+
+
+def test_granularity_gate_merges_same_product_version_fact_fragments() -> None:
+    claims = [
+        AtomicClaim.model_validate(
+            _claim("DP-VERSION#row-1", "尊享版年保费100元", claim_id="CL1")
+        ),
+        AtomicClaim.model_validate(
+            _claim("DP-VERSION#row-2", "尊享版首次普药赔付100%", claim_id="CL2")
+        ),
+    ]
+    plans = [
+        CandidateObjectPlan(
+            plan_id="P1",
+            title="尊享版价格事实",
+            domain="D1",
+            module="D1.1",
+            object_type="PRODUCT_VERSION_FACT",
+            object_boundary="同一产品版本共同更新",
+            classification_basis="属于版本事实",
+            identity_hints={
+                "subject": "药享保-尊享版",
+                "versionScope": "尊享版",
+                "factTheme": "价格",
+            },
+            source_claim_ids=["CL1"],
+        ),
+        CandidateObjectPlan(
+            plan_id="P2",
+            title="尊享版赔付事实补充",
+            domain="D1",
+            module="D1.1",
+            object_type="PRODUCT_VERSION_FACT",
+            object_boundary="同一产品版本共同更新",
+            classification_basis="属于版本事实",
+            identity_hints={
+                "subject": "药享保",
+                "versionScope": "尊享版语境",
+                "factTheme": "赔付比例",
+            },
+            source_claim_ids=["CL2"],
+        ),
+    ]
+
+    merged = _enforce_plan_granularity(plans, claims)
+
+    assert len(merged) == 1
+    assert merged[0].title == "药享保尊享版产品版本事实"
+    assert merged[0].identity_hints == {
+        "subject": "药享保",
+        "versionScope": "尊享版",
+        "factTheme": "产品版本综合事实",
+    }
+    assert merged[0].source_claim_ids == ["CL1", "CL2"]
 
 
 def test_granularity_gate_merges_qa_plans_from_one_document_unit() -> None:
@@ -1561,6 +2057,23 @@ def test_qa_content_normalizes_single_fact_reference_alias() -> None:
     )
 
     assert content["items"][0]["claimRef"] == "CL1"
+
+
+def test_content_shape_removes_runtime_refs_and_normalizes_applicability() -> None:
+    content = _normalize_content_shape(
+        "D1.1",
+        "PRODUCT_VERSION_FACT",
+        {
+            "subject": "药享保尊享版",
+            "facts": [{"description": "年保费100元", "sourceRef": "CL1"}],
+            "applicability": "尊享版用户",
+            "limitations": [],
+        },
+        {"subject": "药享保", "versionScope": "尊享版"},
+    )
+
+    assert content["applicability"] == {"product": "药享保", "version": "尊享版"}
+    assert content["facts"] == [{"description": "年保费100元"}]
 
 
 def test_compact_object_plan_expands_to_validation_shape() -> None:

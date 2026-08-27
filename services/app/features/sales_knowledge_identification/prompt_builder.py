@@ -10,8 +10,8 @@ from .content_contracts import (
 from .identity_contracts import IDENTITY_CONTRACT_BY_MODULE
 from .models import AtomicClaim, CandidateObjectPlan, DocumentPackage, ModelRequest
 
-PROMPT_VERSION = "sales-identification-v0.8"
-SCHEMA_VERSION = "candidate-knowledge-object-v0.6"
+PROMPT_VERSION = "sales-identification-v0.12"
+SCHEMA_VERSION = "candidate-knowledge-object-v0.7"
 
 
 def render_planning_contracts_for_prompt() -> str:
@@ -138,7 +138,9 @@ def build_object_planning_request(
    同一资料行同时包含销售方法/策略与完整话术时，方法或策略和 D4.1 话术分别形成对象；其中可跨
    客群复用的方法原则归 D3.2，带明确客群、产品组合或条件动作的策略归 D3.3。两者下游职责不同，
    不能因为形成话术就丢掉“如何突出优势”“如何按客户特点选择重点”等方法主张。
-5. 根本顾虑相同的异议表达归并；根本顾虑不同的异议保持独立。异议对象不吞并应对话术。
+5. D4.2 的 objectionIntent 只能概括客户可观察的异议/咨询意图，例如“质疑价格”“询问缴费周期”；
+   不得写“害怕麻烦、担心涨价、希望长期锁定”等资料未明确表达的心理原因。可观察意图相同的表达
+   归并，意图或购买语境不同则拆分；异议对象不吞并应对话术。
 6. 下列边界是硬约束：
    - 每个不同 productCombination/产品组合形成独立 D3.3 策略，不得因同属组合营销而合并；
    - D1.3 的用户操作顺序形成 BUSINESS_PROCESS；处方限量、同功效药限制、目录限制、发票条件等
@@ -248,13 +250,20 @@ def build_content_realization_request(
    每个任务只能使用该任务 verifiedClaims 中的证据，禁止借用同批其他任务的主张或法规依据。
 3. 需要保留某条主张的完整原文字段时输出 {{"$verbatimFromClaim":"主张ID"}}，系统会用已核验
    sourceText 替换；只需引用具体禁用表达、术语或短句时输出
-   {{"$exactQuoteFromClaim":"主张ID"}}。不得把长话术压缩成几十字摘要，也不得用完整 sourceText
+   {{"$exactQuoteFromClaim":"主张ID"}}。主张 attributes 已提供精确结构字段时输出
+   {{"$attributeFromClaim":{{"claimId":"主张ID","attribute":"responseContext"}}}}；例如 D4.2
+   expressions 取 expression，resolutionElements 取 responseContext，禁止用同一个完整主张宏
+   混入两者。
+   不得把长话术压缩成几十字摘要，也不得用完整 sourceText
    代替一个短语列表项。
 4. 不用常识补写来源未提供的事实。合同允许为空的字段可显式给空数组；其余缺失必须忠实说明
    unresolved，而不是编造。
 5. 资料中的培训谚语、讲师观点和经验性判断必须保留来源立场。TERM 的每个 terms 条目中，
    standardExplanation 可准确转述资料主张，sourceStance 必须说明它是何种来源观点，
    usageBoundary 必须写明不能由此推断什么；不得把“往往/可能”改写成客观必然规律。
+   CUSTOMER_OBJECTION 的 rootConcernHypotheses 也只能来自资料明确表达的原因、顾虑或研究结论；
+   仅凭一句客户异议不得推演“担心涨价、害怕麻烦、希望锁定权益”等心理原因。没有依据时必须输出
+   空数组；客户原话 expressions 不得混入销售回复。
 6. entityMentions 只记录会参与对象身份、过滤或关系查询的稳定业务实体；不得只输出字符串。每项必须
    严格为 {{"mentionId":"P1-M1","text":"原文实体名","proposedType":"PRODUCT",
    "referenceRole":"ABOUT_PRODUCT","sourceRef":"主张中的真实anchorId"}}。不确定类型时不输出。
@@ -270,6 +279,12 @@ def build_content_realization_request(
    content 中每个非空业务叶子字段都必须有精确 claimUsage 路径；路径必须落到字符串、数字或布尔值，
    不能用 $.facts[0]、$.items 之类父级对象一次覆盖多项内容。来源没有支持的步骤、适用场景、
    限制、心理原因或行动建议必须删除或按合同留空，不得为了填满合同而推演。
+   以下字段属于正式化门禁，任何非空叶子缺少精确 claimUsage 都会保留为调试候选、但禁止形成正式
+   KnowledgeObject：D1.1 的 facts、limitations；D1.3 的 preconditions、rulesOrSteps 正文、
+   exceptions；D3.3 的 triggerConditions、
+   decisionLogic、actions；D4.1 的 script；D4.2 的 expressions、resolutionElements；
+   D4.2 若有 rootConcernHypotheses，其每个字段也必须追溯；D4.3 的 question、answer。
+   不要用 summary 或笼统解释代替这些字段的逐项追溯。
 9. 计划内没有真实写入正文的主张必须进入 omittedClaims，逐条给出 claimId 与具体业务原因；
    不能既出现在 claimUsage 又出现在 omittedClaims，不能为了覆盖率虚报已消费。
 10. 只输出合法 JSON，不输出额外字段。

@@ -7,7 +7,7 @@ from app.features.sales_knowledge_identification.content_contracts import (
 
 
 def test_content_contracts_cover_every_module_and_object_type() -> None:
-    assert CONTENT_CONTRACT_VERSION == "object-content-contracts-v1.1"
+    assert CONTENT_CONTRACT_VERSION == "object-content-contracts-v1.2"
     assert set(CONTENT_CONTRACT_BY_MODULE) == {
         module.code for module in KNOWLEDGE_MODULES
     }
@@ -67,6 +67,22 @@ def test_explicitly_allowed_empty_fields_do_not_force_model_invention() -> None:
     }
 
     assert validate_candidate_content("D4.1", "STANDARD_SCRIPT", content) == []
+
+
+def test_validates_stable_field_shapes_for_formal_content() -> None:
+    errors = validate_candidate_content(
+        "D1.1",
+        "PRODUCT_VERSION_FACT",
+        {
+            "subject": "药享保尊享版",
+            "facts": [{"description": "年保费100元"}],
+            "applicability": "尊享版用户",
+            "limitations": [],
+            "detail": "用于确保测试内容达到最小长度。" * 20,
+        },
+    )
+
+    assert "invalid content field types: applicability must be dict" in errors
 
 
 def test_standard_script_rejects_nested_wrapper_after_normalization_stage() -> None:
@@ -138,3 +154,54 @@ def test_term_accepts_complete_nested_items() -> None:
     }
 
     assert validate_candidate_content("D4.3", "TERM", content) == []
+
+
+def test_objection_allows_empty_root_hypotheses_without_invention() -> None:
+    content = {
+        "objectionTheme": "缴费周期咨询",
+        "expressions": ["可以一次性买几年的吗"],
+        "context": "客户在药享保产品咨询中询问是否支持多年期购买。",
+        "rootConcernHypotheses": [],
+        "resolutionElements": [
+            {
+                "element": "说明按年续交规则",
+                "detail": (
+                    "资料明确说明药享保与车险类似按年续交，客户次年可根据产品实际情况决定是否续保。"
+                ),
+            }
+        ],
+        "sourceDetail": (
+            "该对象只保留客户原话和资料明确给出的回复依据，"
+            "不推演客户担心涨价或操作麻烦。"
+        )
+        * 3,
+    }
+
+    assert validate_candidate_content("D4.2", "CUSTOMER_OBJECTION", content) == []
+
+
+def test_objection_rejects_unstable_resolution_element_shape() -> None:
+    content = {
+        "objectionTheme": "缴费周期咨询",
+        "expressions": ["可以一次性买几年的吗"],
+        "context": "客户在产品咨询中询问缴费周期。",
+        "rootConcernHypotheses": [],
+        "resolutionElements": [
+            {
+                "elementText": "产品按年续交",
+                "elementRole": "standard_response",
+            }
+        ],
+        "sourceDetail": (
+            "用于确认嵌套字段名称漂移时，即使总体文本足够长"
+            "也不能通过正式内容合同。"
+        )
+        * 5,
+    }
+
+    errors = validate_candidate_content("D4.2", "CUSTOMER_OBJECTION", content)
+
+    assert (
+        "resolutionElements item 1 missing string fields: element, detail"
+        in errors
+    )

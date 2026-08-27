@@ -336,13 +336,35 @@ def resolve_verbatim_claim_references(
                 evidence.exact_quote for evidence in claim_by_id[claim_id].evidence
             ]
             return "\n\n".join(dict.fromkeys(quote_parts)), []
+        if set(value) == {"$attributeFromClaim"}:
+            reference = value["$attributeFromClaim"]
+            if not isinstance(reference, dict):
+                return value, ["claim attribute reference must be an object"]
+            claim_id = reference.get("claimId")
+            attribute = reference.get("attribute")
+            if not isinstance(claim_id, str) or claim_id not in claim_by_id:
+                return value, [f"unknown claim attribute reference: {claim_id}"]
+            if not isinstance(attribute, str):
+                return value, ["claim attribute name must be a string"]
+            claim = claim_by_id[claim_id]
+            attribute_value = claim.attributes.get(attribute)
+            if attribute_value in (None, "", [], {}):
+                return value, [
+                    f"claim attribute is empty or missing: {claim_id}.{attribute}"
+                ]
+            return attribute_value, []
         if set(value) == {"$verbatimFromClaim"}:
             claim_id = value["$verbatimFromClaim"]
             if not isinstance(claim_id, str) or claim_id not in claim_by_id:
                 return value, [f"unknown verbatim claim reference: {claim_id}"]
-            source_parts = [
-                evidence.source_text for evidence in claim_by_id[claim_id].evidence
-            ]
+            claim = claim_by_id[claim_id]
+            if claim.claim_kind == "objection" and isinstance(
+                claim.attributes.get("expression"), str
+            ):
+                # 结构化异议同时携带客户原话和销售回复。异议表达只能取
+                # expression，不能把 responseContext 拼进客户原话。
+                return claim.attributes["expression"].strip(), []
+            source_parts = [evidence.source_text for evidence in claim.evidence]
             return "\n\n".join(dict.fromkeys(source_parts)), []
         resolved: dict[str, Any] = {}
         reasons: list[str] = []
@@ -371,6 +393,7 @@ def resolve_verbatim_claim_references(
         if isinstance(parsed, dict) and (
             set(parsed) == {"$verbatimFromClaim"}
             or set(parsed) == {"$exactQuoteFromClaim"}
+            or set(parsed) == {"$attributeFromClaim"}
         ):
             return resolve_verbatim_claim_references(parsed, claim_by_id)
     return value, []

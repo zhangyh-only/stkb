@@ -229,10 +229,10 @@ def test_api_runs_identification_and_reads_the_saved_result(
     assert catalog_response.json()["domains"][0]["question"] == "卖什么"
     assert set(catalog_response.json()["scopeDefinitions"]) == {"core", "optional"}
     assert catalog_response.json()["contentContractVersion"] == (
-        "object-content-contracts-v1.1"
+        "object-content-contracts-v1.2"
     )
     assert catalog_response.json()["identityContractVersion"] == (
-        "object-identity-contracts-v0.2"
+        "object-identity-contracts-v0.3"
     )
     assert catalog_response.json()["modules"][0]["contentContract"][
         "requiredFields"

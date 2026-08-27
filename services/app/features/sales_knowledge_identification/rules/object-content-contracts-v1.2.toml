@@ -1,4 +1,4 @@
-version = "object-content-contracts-v1.1"
+version = "object-content-contracts-v1.2"
 
 [[contracts]]
 module = "D1.1"
@@ -161,12 +161,13 @@ negative_example = "包含尊享版、全能版等多种话术。"
 module = "D4.2"
 object_types = ["CUSTOMER_OBJECTION", "ROOT_CONCERN_HYPOTHESIS", "RESOLUTION_ELEMENT"]
 required_fields = ["objectionTheme", "expressions", "context", "rootConcernHypotheses", "resolutionElements"]
+allow_empty_fields = ["rootConcernHypotheses"]
 minimum_content_chars = 220
 granularity = "同一根本关切和处理方向的异议表达变体形成对象；不同关切不得压成一个异议库摘要。"
-inclusion = "有具体客户表达、规范异议主题、可能根因和化解要素。"
+inclusion = "有具体客户表达、规范异议主题和有来源的化解要素；根因假设仅在资料明确表达时纳入。"
 exclusion = "只讲异议的泛化认知、完整应对话术、将多类异议压成编号摘要。"
-positive_example = "‘价格贵’异议对象包含表达变体、出现上下文、根因假设和化解要素。"
-negative_example = "常见异议包括价格贵、没需要、考虑一下。"
+positive_example = "‘价格贵’异议对象包含客户表达、出现上下文和有来源的化解要素；资料明确分析价格顾虑时才填写根因假设。"
+negative_example = "仅凭客户问‘能否买几年’就推演其担心涨价、嫌续费麻烦或希望锁定权益。"
 
 [[contracts]]
 module = "D4.3"

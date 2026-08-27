@@ -15,6 +15,7 @@ from .formalizer import ExistingKnowledgeObjectState
 from .models import (
     DocumentPackage,
     KnowledgeFormationResult,
+    KnowledgeObjectEntityReference,
     SourceMaterial,
 )
 
@@ -220,7 +221,9 @@ class PsycopgIdentificationRepository:
         with psycopg.connect(self.postgres_dsn, row_factory=dict_row) as connection:
             rows = connection.execute(
                 """
-                SELECT knowledge_object_id, revision, content_fingerprint
+                SELECT knowledge_object_id, revision, content_fingerprint, title,
+                       domain, module, object_type, identity_key, content,
+                       entity_references, evidence, file_path, file_sha256
                 FROM knowledge_objects
                 WHERE knowledge_object_id = ANY(%s)
                 """,
@@ -230,6 +233,19 @@ class PsycopgIdentificationRepository:
             row["knowledge_object_id"]: ExistingKnowledgeObjectState(
                 revision=row["revision"],
                 content_fingerprint=row["content_fingerprint"],
+                title=row["title"],
+                domain=row["domain"],
+                module=row["module"],
+                object_type=row["object_type"],
+                identity_key=row["identity_key"],
+                content=row["content"],
+                entity_references=tuple(
+                    KnowledgeObjectEntityReference.model_validate(item)
+                    for item in row["entity_references"]
+                ),
+                evidence=tuple(row["evidence"]),
+                file_path=row["file_path"],
+                file_sha256=row["file_sha256"],
             )
             for row in rows
         }
@@ -259,6 +275,9 @@ class PsycopgIdentificationRepository:
         formation: KnowledgeFormationResult,
     ) -> None:
         with psycopg.connect(self.postgres_dsn) as connection:
+            if formation.status == "review_required":
+                self._save_knowledge_build_result(connection, formation)
+                return
             current_object_ids = {
                 item.knowledge_object_id for item in formation.knowledge_objects
             }
@@ -418,8 +437,14 @@ class PsycopgIdentificationRepository:
                     """,
                     (list(superseded_object_ids),),
                 )
-            serialized = formation.model_dump(mode="json", by_alias=True)
-            connection.execute(
+            self._save_knowledge_build_result(connection, formation)
+
+    @staticmethod
+    def _save_knowledge_build_result(
+        connection: psycopg.Connection[Any], formation: KnowledgeFormationResult
+    ) -> None:
+        serialized = formation.model_dump(mode="json", by_alias=True)
+        connection.execute(
                 """
                 INSERT INTO knowledge_build_results (
                     build_id, run_id, document_package_id, status, result_json
@@ -429,14 +454,14 @@ class PsycopgIdentificationRepository:
                     status = EXCLUDED.status,
                     result_json = EXCLUDED.result_json
                 """,
-                (
-                    formation.build_id,
-                    formation.run_id,
-                    formation.document_package_id,
-                    formation.status,
-                    Jsonb(serialized),
-                ),
-            )
+            (
+                formation.build_id,
+                formation.run_id,
+                formation.document_package_id,
+                formation.status,
+                Jsonb(serialized),
+            ),
+        )
 
     def get_knowledge_formation(self, run_id: str) -> dict[str, Any]:
         with psycopg.connect(self.postgres_dsn, row_factory=dict_row) as connection:

@@ -92,7 +92,7 @@
       "identities": ["已有医保", "价格贵", "暂时不需要", "考虑一下", "没用到白费", "一次买多年"],
       "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-1-row-11", "DP-YXB-SCRIPTS-20260826#sheet-1-row-12", "DP-YXB-SCRIPTS-20260826#sheet-1-row-13", "DP-YXB-SCRIPTS-20260826#sheet-1-row-14", "DP-YXB-SCRIPTS-20260826#sheet-1-row-15", "DP-YXB-SCRIPTS-20260826#sheet-1-row-16"]
       ,"requireAllEvidence": true,
-      "requiredContentFields": ["objectionTheme", "expressions", "context", "rootConcernHypotheses", "resolutionElements"],
+      "requiredContentFields": ["objectionTheme", "expressions", "context", "resolutionElements"],
       "splitRule": "根本关切和处理方向不同，每类异议必须形成独立对象"
     },
     {

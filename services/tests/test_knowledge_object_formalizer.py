@@ -103,7 +103,7 @@ def test_formalizer_creates_stable_entity_object_and_markdown(tmp_path: Path) ->
     assert "# 药享保在线问诊服务事实" in file_path.read_text(encoding="utf-8")
 
 
-def test_formalizer_reuses_unchanged_object_and_revises_changed_content(
+def test_formalizer_reuses_unchanged_object_and_requires_review_for_changed_content(
     tmp_path: Path,
 ) -> None:
     service = KnowledgeObjectFormationService(project_root=tmp_path)
@@ -137,8 +137,14 @@ def test_formalizer_reuses_unchanged_object_and_revises_changed_content(
     assert reused.knowledge_objects[0].action == "reused"
     assert reused.knowledge_objects[0].revision == 1
     assert reused.entities[0].action == "reused"
-    assert updated.knowledge_objects[0].action == "updated"
-    assert updated.knowledge_objects[0].revision == 2
+    assert updated.status == "review_required"
+    assert updated.review_required_count == 1
+    assert updated.knowledge_objects[0].action == "review_required"
+    assert updated.knowledge_objects[0].revision == 1
+    assert updated.knowledge_objects[0].revision_proposal is not None
+    assert updated.knowledge_objects[0].revision_proposal.content == {
+        "summary": "药享保提供7×24小时在线问诊"
+    }
 
 
 def test_formalizer_resolves_model_wording_drift_through_source_lineage(
@@ -180,3 +186,53 @@ def test_formalizer_resolves_model_wording_drift_through_source_lineage(
     assert resolved_ids == {first_object.knowledge_object_id}
     assert second.knowledge_objects[0].knowledge_object_id == first_object.knowledge_object_id
     assert second.knowledge_objects[0].action == "reused"
+
+
+def test_formalizer_keeps_quality_failed_candidate_out_of_formal_knowledge(
+    tmp_path: Path,
+) -> None:
+    service = KnowledgeObjectFormationService(project_root=tmp_path)
+    identification = _identification().model_copy(deep=True)
+    identification.candidates[0].quality_issues = [
+        "关键正文缺少主张归因：$.facts[0].description"
+    ]
+
+    result = service.form(
+        document_package=_package(),
+        identification=identification,
+        existing_entities=set(),
+        existing_objects={},
+    )
+
+    assert result.status == "review_required"
+    assert result.knowledge_objects == []
+    assert result.entities == []
+    assert result.quality_blocked_candidate_ids == ["C1"]
+    assert result.quality_blocked_count == 1
+    assert result.formal_knowledge_files == 0
+    assert not list(tmp_path.rglob("*.md"))
+
+
+def test_core_equivalence_ignores_script_metadata_and_qa_order_drift() -> None:
+    service = KnowledgeObjectFormationService(project_root=Path("."))
+
+    assert service._equivalent_core_content(
+        "STANDARD_SCRIPT",
+        {"script": "您好，先确认需求。", "applicability": "客户A"},
+        {"script": "您好，先确认需求。", "applicability": "通用客户"},
+    )
+    assert service._equivalent_core_content(
+        "QA_PAIR",
+        {
+            "items": [
+                {"question": "问题一", "answer": "答案一", "claimRef": "CL1"},
+                {"question": "问题二", "answer": "答案二", "claimRef": "CL2"},
+            ]
+        },
+        {
+            "items": [
+                {"question": "问题二", "answer": "答案二", "claimRef": "CL9"},
+                {"question": "问题一", "answer": "答案一", "claimRef": "CL8"},
+            ]
+        },
+    )

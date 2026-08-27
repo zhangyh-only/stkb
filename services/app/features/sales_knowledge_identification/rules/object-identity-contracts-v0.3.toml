@@ -1,4 +1,4 @@
-version = "object-identity-contracts-v0.2"
+version = "object-identity-contracts-v0.3"
 status = "sample_validation"
 
 [[contracts]]
@@ -115,11 +115,11 @@ conflict_rule = "完整话术不得被摘要覆盖；事实冲突交由D1对象�
 
 [[contracts]]
 module = "D4.2"
-identity_fields = ["rootConcern", "context"]
-same_object_when = "客户表达指向同一根本顾虑、意图和处理方向。"
-different_object_when = "根本顾虑、购买语境或所需处理方向不同。"
+identity_fields = ["objectionIntent", "context"]
+same_object_when = "客户可观察表达指向同一异议意图和购买语境；根因只有经来源证明后才作为内容补充，不参与初始身份推演。"
+different_object_when = "可观察异议意图或购买语境不同；不能仅凭模型推测的心理根因拆分或归并。"
 merge_strategy = "合并表达变体、根因假设证据和化解要素。"
-conflict_rule = "仅表面词相似不能归并；完整应对话术仍保持独立对象。"
+conflict_rule = "仅表面词相似不能归并；无来源的心理推断不得参与身份；完整应对话术仍保持独立对象。"
 
 [[contracts]]
 module = "D4.3"

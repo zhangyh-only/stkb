@@ -23,6 +23,7 @@ from app.features.sales_knowledge_identification.catalog import (
 from app.features.sales_knowledge_identification.content_contracts import (
     CONTENT_CONTRACT_BY_MODULE,
     CONTENT_CONTRACT_VERSION,
+    CONTENT_SHAPES_BY_OBJECT_TYPE,
 )
 from app.features.sales_knowledge_identification.formalizer import (
     KnowledgeObjectFormationService,
@@ -105,6 +106,11 @@ def identification_catalog() -> dict[str, object]:
                     "itemFieldsByType": CONTENT_CONTRACT_BY_MODULE[
                         module.code
                     ].item_fields_by_type,
+                    "fieldShapesByType": {
+                        object_type: CONTENT_SHAPES_BY_OBJECT_TYPE[object_type]
+                        for object_type in module.object_types
+                        if object_type in CONTENT_SHAPES_BY_OBJECT_TYPE
+                    },
                     "allowEmptyFields": CONTENT_CONTRACT_BY_MODULE[
                         module.code
                     ].allow_empty_fields,

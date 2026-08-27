@@ -171,6 +171,7 @@ class CandidateKnowledgeObject(ApiModel):
     content_leaf_count: int = 0
     attributed_content_leaf_count: int = 0
     unattributed_content_paths: list[str] = Field(default_factory=list)
+    quality_issues: list[str] = Field(default_factory=list)
     content: dict[str, Any]
     entity_mentions: list[EntityMention] = Field(default_factory=list)
     evidence: list[str] = Field(min_length=1)
@@ -198,9 +199,11 @@ class RejectedAuxiliaryItem(ApiModel):
 
 class CandidateNormalization(ApiModel):
     candidate_id: str
-    field: Literal["domain", "entity_mentions", "relations"]
-    original_value: str
-    normalized_value: str
+    field: Literal[
+        "domain", "entity_mentions", "relations", "content.expressions"
+    ]
+    original_value: Any
+    normalized_value: Any
     reason: str
 
 
@@ -371,10 +374,21 @@ class KnowledgeObjectSourceTrace(ApiModel):
     unattributed_content_paths: list[str]
 
 
+class KnowledgeObjectRevisionProposal(ApiModel):
+    title: str
+    identity_key: str
+    content_fingerprint: str
+    content: dict[str, Any]
+    entity_references: list[KnowledgeObjectEntityReference]
+    evidence: list[str]
+    source_traces: list[KnowledgeObjectSourceTrace]
+    changed_paths: list[str]
+
+
 class FormalKnowledgeObject(ApiModel):
     knowledge_object_id: str
     revision: int
-    action: Literal["created", "updated", "reused"]
+    action: Literal["created", "updated", "reused", "review_required"]
     title: str
     domain: str
     module: str
@@ -387,6 +401,8 @@ class FormalKnowledgeObject(ApiModel):
     evidence: list[str]
     source_candidate_ids: list[str]
     source_traces: list[KnowledgeObjectSourceTrace]
+    revision_proposal: KnowledgeObjectRevisionProposal | None = None
+    equivalence_reason: str | None = None
     file_path: str
     file_sha256: str
 
@@ -394,7 +410,7 @@ class FormalKnowledgeObject(ApiModel):
 class KnowledgeFormationStage(ApiModel):
     key: Literal["entity_resolution", "knowledge_merge", "formal_write"]
     name: str
-    status: Literal["completed", "failed"]
+    status: Literal["completed", "pending", "failed"]
     detail: str
 
 
@@ -402,12 +418,15 @@ class KnowledgeFormationResult(ApiModel):
     build_id: str = Field(default_factory=lambda: str(uuid4()))
     run_id: str
     document_package_id: str
-    status: Literal["completed", "failed"] = "completed"
+    status: Literal["completed", "review_required", "failed"] = "completed"
     entities: list[ResolvedBusinessEntity]
     knowledge_objects: list[FormalKnowledgeObject]
     stages: list[KnowledgeFormationStage]
     created_count: int
     updated_count: int
     reused_count: int
+    review_required_count: int = 0
     superseded_count: int = 0
+    quality_blocked_candidate_ids: list[str] = Field(default_factory=list)
+    quality_blocked_count: int = 0
     formal_knowledge_files: int

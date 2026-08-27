@@ -7,11 +7,117 @@ from pathlib import Path
 from typing import Any
 
 CONTRACTS_PATH = (
-    Path(__file__).with_name("rules") / "object-content-contracts-v1.1.toml"
+    Path(__file__).with_name("rules") / "object-content-contracts-v1.2.toml"
 )
 
 STRING_FIELDS_BY_OBJECT_TYPE: dict[str, tuple[str, ...]] = {
     "STANDARD_SCRIPT": ("communicationGoal", "script"),
+}
+
+FIELD_TYPES_BY_OBJECT_TYPE: dict[str, dict[str, type]] = {
+    "PRODUCT_VERSION_FACT": {
+        "subject": str,
+        "facts": list,
+        "applicability": dict,
+        "limitations": list,
+    },
+    "BUSINESS_PROCESS": {
+        "purpose": str,
+        "preconditions": list,
+        "rulesOrSteps": list,
+        "exceptions": list,
+    },
+    "POLICY_RULE_SET": {
+        "purpose": str,
+        "preconditions": list,
+        "rulesOrSteps": list,
+        "exceptions": list,
+    },
+    "SALES_STRATEGY": {
+        "strategyName": str,
+        "triggerConditions": list,
+        "decisionLogic": str,
+        "actions": list,
+        "applicability": dict,
+    },
+    "DECISION_RULE": {
+        "strategyName": str,
+        "triggerConditions": list,
+        "decisionLogic": str,
+        "actions": list,
+        "applicability": dict,
+    },
+    "STANDARD_SCRIPT": {
+        "communicationGoal": str,
+        "applicability": dict,
+        "script": str,
+        "factReferences": list,
+        "complianceConstraints": list,
+    },
+    "CUSTOMER_OBJECTION": {
+        "objectionTheme": str,
+        "expressions": list,
+        "context": str,
+        "rootConcernHypotheses": list,
+        "resolutionElements": list,
+    },
+    "QA_PAIR": {
+        "items": list,
+        "factReferences": list,
+        "applicability": str,
+    },
+}
+
+ITEM_FIELD_TYPES_BY_OBJECT_TYPE: dict[str, dict[str, type]] = {
+    "PRODUCT_VERSION_FACT": {"description": str},
+    "QA_PAIR": {"question": str, "answer": str, "claimRef": str},
+}
+
+NESTED_ITEM_FIELDS_BY_OBJECT_TYPE: dict[
+    str, dict[str, tuple[str, ...]]
+] = {
+    "CUSTOMER_OBJECTION": {
+        "rootConcernHypotheses": (
+            "hypothesis",
+            "sourceStance",
+            "usageBoundary",
+        ),
+        "resolutionElements": ("element", "detail"),
+    }
+}
+
+CONTENT_SHAPES_BY_OBJECT_TYPE: dict[str, str] = {
+    "PRODUCT_VERSION_FACT": (
+        "subject:string; facts:[{description:string}]; "
+        "applicability:{product:string,version:string}; limitations:array"
+    ),
+    "BUSINESS_PROCESS": (
+        "purpose:string; preconditions:array; rulesOrSteps:array; exceptions:array"
+    ),
+    "POLICY_RULE_SET": (
+        "purpose:string; preconditions:array; rulesOrSteps:array; exceptions:array"
+    ),
+    "SALES_STRATEGY": (
+        "strategyName:string; triggerConditions:array; decisionLogic:string; "
+        "actions:array; applicability:{products:array,scenarios:array}"
+    ),
+    "DECISION_RULE": (
+        "与 SALES_STRATEGY 同形；仅允许销售决策，不收录服务操作答疑"
+    ),
+    "STANDARD_SCRIPT": (
+        "communicationGoal:string; applicability:object; script:string; "
+        "factReferences:array; complianceConstraints:array"
+    ),
+    "CUSTOMER_OBJECTION": (
+        "objectionTheme:string; expressions:array; context:string; "
+        "rootConcernHypotheses:[{hypothesis:string,sourceStance:string,"
+        "usageBoundary:string}]（无来源可为空）；"
+        "resolutionElements:[{element:string,detail:string}]"
+    ),
+    "QA_PAIR": (
+        "items:[{question:string,answer:string,claimRef:string}]; "
+        "factReferences:array; applicability:string"
+    ),
 }
 
 
@@ -102,6 +208,15 @@ def validate_candidate_content(module: str, object_type: str, content: dict[str,
             "content fields must be non-empty strings: "
             + ", ".join(invalid_string_fields)
         )
+    invalid_type_fields = [
+        f"{field} must be {expected_type.__name__}"
+        for field, expected_type in FIELD_TYPES_BY_OBJECT_TYPE.get(
+            object_type, {}
+        ).items()
+        if field in content and not isinstance(content[field], expected_type)
+    ]
+    if invalid_type_fields:
+        errors.append("invalid content field types: " + ", ".join(invalid_type_fields))
     item_fields = contract.item_fields_by_type.get(object_type)
     if item_fields:
         collection_field = next(
@@ -120,6 +235,43 @@ def validate_candidate_content(module: str, object_type: str, content: dict[str,
                 errors.append(
                     f"content item {index} missing fields: "
                     + ", ".join(missing_item_fields)
+                )
+            invalid_item_types = [
+                f"{field} must be {expected_type.__name__}"
+                for field, expected_type in ITEM_FIELD_TYPES_BY_OBJECT_TYPE.get(
+                    object_type, {}
+                ).items()
+                if field in item and not isinstance(item[field], expected_type)
+            ]
+            if invalid_item_types:
+                errors.append(
+                    f"content item {index} invalid field types: "
+                    + ", ".join(invalid_item_types)
+                )
+    for collection_field, nested_fields in NESTED_ITEM_FIELDS_BY_OBJECT_TYPE.get(
+        object_type, {}
+    ).items():
+        for index, item in enumerate(content.get(collection_field, []), start=1):
+            if not isinstance(item, dict):
+                errors.append(
+                    f"{collection_field} item {index} must be an object"
+                )
+                continue
+            missing_nested_fields = [
+                field
+                for field in nested_fields
+                if not isinstance(item.get(field), str) or not item[field].strip()
+            ]
+            if missing_nested_fields:
+                errors.append(
+                    f"{collection_field} item {index} missing string fields: "
+                    + ", ".join(missing_nested_fields)
+                )
+            unexpected_nested_fields = sorted(set(item) - set(nested_fields))
+            if unexpected_nested_fields:
+                errors.append(
+                    f"{collection_field} item {index} has unsupported fields: "
+                    + ", ".join(unexpected_nested_fields)
                 )
     serialized = json.dumps(content, ensure_ascii=False, sort_keys=True)
     if len(serialized) < contract.minimum_content_chars:
@@ -154,6 +306,21 @@ def render_content_contracts_for_prompt(
                             )
                         ]
                         if item.required_fields_by_type
+                        else []
+                    ),
+                    *(
+                        [
+                            "- 字段形态："
+                            + "；".join(
+                                f"{object_type}={CONTENT_SHAPES_BY_OBJECT_TYPE[object_type]}"
+                                for object_type in item.object_types
+                                if object_type in CONTENT_SHAPES_BY_OBJECT_TYPE
+                            )
+                        ]
+                        if any(
+                            object_type in CONTENT_SHAPES_BY_OBJECT_TYPE
+                            for object_type in item.object_types
+                        )
                         else []
                     ),
                     *(

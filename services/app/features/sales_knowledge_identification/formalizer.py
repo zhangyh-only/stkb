@@ -17,6 +17,7 @@ from .models import (
     KnowledgeFormationResult,
     KnowledgeFormationStage,
     KnowledgeObjectEntityReference,
+    KnowledgeObjectRevisionProposal,
     KnowledgeObjectSourceTrace,
     ResolvedBusinessEntity,
 )
@@ -26,6 +27,16 @@ from .models import (
 class ExistingKnowledgeObjectState:
     revision: int
     content_fingerprint: str
+    title: str = ""
+    domain: str = ""
+    module: str = ""
+    object_type: str = ""
+    identity_key: str = ""
+    content: dict[str, Any] | None = None
+    entity_references: tuple[KnowledgeObjectEntityReference, ...] = ()
+    evidence: tuple[str, ...] = ()
+    file_path: str = ""
+    file_sha256: str = ""
 
 
 class KnowledgeObjectFormationService:
@@ -76,9 +87,19 @@ class KnowledgeObjectFormationService:
         existing_lineages: dict[str, str] | None = None,
     ) -> KnowledgeFormationResult:
         existing_lineages = existing_lineages or {}
+        quality_blocked_candidate_ids = [
+            candidate.candidate_id
+            for candidate in identification.candidates
+            if candidate.quality_issues
+        ]
+        eligible_candidates = [
+            candidate
+            for candidate in identification.candidates
+            if not candidate.quality_issues
+        ]
         entities = self._resolve_entities(
             document_package.workspace_id,
-            identification.candidates,
+            eligible_candidates,
             existing_entities,
         )
         entity_by_mention = {
@@ -87,13 +108,13 @@ class KnowledgeObjectFormationService:
                 mention.proposed_type,
                 mention.text,
             )
-            for candidate in identification.candidates
+            for candidate in eligible_candidates
             for mention in candidate.entity_mentions
         }
         groups: dict[str, list[CandidateKnowledgeObject]] = defaultdict(list)
         identity_keys: dict[str, str] = {}
         lineage_keys: dict[str, set[str]] = defaultdict(set)
-        for candidate in identification.candidates:
+        for candidate in eligible_candidates:
             identity_key = self._identity_key(candidate)
             lineage_key = self._source_lineage_key(candidate)
             object_id = existing_lineages.get(
@@ -123,6 +144,16 @@ class KnowledgeObjectFormationService:
         created_count = sum(item.action == "created" for item in knowledge_objects)
         updated_count = sum(item.action == "updated" for item in knowledge_objects)
         reused_count = sum(item.action == "reused" for item in knowledge_objects)
+        review_required_count = sum(
+            item.action == "review_required" for item in knowledge_objects
+        )
+        requires_review = bool(review_required_count or quality_blocked_candidate_ids)
+        if not requires_review:
+            for item in knowledge_objects:
+                if item.action == "created" or not item.file_sha256:
+                    self._write_accepted_object(
+                        item, document_package.document_package_id
+                    )
         return KnowledgeFormationResult(
             run_id=identification.run_id,
             document_package_id=document_package.document_package_id,
@@ -140,21 +171,36 @@ class KnowledgeObjectFormationService:
                     name="知识身份归并",
                     status="completed",
                     detail=(
-                        f"形成 {len(knowledge_objects)} 个正式知识身份："
+                        f"匹配 {len(knowledge_objects)} 个知识身份："
+                        f"待新增 {created_count}、待评审 {review_required_count}、"
+                        f"复用 {reused_count}、质量阻断 "
+                        f"{len(quality_blocked_candidate_ids)}"
+                        if requires_review
+                        else f"形成 {len(knowledge_objects)} 个正式知识身份："
                         f"新增 {created_count}、更新 {updated_count}、复用 {reused_count}"
                     ),
                 ),
                 KnowledgeFormationStage(
                     key="formal_write",
                     name="正式知识写入",
-                    status="completed",
-                    detail=f"写入或校验 {len(knowledge_objects)} 份正式 Markdown",
+                    status="pending" if requires_review else "completed",
+                    detail=(
+                        f"有 {review_required_count} 个既有对象存在正文差异，"
+                        f"{len(quality_blocked_candidate_ids)} 个候选未通过追溯门槛；"
+                        "评审前不改写正式知识"
+                        if requires_review
+                        else f"写入或校验 {len(knowledge_objects)} 份正式 Markdown"
+                    ),
                 ),
             ],
+            status="review_required" if requires_review else "completed",
             created_count=created_count,
             updated_count=updated_count,
             reused_count=reused_count,
-            formal_knowledge_files=len(knowledge_objects),
+            review_required_count=review_required_count,
+            quality_blocked_candidate_ids=quality_blocked_candidate_ids,
+            quality_blocked_count=len(quality_blocked_candidate_ids),
+            formal_knowledge_files=sum(bool(item.file_sha256) for item in knowledge_objects),
         )
 
     def _resolve_entities(
@@ -228,35 +274,72 @@ class KnowledgeObjectFormationService:
             evidence=evidence,
             source_traces=source_traces,
         )
+        revision_proposal = None
+        equivalence_reason = None
         if existing is None:
             action = "created"
             revision = 1
         elif existing.content_fingerprint == payload_fingerprint:
             action = "reused"
             revision = existing.revision
+        elif self._equivalent_core_content(
+            primary.object_type, existing.content or {}, content
+        ):
+            action = "reused"
+            revision = existing.revision
+            equivalence_reason = (
+                "来源承载的核心内容未变化；仅顺序、主张编号或辅助描述发生漂移"
+            )
+            primary = primary.model_copy(
+                update={
+                    "title": existing.title or primary.title,
+                    "domain": existing.domain or primary.domain,
+                    "module": existing.module or primary.module,
+                    "object_type": existing.object_type or primary.object_type,
+                    "content": existing.content or content,
+                }
+            )
+            identity_key = existing.identity_key or identity_key
+            content = existing.content or content
+            entity_references = list(existing.entity_references) or entity_references
+            evidence = list(existing.evidence) or evidence
         else:
-            action = "updated"
-            revision = existing.revision + 1
+            action = "review_required"
+            revision = existing.revision
+            revision_proposal = KnowledgeObjectRevisionProposal(
+                title=primary.title,
+                identity_key=identity_key,
+                content_fingerprint=payload_fingerprint,
+                content=content,
+                entity_references=entity_references,
+                evidence=evidence,
+                source_traces=source_traces,
+                changed_paths=self._changed_paths(existing.content or {}, content),
+            )
+            primary = primary.model_copy(
+                update={
+                    "title": existing.title or primary.title,
+                    "domain": existing.domain or primary.domain,
+                    "module": existing.module or primary.module,
+                    "object_type": existing.object_type or primary.object_type,
+                    "content": existing.content or content,
+                }
+            )
+            identity_key = existing.identity_key or identity_key
+            content = existing.content or content
+            entity_references = list(existing.entity_references) or entity_references
+            evidence = list(existing.evidence) or evidence
+        formal_fingerprint = (
+            existing.content_fingerprint
+            if action in {"review_required", "reused"} and existing is not None
+            else payload_fingerprint
+        )
         relative_path = Path(
             f"workspace/knowledge/{primary.domain}/{primary.module}/{object_id}.md"
         )
-        markdown = self._render_markdown(
-            object_id=object_id,
-            revision=revision,
-            title=primary.title,
-            domain=primary.domain,
-            module=primary.module,
-            object_type=primary.object_type,
-            identity_key=identity_key,
-            source_lineage_keys=source_lineage_keys,
-            content=content,
-            entity_references=entity_references,
-            evidence=evidence,
-            document_package_id=document_package.document_package_id,
-            source_traces=source_traces,
-        )
-        file_sha256 = hashlib.sha256(markdown.encode("utf-8")).hexdigest()
-        self._write_atomically(relative_path, markdown)
+        if existing and existing.file_path:
+            relative_path = Path(existing.file_path)
+        file_sha256 = existing.file_sha256 if existing else ""
         return FormalKnowledgeObject(
             knowledge_object_id=object_id,
             revision=revision,
@@ -267,15 +350,38 @@ class KnowledgeObjectFormationService:
             object_type=primary.object_type,
             identity_key=identity_key,
             source_lineage_keys=source_lineage_keys,
-            content_fingerprint=payload_fingerprint,
+            content_fingerprint=formal_fingerprint,
             content=content,
             entity_references=entity_references,
             evidence=evidence,
             source_candidate_ids=source_candidate_ids,
             source_traces=source_traces,
+            revision_proposal=revision_proposal,
+            equivalence_reason=equivalence_reason,
             file_path=relative_path.as_posix(),
             file_sha256=file_sha256,
         )
+
+    def _write_accepted_object(
+        self, item: FormalKnowledgeObject, document_package_id: str
+    ) -> None:
+        markdown = self._render_markdown(
+            object_id=item.knowledge_object_id,
+            revision=item.revision,
+            title=item.title,
+            domain=item.domain,
+            module=item.module,
+            object_type=item.object_type,
+            identity_key=item.identity_key,
+            source_lineage_keys=item.source_lineage_keys,
+            content=item.content,
+            entity_references=item.entity_references,
+            evidence=item.evidence,
+            document_package_id=document_package_id,
+            source_traces=item.source_traces,
+        )
+        item.file_sha256 = hashlib.sha256(markdown.encode("utf-8")).hexdigest()
+        self._write_atomically(Path(item.file_path), markdown)
 
     def _entity_references(
         self,
@@ -332,6 +438,60 @@ class KnowledgeObjectFormationService:
             (0, int(part)) if part.isdigit() else (1, part)
             for part in re.split(r"(\d+)", value.casefold())
         ]
+
+    @classmethod
+    def _changed_paths(cls, current: Any, proposed: Any, path: str = "$") -> list[str]:
+        if isinstance(current, dict) and isinstance(proposed, dict):
+            paths: list[str] = []
+            for key in sorted(set(current) | set(proposed)):
+                child = f"{path}.{key}"
+                if key not in current or key not in proposed:
+                    paths.append(child)
+                else:
+                    paths.extend(cls._changed_paths(current[key], proposed[key], child))
+            return paths
+        if isinstance(current, list) and isinstance(proposed, list):
+            paths = []
+            for index in range(max(len(current), len(proposed))):
+                child = f"{path}[{index}]"
+                if index >= len(current) or index >= len(proposed):
+                    paths.append(child)
+                else:
+                    paths.extend(cls._changed_paths(current[index], proposed[index], child))
+            return paths
+        return [] if current == proposed else [path]
+
+    @classmethod
+    def _equivalent_core_content(
+        cls, object_type: str, current: dict[str, Any], proposed: dict[str, Any]
+    ) -> bool:
+        if object_type == "STANDARD_SCRIPT":
+            current_script = cls._normalize_text(current.get("script"))
+            proposed_script = cls._normalize_text(proposed.get("script"))
+            return bool(current_script) and current_script == proposed_script
+        if object_type == "QA_PAIR":
+            return cls._qa_pairs(current) == cls._qa_pairs(proposed) and bool(
+                cls._qa_pairs(current)
+            )
+        return False
+
+    @classmethod
+    def _qa_pairs(cls, content: dict[str, Any]) -> dict[str, str]:
+        pairs: dict[str, str] = {}
+        for item in content.get("items", []):
+            if not isinstance(item, dict):
+                continue
+            question = cls._normalize_text(item.get("question"))
+            answer = cls._normalize_text(item.get("answer"))
+            if question and answer:
+                pairs[question] = answer
+        return pairs
+
+    @staticmethod
+    def _normalize_text(value: Any) -> str:
+        if not isinstance(value, str):
+            return ""
+        return re.sub(r"\s+", "", value).casefold()
 
     @staticmethod
     def _entity_id(workspace_id: str, entity_type: str, text: str) -> str:

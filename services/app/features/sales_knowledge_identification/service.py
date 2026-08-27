@@ -59,6 +59,7 @@ from .prompt_builder import (
 from .segmenter import DocumentSegment, segment_document
 
 CallPurpose = Literal["claim_discovery", "object_planning", "content_realization"]
+OBJECT_PLANNING_BATCH_SIZE = 45
 CONTENT_REALIZATION_BATCH_SIZE = 5
 PRIMARY_MODULE_PREFIXES_BY_CLAIM_KIND: dict[str, tuple[str, ...]] = {
     "fact": ("D1.",),
@@ -267,7 +268,7 @@ class SalesKnowledgeIdentificationService:
                                 "D4.2",
                                 "CUSTOMER_OBJECTION",
                                 {
-                                    "rootConcern": claim.subject,
+                                    "objectionIntent": claim.subject,
                                     "context": "来源资料中的销售咨询与异议处理",
                                 },
                                 [claim.claim_id],
@@ -504,18 +505,24 @@ class SalesKnowledgeIdentificationService:
     ]:
         if not claims:
             return [], []
-        request = build_object_planning_request(
-            document_package_id, claims, len(claims)
-        )
-        try:
+        groups = _group_claims_for_planning(claims, OBJECT_PLANNING_BATCH_SIZE)
+
+        def run(item: tuple[str, list[AtomicClaim]]) -> tuple[Any, ...]:
+            label, batch_claims = item
+            request = build_object_planning_request(
+                document_package_id, batch_claims, len(batch_claims)
+            )
             payload, completion, calls = self._complete_json_request(
                 request, "object_planning"
             )
-        except SegmentIdentificationFailure as error:
-            return [("global", claims, {}, None, error.model_calls)], [
-                f"global: {error}"
-            ]
-        return [("global", claims, payload, completion, calls)], []
+            return label, batch_claims, payload, completion, calls
+
+        return _run_parallel(
+            items=groups,
+            worker=run,
+            label=lambda item: item[0],
+            max_concurrency=self.max_concurrency,
+        )
 
     def _realize_candidate_objects(
         self,
@@ -753,7 +760,38 @@ class SalesKnowledgeIdentificationService:
                 candidate_payload.get("module"),
                 candidate_payload.get("objectType"),
                 resolved_content,
+                candidate_payload.get("identityHints"),
             )
+            if (
+                candidate_payload.get("module") == "D4.2"
+                and candidate_payload.get("objectType") == "CUSTOMER_OBJECTION"
+            ):
+                verified_expressions = list(
+                    dict.fromkeys(
+                        expression.strip()
+                        for claim in source_claims
+                        if claim.claim_kind == "objection"
+                        for expression in [claim.attributes.get("expression")]
+                        if isinstance(expression, str) and expression.strip()
+                    )
+                )
+                current_expressions = candidate_payload["content"].get("expressions")
+                if verified_expressions and current_expressions != verified_expressions:
+                    candidate_payload["content"] = {
+                        **candidate_payload["content"],
+                        "expressions": verified_expressions,
+                    }
+                    normalizations.append(
+                        CandidateNormalization(
+                            candidate_id=candidate_id,
+                            field="content.expressions",
+                            original_value=current_expressions,
+                            normalized_value=verified_expressions,
+                            reason=(
+                                "客户异议表达按结构化来源字段校准，禁止混入销售回复"
+                            ),
+                        )
+                    )
             reasons.extend(macro_reasons)
             raw_claim_usage = candidate_payload.get("claimUsage", [])
             if "claimUsage" in raw_candidate:
@@ -900,6 +938,30 @@ class SalesKnowledgeIdentificationService:
                     )
                 )
                 continue
+
+            if "claimUsage" in raw_candidate:
+                attributed_paths = {
+                    path
+                    for usage in candidate.claim_usage
+                    for path in usage.content_paths
+                }
+                missing_critical_paths = sorted(
+                    _critical_attribution_paths(
+                        candidate.module,
+                        candidate.object_type,
+                        candidate.content,
+                    )
+                    - attributed_paths
+                )
+                if missing_critical_paths:
+                    candidate = candidate.model_copy(
+                        update={
+                            "quality_issues": [
+                                "关键正文缺少主张归因："
+                                + "、".join(missing_critical_paths)
+                            ]
+                        }
+                    )
 
             reasons.extend(
                 validate_candidate_classification(
@@ -1170,18 +1232,31 @@ def _validate_object_plans(
     valid_anchors = {
         evidence.anchor_id for claim in claims for evidence in claim.evidence
     }
-    payload = planning_results[0][2] if planning_results else {}
+    payloads = [
+        (str(result[0]), result[2])
+        for result in planning_results
+        if len(result) >= 3 and isinstance(result[2], dict)
+    ]
     accepted: list[CandidateObjectPlan] = []
     rejected: list[RejectedObjectPlan] = []
     seen_plan_ids: set[str] = set()
     seen_identities: set[str] = set()
     covered_claim_ids: set[str] = set()
 
-    raw_plans = payload.get("objectPlans")
-    if raw_plans is None:
-        raw_plans = payload.get("candidates", [])
-    for index, raw_plan in enumerate(raw_plans, start=1):
+    raw_plan_inputs: list[tuple[str, Any]] = []
+    for label, payload in payloads:
+        raw_plans = payload.get("objectPlans")
+        if raw_plans is None:
+            raw_plans = payload.get("candidates", [])
+        raw_plan_inputs.extend((label, raw_plan) for raw_plan in raw_plans)
+    for index, (label, raw_plan) in enumerate(raw_plan_inputs, start=1):
         raw_plan = _expand_compact_object_plan(raw_plan)
+        if len(payloads) > 1 and isinstance(raw_plan, dict):
+            raw_plan = raw_plan.copy()
+            raw_plan_id = raw_plan.get("planId", raw_plan.get("candidateId"))
+            if isinstance(raw_plan_id, str):
+                raw_plan["planId"] = f"{label}-{raw_plan_id}"
+                raw_plan.pop("candidateId", None)
         plan_id = (
             raw_plan.get("planId", f"INVALID-{index}")
             if isinstance(raw_plan, dict)
@@ -1225,6 +1300,14 @@ def _validate_object_plans(
                 )
             )
             continue
+        if (
+            plan.module == "D1.1"
+            and plan.object_type == "PRODUCT_FACT"
+            and _is_named_product_version(
+                plan.identity_hints.get("versionScope")
+            )
+        ):
+            plan = plan.model_copy(update={"object_type": "PRODUCT_VERSION_FACT"})
         if plan.module == "D4.2" and plan.object_type == "CUSTOMER_OBJECTION":
             objection_anchors = {
                 evidence.anchor_id
@@ -1284,6 +1367,24 @@ def _validate_object_plans(
                     )
                 }
             )
+        plan = _constrain_plan_source_claim_scope(plan, claim_by_id)
+        if plan.module == "D4.2" and plan.object_type == "CUSTOMER_OBJECTION":
+            objection_claims = [
+                claim
+                for claim_id in plan.source_claim_ids
+                if claim_id in claim_by_id
+                for claim in [claim_by_id[claim_id]]
+                if claim.claim_kind == "objection"
+            ]
+            if len(objection_claims) == 1:
+                plan = plan.model_copy(
+                    update={
+                        "identity_hints": {
+                            **plan.identity_hints,
+                            "objectionIntent": objection_claims[0].subject.strip(),
+                        }
+                    }
+                )
         reasons.extend(
             validate_candidate_classification(plan.domain, plan.module, plan.object_type)
         )
@@ -1337,6 +1438,13 @@ def _validate_object_plans(
                 "all-versions product fact requires explicit all-version scope "
                 "on every source claim"
             )
+        if plan.module == "D1.1" and _is_unknown_version_scope(
+            plan.identity_hints.get("versionScope")
+        ):
+            reasons.append(
+                "version-sensitive product fact requires an explicit product version; "
+                "unknown version must remain unresolved"
+            )
         if plan.module == "D1.3" and plan.object_type == "BUSINESS_PROCESS":
             has_embedded_sequence = any(
                 isinstance(claim.attributes.get(field), list)
@@ -1379,6 +1487,19 @@ def _validate_object_plans(
         ):
             reasons.append(
                 "category enumeration cannot become an action rule without source actions"
+            )
+        if (
+            plan.module == "D3.3"
+            and plan_claims
+            and not all(claim.claim_kind == "list" for claim in plan_claims)
+            and not any(
+                _plan_satisfies_primary_claim_role(plan, claim)
+                for claim in plan_claims
+            )
+        ):
+            reasons.append(
+                "D3.3 requires a source-backed sales strategy or decision rule; "
+                "service operation guidance belongs to D1.3 or D4.3"
             )
         if not plan.title.strip():
             reasons.append("object plan title is required")
@@ -1426,16 +1547,20 @@ def _validate_object_plans(
             and _plan_satisfies_primary_claim_role(plan, claim_by_id[claim_id])
         )
 
-    weak_inputs = [(item, valid_anchors) for item in payload.get("weakSignals", [])]
+    weak_inputs = [
+        (item, valid_anchors)
+        for _label, payload in payloads
+        for item in payload.get("weakSignals", [])
+    ]
     unresolved_inputs = [
-        (item, valid_anchors) for item in payload.get("unresolvedItems", [])
+        (item, valid_anchors)
+        for _label, payload in payloads
+        for item in payload.get("unresolvedItems", [])
     ]
     explicitly_accounted_claim_ids = {
         item.get("claimId")
-        for item in [
-            *payload.get("weakSignals", []),
-            *payload.get("unresolvedItems", []),
-        ]
+        for _label, payload in payloads
+        for item in [*payload.get("weakSignals", []), *payload.get("unresolvedItems", [])]
         if isinstance(item, dict) and item.get("claimId") in claim_by_id
     }
     for claim_id in sorted(
@@ -1480,6 +1605,35 @@ def _expand_compact_object_plan(raw_plan: Any) -> Any:
     )
 
 
+def _group_claims_for_planning(
+    claims: list[AtomicClaim], max_claims: int
+) -> list[tuple[str, list[AtomicClaim]]]:
+    """Keep claims from one source location together while bounding model output."""
+    claims_by_anchor: dict[str, list[AtomicClaim]] = {}
+    anchor_order: list[str] = []
+    for claim in claims:
+        anchor = claim.evidence[0].anchor_id if claim.evidence else claim.claim_id
+        if anchor not in claims_by_anchor:
+            claims_by_anchor[anchor] = []
+            anchor_order.append(anchor)
+        claims_by_anchor[anchor].append(claim)
+
+    batches: list[list[AtomicClaim]] = []
+    current: list[AtomicClaim] = []
+    for anchor in anchor_order:
+        anchor_claims = claims_by_anchor[anchor]
+        if current and len(current) + len(anchor_claims) > max_claims:
+            batches.append(current)
+            current = []
+        current.extend(anchor_claims)
+    if current:
+        batches.append(current)
+    return [
+        (f"planning-{index}", batch)
+        for index, batch in enumerate(batches, start=1)
+    ]
+
+
 def _plan_satisfies_primary_claim_role(
     plan: CandidateObjectPlan, claim: AtomicClaim
 ) -> bool:
@@ -1494,6 +1648,39 @@ def _plan_satisfies_primary_claim_role(
     return any(plan.module == prefix or plan.module.startswith(prefix) for prefix in prefixes)
 
 
+def _constrain_plan_source_claim_scope(
+    plan: CandidateObjectPlan, claim_by_id: dict[str, AtomicClaim]
+) -> CandidateObjectPlan:
+    primary_kinds_by_module = {
+        "D3.3": {"strategy"},
+        "D4.1": {"script"},
+        "D4.2": {"objection"},
+    }
+    primary_kinds = primary_kinds_by_module.get(plan.module)
+    if primary_kinds is None:
+        return plan
+    plan_claims = [
+        claim_by_id[claim_id]
+        for claim_id in plan.source_claim_ids
+        if claim_id in claim_by_id
+    ]
+    primary_claims = [
+        claim for claim in plan_claims if claim.claim_kind in primary_kinds
+    ]
+    if not primary_claims:
+        return plan
+    primary_anchors = {
+        evidence.anchor_id for claim in primary_claims for evidence in claim.evidence
+    }
+    retained_ids = [
+        claim.claim_id
+        for claim in plan_claims
+        if claim.claim_kind in primary_kinds
+        or primary_anchors & {evidence.anchor_id for evidence in claim.evidence}
+    ]
+    return plan.model_copy(update={"source_claim_ids": retained_ids})
+
+
 def _is_all_versions_scope(value: Any) -> bool:
     if not isinstance(value, str):
         return False
@@ -1502,6 +1689,22 @@ def _is_all_versions_scope(value: Any) -> bool:
         marker in normalized
         for marker in ("全版本", "所有版本", "两个版本", "各版本", "通用")
     )
+
+
+def _is_named_product_version(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    normalized = value.replace(" ", "")
+    if any(marker in normalized for marker in ("当前版本", "未明确版本", "未知版本")):
+        return False
+    return "版" in normalized and not _is_all_versions_scope(normalized)
+
+
+def _is_unknown_version_scope(value: Any) -> bool:
+    if not isinstance(value, str):
+        return True
+    normalized = value.replace(" ", "")
+    return any(marker in normalized for marker in ("未明确", "未知", "需核实"))
 
 
 def _claim_explicitly_all_versions(claim: AtomicClaim) -> bool:
@@ -1516,9 +1719,38 @@ def _claim_explicitly_all_versions(claim: AtomicClaim) -> bool:
 
 
 def _normalize_content_shape(
-    module: Any, object_type: Any, content: Any
+    module: Any,
+    object_type: Any,
+    content: Any,
+    identity_hints: Any = None,
 ) -> Any:
-    if module != "D4.3" or object_type != "QA_PAIR" or not isinstance(content, dict):
+    if not isinstance(content, dict):
+        return content
+    content = _remove_runtime_source_references(content)
+    hints = identity_hints if isinstance(identity_hints, dict) else {}
+    if module == "D1.1" and object_type == "PRODUCT_VERSION_FACT":
+        content = {
+            **content,
+            "applicability": {
+                "product": str(hints.get("subject", "")).strip(),
+                "version": str(hints.get("versionScope", "")).strip(),
+            },
+        }
+    if module == "D3.3" and object_type in {"SALES_STRATEGY", "DECISION_RULE"}:
+        applicability = content.get("applicability")
+        if isinstance(applicability, str):
+            content = {
+                **content,
+                "applicability": {
+                    "products": [applicability],
+                    "scenarios": [],
+                },
+            }
+    if module == "D4.1" and object_type == "STANDARD_SCRIPT":
+        applicability = content.get("applicability")
+        if isinstance(applicability, str):
+            content = {**content, "applicability": {"scope": applicability}}
+    if module != "D4.3" or object_type != "QA_PAIR":
         return content
     items = content.get("items")
     if not isinstance(items, list):
@@ -1538,6 +1770,18 @@ def _normalize_content_shape(
     return {**content, "items": normalized_items}
 
 
+def _remove_runtime_source_references(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _remove_runtime_source_references(item)
+            for key, item in value.items()
+            if key != "sourceRef"
+        }
+    if isinstance(value, list):
+        return [_remove_runtime_source_references(item) for item in value]
+    return value
+
+
 _CONTENT_PATH_PATTERN = re.compile(
     r"^\$(?:(?:\.[A-Za-z_][A-Za-z0-9_-]*)|(?:\[[0-9]+\]))+$"
 )
@@ -1547,6 +1791,7 @@ _NON_CONTENT_REFERENCE_KEYS = {
     "factReferences",
     "sourceClaimIds",
     "sourceClaimId",
+    "sourceRef",
     "evidenceRef",
     "elementId",
     "stepId",
@@ -1643,6 +1888,44 @@ def _business_content_leaf_paths(content: dict[str, Any]) -> list[str]:
     leaf_paths: list[str] = []
     _collect_business_leaf_paths(content, "$", leaf_paths)
     return sorted(leaf_paths)
+
+
+def _critical_attribution_paths(
+    module: str, object_type: str, content: dict[str, Any]
+) -> set[str]:
+    all_paths = set(_business_content_leaf_paths(content))
+    if module == "D1.1":
+        prefixes = ("$.facts[", "$.limitations[")
+    elif module == "D1.3":
+        return {
+            path
+            for path in all_paths
+            if path.startswith(("$.preconditions[", "$.exceptions["))
+            or (
+                path.startswith("$.rulesOrSteps[")
+                and (
+                    path.endswith(".description")
+                    or re.search(r"\[[0-9]+\]$", path)
+                )
+            )
+        }
+    elif module == "D3.3":
+        prefixes = ("$.triggerConditions[", "$.decisionLogic", "$.actions[")
+    elif module == "D4.1" and object_type == "STANDARD_SCRIPT":
+        prefixes = ("$.script",)
+    elif module == "D4.2":
+        prefixes = (
+            "$.expressions[",
+            "$.rootConcernHypotheses[",
+            "$.resolutionElements[",
+        )
+    elif module == "D4.3" and object_type == "QA_PAIR":
+        prefixes = ("$.items[",)
+    else:
+        return set()
+    return {
+        path for path in all_paths if any(path.startswith(prefix) for prefix in prefixes)
+    }
 
 
 def _collect_business_leaf_paths(value: Any, path: str, output: list[str]) -> None:
@@ -1827,6 +2110,49 @@ def _enforce_plan_granularity(
     plans: list[CandidateObjectPlan], claims: list[AtomicClaim]
 ) -> list[CandidateObjectPlan]:
     claim_by_id = {claim.claim_id: claim for claim in claims}
+    plans = [_normalize_product_version_plan(plan) for plan in plans]
+    version_fact_groups: dict[tuple[str, str], list[CandidateObjectPlan]] = {}
+    for plan in plans:
+        if plan.module != "D1.1" or plan.object_type != "PRODUCT_VERSION_FACT":
+            continue
+        subject = plan.identity_hints.get("subject")
+        version_scope = _normalized_version_scope(
+            plan.identity_hints.get("versionScope")
+        )
+        if isinstance(subject, str) and subject.strip() and version_scope:
+            version_fact_groups.setdefault(
+                (subject.strip().casefold(), version_scope.casefold()), []
+            ).append(plan)
+    for group in version_fact_groups.values():
+        if len(group) < 2:
+            continue
+        primary = group[0]
+        subject = str(primary.identity_hints["subject"]).strip()
+        version_scope = _normalized_version_scope(
+            primary.identity_hints.get("versionScope")
+        )
+        merged = primary.model_copy(
+            update={
+                "title": f"{subject}{version_scope}产品版本事实",
+                "identity_hints": {
+                    **primary.identity_hints,
+                    "versionScope": version_scope,
+                    "factTheme": "产品版本综合事实",
+                },
+                "source_claim_ids": list(
+                    dict.fromkeys(
+                        claim_id
+                        for item in group
+                        for claim_id in item.source_claim_ids
+                    )
+                ),
+            }
+        )
+        plans = [
+            merged if plan.plan_id == primary.plan_id else plan
+            for plan in plans
+            if plan not in group[1:]
+        ]
     qa_plans = [
         plan
         for plan in plans
@@ -1871,7 +2197,7 @@ def _enforce_plan_granularity(
                         objections,
                         title=lambda claim: f"客户异议：{claim.subject}",
                         identity=lambda claim, context=objection_context: {
-                            "rootConcern": claim.subject,
+                            "objectionIntent": claim.subject,
                             "context": context,
                         },
                     )
@@ -1939,6 +2265,45 @@ def _enforce_plan_granularity(
                 continue
         enforced.append(plan)
     return enforced
+
+
+def _normalized_version_scope(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    normalized = value.strip()
+    for suffix in ("适用语境", "语境", "场景", "上下文"):
+        if normalized.endswith(suffix):
+            normalized = normalized[: -len(suffix)].strip()
+    return normalized
+
+
+def _normalize_product_version_plan(
+    plan: CandidateObjectPlan,
+) -> CandidateObjectPlan:
+    if plan.module != "D1.1" or plan.object_type != "PRODUCT_VERSION_FACT":
+        return plan
+    version_scope = _normalized_version_scope(
+        plan.identity_hints.get("versionScope")
+    )
+    subject = plan.identity_hints.get("subject")
+    if not isinstance(subject, str) or not version_scope:
+        return plan
+    normalized_subject = subject.strip()
+    for separator in ("-", "—", "·", " "):
+        normalized_subject = normalized_subject.replace(
+            f"{separator}{version_scope}", ""
+        )
+    if normalized_subject.endswith(version_scope):
+        normalized_subject = normalized_subject[: -len(version_scope)].strip()
+    return plan.model_copy(
+        update={
+            "identity_hints": {
+                **plan.identity_hints,
+                "subject": normalized_subject or subject.strip(),
+                "versionScope": version_scope,
+            }
+        }
+    )
 
 
 def _split_plan_by_anchor(
