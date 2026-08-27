@@ -4,6 +4,8 @@ export type CoverageStatus = 'hit' | 'weak_signal' | 'not_found' | 'unresolved'
 export type ModelCallPurpose =
   | 'identification'
   | 'claim_discovery'
+  | 'object_planning'
+  | 'content_realization'
   | 'object_formation'
   | 'output_limit_retry'
   | 'repair'
@@ -77,6 +79,24 @@ export type RejectedAtomicClaim = {
   claimId: string
   reasons: string[]
   rawClaim: Record<string, unknown>
+}
+
+export type CandidateObjectPlan = {
+  planId: string
+  title: string
+  domain: string
+  module: string
+  objectType: string
+  objectBoundary: string
+  classificationBasis: string
+  identityHints: Record<string, unknown>
+  sourceClaimIds: string[]
+}
+
+export type RejectedObjectPlan = {
+  planId: string
+  reasons: string[]
+  rawPlan: Record<string, unknown>
 }
 
 export type CandidateKnowledgeObject = {
@@ -217,6 +237,8 @@ export type IdentificationResult = {
   processingStages: ProcessingStage[]
   atomicClaims: AtomicClaim[]
   rejectedAtomicClaims: RejectedAtomicClaim[]
+  objectPlans: CandidateObjectPlan[]
+  rejectedObjectPlans: RejectedObjectPlan[]
   candidates: CandidateKnowledgeObject[]
   rejectedCandidates: RejectedCandidate[]
   rejectedAuxiliaryItems: RejectedAuxiliaryItem[]
@@ -307,6 +329,13 @@ export type KnowledgeModule = {
     positiveExample: string
     negativeExample: string
   }
+  identityContract: {
+    identityFields: string[]
+    sameObjectWhen: string
+    differentObjectWhen: string
+    mergeStrategy: string
+    conflictRule: string
+  }
 }
 
 export type KnowledgeDomain = {
@@ -323,6 +352,8 @@ export type IdentificationCatalog = {
   status: 'sample_validation'
   source: string
   contentContractVersion: string
+  identityContractVersion: string
+  identityContractStatus: string
   scopeDefinitions: Record<'core' | 'optional', string>
   domains: KnowledgeDomain[]
   modules: KnowledgeModule[]

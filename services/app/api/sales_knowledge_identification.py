@@ -27,6 +27,11 @@ from app.features.sales_knowledge_identification.content_contracts import (
 from app.features.sales_knowledge_identification.formalizer import (
     KnowledgeObjectFormationService,
 )
+from app.features.sales_knowledge_identification.identity_contracts import (
+    IDENTITY_CONTRACT_BY_MODULE,
+    IDENTITY_CONTRACT_STATUS,
+    IDENTITY_CONTRACT_VERSION,
+)
 from app.features.sales_knowledge_identification.models import (
     DocumentPackage,
     IdentificationResult,
@@ -66,6 +71,8 @@ def identification_catalog() -> dict[str, object]:
         "status": CATALOG_STATUS,
         "source": CATALOG_SOURCE,
         "contentContractVersion": CONTENT_CONTRACT_VERSION,
+        "identityContractVersion": IDENTITY_CONTRACT_VERSION,
+        "identityContractStatus": IDENTITY_CONTRACT_STATUS,
         "scopeDefinitions": MODULE_SCOPE_DEFINITIONS,
         "domains": [
             {
@@ -107,6 +114,23 @@ def identification_catalog() -> dict[str, object]:
                     "negativeExample": CONTENT_CONTRACT_BY_MODULE[
                         module.code
                     ].negative_example,
+                },
+                "identityContract": {
+                    "identityFields": IDENTITY_CONTRACT_BY_MODULE[
+                        module.code
+                    ].identity_fields,
+                    "sameObjectWhen": IDENTITY_CONTRACT_BY_MODULE[
+                        module.code
+                    ].same_object_when,
+                    "differentObjectWhen": IDENTITY_CONTRACT_BY_MODULE[
+                        module.code
+                    ].different_object_when,
+                    "mergeStrategy": IDENTITY_CONTRACT_BY_MODULE[
+                        module.code
+                    ].merge_strategy,
+                    "conflictRule": IDENTITY_CONTRACT_BY_MODULE[
+                        module.code
+                    ].conflict_rule,
                 },
             }
             for module in KNOWLEDGE_MODULES

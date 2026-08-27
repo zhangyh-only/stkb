@@ -96,28 +96,40 @@ class ApiStubGateway:
                     }
                 ]
             }
-        else:
+        elif "对象边界规划器" in request.system_prompt:
             payload = {
-                "candidates": [
+                "objectPlans": [
                     {
-                        "candidateId": "C1",
+                        "planId": "P1",
                         "title": "测试对象 C1",
                         "objectBoundary": "共享测试业务身份与更新边界",
                         "classificationBasis": "依据测试模块规则分类",
-                        "identityHints": {"testKey": "C1"},
+                        "identityHints": {
+                            "subject": "药享保",
+                            "versionScope": "当前版本",
+                            "factTheme": "在线问诊服务",
+                        },
                         "sourceClaimIds": ["CL1"],
                         "domain": "D1",
                         "module": "D1.1",
                         "objectType": "PRODUCT_FACT",
+                    }
+                ],
+                "weakSignals": [],
+                "unresolvedItems": [],
+            }
+        else:
+            payload = {
+                "realizations": [
+                    {
+                        "planId": "P1",
                         "content": _api_contract_content(
                             "D1.1", "药享保提供在线问诊服务"
                         ),
                         "entityMentions": [],
                         "relations": [],
                     }
-                ],
-                "weakSignals": [],
-                "unresolvedItems": [],
+                ]
             }
         return ModelCompletion(
             provider="test-provider",
@@ -214,13 +226,19 @@ def test_api_runs_identification_and_reads_the_saved_result(
     assert catalog_response.json()["contentContractVersion"] == (
         "object-content-contracts-v0.3"
     )
+    assert catalog_response.json()["identityContractVersion"] == (
+        "object-identity-contracts-v0.1"
+    )
     assert catalog_response.json()["modules"][0]["contentContract"][
         "requiredFields"
+    ]
+    assert catalog_response.json()["modules"][0]["identityContract"][
+        "identityFields"
     ]
     assert run_response.status_code == 200
     assert run_response.json()["status"] == "completed"
     assert run_response.json()["modelConfiguration"]["documentMaxChars"] == 3500
-    assert run_response.json()["candidates"][0]["candidateId"] == "G1-C1"
+    assert run_response.json()["candidates"][0]["candidateId"] == "P1"
     assert formation_response.status_code == 200
     assert formation_response.json()["status"] == "completed"
     assert formation_response.json()["createdCount"] == 1
