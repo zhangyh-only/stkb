@@ -101,11 +101,16 @@ def build_object_planning_request(
 3. FAQ 表按一个共同维护的问答集合规划，所有 qa 主张进入同一计划；不要按每个问题或主题拆对象。
 4. 同一沟通目标、客群、产品组合与方法下的完整话术形成一个话术对象；措辞变体进入同一对象。
 5. 根本顾虑相同的异议表达归并；根本顾虑不同的异议保持独立。异议对象不吞并应对话术。
-6. 每条主张必须至少进入一个 plan，或在 unresolvedItems 中逐条列明 claimId 与原因；不得静默丢失。
+6. 下列边界是硬约束：
+   - 每个不同 productCombination/产品组合形成独立 D3.3 策略，不得因同属组合营销而合并；
+   - D1.3 的用户操作顺序形成 BUSINESS_PROCESS；处方限量、同功效药限制、目录限制、发票条件等
+     可独立查询的约束形成 POLICY_RULE_SET，不得塞进一个“通用流程与规则”对象；
+   - 同一规则主题可聚合多条约束，但处方规则与发票规则因消费问题和更新依据不同必须拆分。
+7. 每条主张必须至少进入一个 plan，或在 unresolvedItems 中逐条列明 claimId 与原因；不得静默丢失。
    同一主张只有在确实支撑不同下游职责时才可进入多个计划。
-7. 一个计划只有一个主模块。identityHints 只写决定“是否同一对象”的稳定业务要素，不写摘要、
+8. 一个计划只有一个主模块。identityHints 只写决定“是否同一对象”的稳定业务要素，不写摘要、
    claimId、锚点、模块码或任意技术字段。
-8. 只返回输出形态列出的最小字段，不返回 domain、objectBoundary、classificationBasis、content、
+9. 只返回输出形态列出的最小字段，不返回 domain、objectBoundary、classificationBasis、content、
    entityMentions、relations 或解释文字；这些由程序根据已发布合同注入，避免重复规则和输出截断。
    只输出合法 JSON，不输出隐藏推理过程。
 
