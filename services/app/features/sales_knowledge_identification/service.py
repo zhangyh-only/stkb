@@ -916,6 +916,37 @@ def _validate_object_plans(
         unknown_claim_ids = sorted(set(plan.source_claim_ids) - set(claim_by_id))
         if unknown_claim_ids:
             reasons.append("unknown source claim ids: " + ", ".join(unknown_claim_ids))
+        plan_claims = [
+            claim_by_id[claim_id]
+            for claim_id in plan.source_claim_ids
+            if claim_id in claim_by_id
+        ]
+        if plan.module == "D4.2" and plan.object_type == "CUSTOMER_OBJECTION":
+            support_keys = {
+                "rootConcern",
+                "rootCause",
+                "response",
+                "responseContext",
+                "resolution",
+                "handling",
+            }
+            has_complete_objection_support = any(
+                claim.claim_kind in {"strategy", "script"}
+                or support_keys.intersection(claim.attributes)
+                for claim in plan_claims
+            )
+            if not has_complete_objection_support:
+                reasons.append(
+                    "customer objection lacks source-backed root concern or response"
+                )
+        if (
+            plan.module == "D3.3"
+            and plan_claims
+            and all(claim.claim_kind == "list" for claim in plan_claims)
+        ):
+            reasons.append(
+                "category enumeration cannot become an action rule without source actions"
+            )
         if not plan.title.strip():
             reasons.append("object plan title is required")
         if not plan.object_boundary.strip():
@@ -1042,6 +1073,34 @@ def _enforce_plan_granularity(
                         },
                     )
                 )
+                continue
+        if plan.module == "D3.3" and plan.object_type == "DECISION_RULE":
+            claims_by_anchor: dict[str, list[AtomicClaim]] = {}
+            for claim in plan_claims:
+                if not claim.evidence:
+                    continue
+                claims_by_anchor.setdefault(claim.evidence[0].anchor_id, []).append(
+                    claim
+                )
+            if len(claims_by_anchor) > 1:
+                for index, anchor_claims in enumerate(
+                    claims_by_anchor.values(), start=1
+                ):
+                    trigger = anchor_claims[0].subject
+                    identity_hints = dict(plan.identity_hints)
+                    identity_hints["triggerContext"] = trigger
+                    enforced.append(
+                        plan.model_copy(
+                            update={
+                                "plan_id": f"{plan.plan_id}-{index}",
+                                "title": f"{plan.title}：{trigger}",
+                                "identity_hints": identity_hints,
+                                "source_claim_ids": [
+                                    claim.claim_id for claim in anchor_claims
+                                ],
+                            }
+                        )
+                    )
                 continue
         enforced.append(plan)
     return enforced

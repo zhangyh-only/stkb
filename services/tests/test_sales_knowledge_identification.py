@@ -322,9 +322,11 @@ def test_two_stage_identification_validates_catalog_and_source_claims() -> None:
         "weakSignals": [],
         "unresolvedItems": [],
     }
-    gateway = TwoStageGateway(
-        [_claim("DP-TEST#page-1", "药品需在保障目录内")], object_payload
+    objection_claim = _claim(
+        "DP-TEST#page-1", "药品需在保障目录内", kind="objection"
     )
+    objection_claim["attributes"] = {"responseContext": "目录异议应对依据"}
+    gateway = TwoStageGateway([objection_claim], object_payload)
 
     result = SalesKnowledgeIdentificationService(gateway=gateway).identify(
         _package("DP-TEST", "# 示例\n\n药品需在保障目录内。")
@@ -365,6 +367,49 @@ def test_uncovered_claim_does_not_promote_module_hint_to_classification() -> Non
     assert len(result.unresolved_items) == 1
     assert result.unresolved_items[0].module is None
     assert "禁止静默丢失" in result.unresolved_items[0].reason
+
+
+def test_planning_rejects_objection_built_from_expression_only() -> None:
+    gateway = TwoStageGateway(
+        [_claim("DP-EXPRESSION#page-1", "我没时间", kind="objection")],
+        {
+            "candidates": [
+                _candidate("D4.2", "CUSTOMER_OBJECTION", ["CL1"])
+            ],
+            "weakSignals": [],
+            "unresolvedItems": [],
+        },
+    )
+
+    result = SalesKnowledgeIdentificationService(gateway=gateway).identify(
+        _package("DP-EXPRESSION", "# 示例\n\n我没时间。")
+    )
+
+    assert result.candidates == []
+    assert result.rejected_object_plans[0].reasons == [
+        "customer objection lacks source-backed root concern or response"
+    ]
+    assert result.unresolved_items[0].evidence == ["DP-EXPRESSION#page-1"]
+
+
+def test_planning_rejects_list_only_action_rule() -> None:
+    gateway = TwoStageGateway(
+        [_claim("DP-LIST#page-1", "A、B、C三级", kind="list")],
+        {
+            "candidates": [_candidate("D3.3", "DECISION_RULE", ["CL1"])],
+            "weakSignals": [],
+            "unresolvedItems": [],
+        },
+    )
+
+    result = SalesKnowledgeIdentificationService(gateway=gateway).identify(
+        _package("DP-LIST", "# 示例\n\nA、B、C三级。")
+    )
+
+    assert result.candidates == []
+    assert result.rejected_object_plans[0].reasons == [
+        "category enumeration cannot become an action rule without source actions"
+    ]
 
 
 def test_identification_rejects_relations_to_a_rejected_candidate() -> None:
@@ -907,3 +952,57 @@ def test_granularity_gate_splits_objections_sharing_one_source_anchor() -> None:
         "已经有医保",
     ]
     assert [item.source_claim_ids for item in split] == [["CL1"], ["CL2"]]
+
+
+def test_granularity_gate_splits_decision_rules_by_trigger_anchor() -> None:
+    claims = [
+        AtomicClaim(
+            claim_id="CL1",
+            claim_kind="rule",
+            statement="首次接触后按报价结果分类",
+            subject="首次分类",
+            evidence=[
+                ClaimEvidence(
+                    anchor_id="DP-RULE#section-1",
+                    exact_quote="首次分类",
+                    source_text="首次分类",
+                )
+            ],
+        ),
+        AtomicClaim(
+            claim_id="CL2",
+            claim_kind="rule",
+            statement="复播时只升不降",
+            subject="复播迁移",
+            evidence=[
+                ClaimEvidence(
+                    anchor_id="DP-RULE#section-2",
+                    exact_quote="复播迁移",
+                    source_text="复播迁移",
+                )
+            ],
+        ),
+    ]
+    plan = CandidateObjectPlan(
+        plan_id="P1",
+        title="名单状态规则",
+        domain="D3",
+        module="D3.3",
+        object_type="DECISION_RULE",
+        object_boundary="触发上下文不同必须拆分",
+        classification_basis="属于行动规则",
+        identity_hints={
+            "strategyGoal": "维护名单状态",
+            "triggerContext": "名单更新",
+            "applicability": "外呼名单管理",
+        },
+        source_claim_ids=["CL1", "CL2"],
+    )
+
+    split = _enforce_plan_granularity([plan], claims)
+
+    assert [item.source_claim_ids for item in split] == [["CL1"], ["CL2"]]
+    assert [item.identity_hints["triggerContext"] for item in split] == [
+        "首次分类",
+        "复播迁移",
+    ]
