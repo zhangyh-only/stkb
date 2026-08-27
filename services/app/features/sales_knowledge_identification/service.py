@@ -16,8 +16,12 @@ from .catalog import (
     validate_candidate_classification,
 )
 from .claims import resolve_verbatim_claim_references, validate_atomic_claims
-from .content_contracts import validate_candidate_content
-from .identity_contracts import canonical_identity, validate_identity_hints
+from .content_contracts import CONTENT_CONTRACT_BY_MODULE, validate_candidate_content
+from .identity_contracts import (
+    IDENTITY_CONTRACT_BY_MODULE,
+    canonical_identity,
+    validate_identity_hints,
+)
 from .models import (
     AtomicClaim,
     CandidateKnowledgeObject,
@@ -840,12 +844,17 @@ def _validate_object_plans(
         for field in ("content", "entityMentions", "relations", "evidence"):
             candidate_payload.pop(field, None)
         module_code = candidate_payload.get("module")
-        if (
-            candidate_payload.get("domain") == module_code
-            and isinstance(module_code, str)
-            and module_code in MODULE_BY_CODE
-        ):
+        if isinstance(module_code, str) and module_code in MODULE_BY_CODE:
             candidate_payload["domain"] = MODULE_BY_CODE[module_code].domain
+            identity_contract = IDENTITY_CONTRACT_BY_MODULE[module_code]
+            content_contract = CONTENT_CONTRACT_BY_MODULE[module_code]
+            candidate_payload["objectBoundary"] = (
+                f"同一对象：{identity_contract.same_object_when} "
+                f"必须拆分：{identity_contract.different_object_when}"
+            )
+            candidate_payload["classificationBasis"] = (
+                f"纳入：{content_contract.inclusion} 排除：{content_contract.exclusion}"
+            )
         reasons: list[str] = []
         try:
             plan = CandidateObjectPlan.model_validate(candidate_payload)

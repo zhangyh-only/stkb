@@ -105,8 +105,9 @@ def build_object_planning_request(
    同一主张只有在确实支撑不同下游职责时才可进入多个计划。
 7. 一个计划只有一个主模块。identityHints 只写决定“是否同一对象”的稳定业务要素，不写摘要、
    claimId、锚点、模块码或任意技术字段。
-8. classificationBasis 明示命中的纳入/排除与冲突裁决；objectBoundary 明示什么内容共同更新、
-   什么情况必须拆分。只输出合法 JSON，不输出隐藏推理过程。
+8. 只返回输出形态列出的最小字段，不返回 domain、objectBoundary、classificationBasis、content、
+   entityMentions、relations 或解释文字；这些由程序根据已发布合同注入，避免重复规则和输出截断。
+   只输出合法 JSON，不输出隐藏推理过程。
 
 当前 D1-D5 / 22个知识内容模块规则：
 {render_catalog_for_prompt()}
@@ -122,11 +123,8 @@ def build_object_planning_request(
   "objectPlans": [{{
     "planId": "P1",
     "title": "业务可读标题",
-    "domain": "D4",
     "module": "D4.1",
     "objectType": "STANDARD_SCRIPT",
-    "objectBoundary": "同一沟通目标、客群与更新生命周期下独立复用",
-    "classificationBasis": "符合 D4.1 标准表达与完整话术边界",
     "identityHints": {{"subject": "业务主体", "scope": "适用范围"}},
     "sourceClaimIds": ["CL1"]
   }}],
