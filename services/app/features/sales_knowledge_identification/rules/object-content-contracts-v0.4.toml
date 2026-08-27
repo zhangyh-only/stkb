@@ -1,4 +1,4 @@
-version = "object-content-contracts-v0.3"
+version = "object-content-contracts-v0.4"
 
 [[contracts]]
 module = "D1.1"
@@ -172,6 +172,7 @@ negative_example = "常见异议包括价格贵、没需要、考虑一下。"
 module = "D4.3"
 object_types = ["QA_PAIR", "TERM", "STANDARD_EXPLANATION"]
 required_fields = ["items", "factReferences", "applicability"]
+required_fields_by_type = { QA_PAIR = ["items", "factReferences", "applicability"], TERM = ["terms", "standardExplanation", "applicability"], STANDARD_EXPLANATION = ["subject", "standardExplanation", "factReferences", "applicability"] }
 minimum_content_chars = 180
 granularity = "同一主题和事实依据下可一起更新、检索的一组问答或术语形成对象；跨主题应拆分。"
 inclusion = "具体问题、销售术语或谚语，以及对应标准答案/解释、事实引用和适用范围。"

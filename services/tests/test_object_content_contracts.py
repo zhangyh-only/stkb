@@ -7,7 +7,7 @@ from app.features.sales_knowledge_identification.content_contracts import (
 
 
 def test_content_contracts_cover_every_module_and_object_type() -> None:
-    assert CONTENT_CONTRACT_VERSION == "object-content-contracts-v0.3"
+    assert CONTENT_CONTRACT_VERSION == "object-content-contracts-v0.4"
     assert set(CONTENT_CONTRACT_BY_MODULE) == {
         module.code for module in KNOWLEDGE_MODULES
     }
@@ -67,3 +67,21 @@ def test_explicitly_allowed_empty_fields_do_not_force_model_invention() -> None:
     }
 
     assert validate_candidate_content("D4.1", "STANDARD_SCRIPT", content) == []
+
+
+def test_term_cannot_use_qa_pair_content_shape() -> None:
+    errors = validate_candidate_content(
+        "D4.3",
+        "TERM",
+        {
+            "items": [{"question": "什么是嫌货", "answer": "提出异议的客户"}],
+            "factReferences": ["CL1"],
+            "applicability": "销售基础培训",
+            "detail": "用于确保内容长度达到基础阈值。" * 20,
+        },
+    )
+
+    assert any(
+        error == "missing required content fields: terms, standardExplanation"
+        for error in errors
+    )

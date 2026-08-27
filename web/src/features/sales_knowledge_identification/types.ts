@@ -321,6 +321,7 @@ export type KnowledgeModule = {
   consumers: string[]
   contentContract: {
     requiredFields: string[]
+    requiredFieldsByType: Record<string, string[]>
     allowEmptyFields: string[]
     minimumContentChars: number
     granularity: string

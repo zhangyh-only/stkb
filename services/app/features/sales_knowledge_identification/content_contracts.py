@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 CONTRACTS_PATH = (
-    Path(__file__).with_name("rules") / "object-content-contracts-v0.3.toml"
+    Path(__file__).with_name("rules") / "object-content-contracts-v0.4.toml"
 )
 
 
@@ -16,6 +16,7 @@ class ObjectContentContract:
     module: str
     object_types: tuple[str, ...]
     required_fields: tuple[str, ...]
+    required_fields_by_type: dict[str, tuple[str, ...]]
     allow_empty_fields: tuple[str, ...]
     minimum_content_chars: int
     granularity: str
@@ -33,6 +34,12 @@ def _load_contracts() -> tuple[str, tuple[ObjectContentContract, ...]]:
             module=item["module"],
             object_types=tuple(item["object_types"]),
             required_fields=tuple(item["required_fields"]),
+            required_fields_by_type={
+                object_type: tuple(fields)
+                for object_type, fields in item.get(
+                    "required_fields_by_type", {}
+                ).items()
+            },
             allow_empty_fields=tuple(item.get("allow_empty_fields", [])),
             minimum_content_chars=item["minimum_content_chars"],
             granularity=item["granularity"],
@@ -61,9 +68,12 @@ def validate_candidate_content(module: str, object_type: str, content: dict[str,
     errors: list[str] = []
     if object_type not in contract.object_types:
         errors.append(f"object type {object_type} is not covered by content contract {module}")
+    required_fields = contract.required_fields_by_type.get(
+        object_type, contract.required_fields
+    )
     missing_fields = [
         field
-        for field in contract.required_fields
+        for field in required_fields
         if field not in content
         or (
             field not in contract.allow_empty_fields
@@ -92,6 +102,17 @@ def render_content_contracts_for_prompt() -> str:
                     f"### {item.module} 内容合同",
                     f"- 适用对象类型：{', '.join(item.object_types)}",
                     f"- content 必填字段：{', '.join(item.required_fields)}",
+                    *(
+                        [
+                            "- 分对象类型必填："
+                            + "；".join(
+                                f"{object_type}=[{', '.join(fields)}]"
+                                for object_type, fields in item.required_fields_by_type.items()
+                            )
+                        ]
+                        if item.required_fields_by_type
+                        else []
+                    ),
                     (
                         "- 可显式为空的字段："
                         + (", ".join(item.allow_empty_fields) or "无")

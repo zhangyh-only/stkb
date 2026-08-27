@@ -99,6 +99,9 @@ def identification_catalog() -> dict[str, object]:
                 "consumers": module.consumers,
                 "contentContract": {
                     "requiredFields": CONTENT_CONTRACT_BY_MODULE[module.code].required_fields,
+                    "requiredFieldsByType": CONTENT_CONTRACT_BY_MODULE[
+                        module.code
+                    ].required_fields_by_type,
                     "allowEmptyFields": CONTENT_CONTRACT_BY_MODULE[
                         module.code
                     ].allow_empty_fields,
