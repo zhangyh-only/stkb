@@ -166,7 +166,13 @@ def build_content_realization_request(
    sourceText 替换。不得把长话术压缩成几十字摘要。
 4. 不用常识补写来源未提供的事实。合同允许为空的字段可显式给空数组；其余缺失必须忠实说明
    unresolved，而不是编造。
-5. entityMentions 和 relations 只引用本批计划、主张证据中明确出现的内容。只输出合法 JSON。
+5. entityMentions 只记录会参与对象身份、过滤或关系查询的稳定业务实体；不得只输出字符串。每项必须
+   严格为 {{"mentionId":"P1-M1","text":"原文实体名","proposedType":"PRODUCT",
+   "referenceRole":"ABOUT_PRODUCT","sourceRef":"主张中的真实anchorId"}}。不确定类型时不输出。
+6. relations 只记录本批明确且有证据的关系，每项必须严格为
+   {{"relationKind":"entity|object","relationType":"关系类型","sourceRef":"P1或P1-M1",
+   "targetRef":"P2或P2-M1","evidence":["真实anchorId"]}}。无法同时满足引用和证据时不输出。
+7. 只输出合法 JSON，不输出额外字段。
 
 当前22个模块对象内容合同：
 {render_content_contracts_for_prompt()}

@@ -8,7 +8,7 @@ from typing import Any
 from .catalog import MODULE_BY_CODE
 
 CONTRACTS_PATH = (
-    Path(__file__).with_name("rules") / "object-identity-contracts-v0.1.toml"
+    Path(__file__).with_name("rules") / "object-identity-contracts-v0.2.toml"
 )
 
 

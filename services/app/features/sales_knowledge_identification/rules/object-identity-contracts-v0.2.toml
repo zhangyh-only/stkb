@@ -1,4 +1,4 @@
-version = "object-identity-contracts-v0.1"
+version = "object-identity-contracts-v0.2"
 status = "sample_validation"
 
 [[contracts]]
@@ -123,7 +123,7 @@ conflict_rule = "仅表面词相似不能归并；完整应对话术仍保持独
 
 [[contracts]]
 module = "D4.3"
-identity_fields = ["collectionName", "applicability"]
+identity_fields = ["subject", "applicability"]
 same_object_when = "同一来源维护单元、主题范围和适用范围内共同更新的问答/术语条目。"
 different_object_when = "维护单元、事实主题或适用产品范围不同。"
 merge_strategy = "按问题/术语规范键合并 items、同义问法和事实引用。"

@@ -227,7 +227,7 @@ def test_api_runs_identification_and_reads_the_saved_result(
         "object-content-contracts-v0.3"
     )
     assert catalog_response.json()["identityContractVersion"] == (
-        "object-identity-contracts-v0.1"
+        "object-identity-contracts-v0.2"
     )
     assert catalog_response.json()["modules"][0]["contentContract"][
         "requiredFields"
