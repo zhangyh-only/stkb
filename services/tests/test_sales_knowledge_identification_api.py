@@ -77,34 +77,52 @@ class InMemoryRepository:
 
 class ApiStubGateway:
     def complete(self, request):  # type: ignore[no-untyped-def]
+        if "原子主张发现器" in request.system_prompt:
+            payload = {
+                "claims": [
+                    {
+                        "claimId": "CL1",
+                        "claimKind": "fact",
+                        "statement": "药享保提供在线问诊服务",
+                        "subject": "药享保",
+                        "attributes": {},
+                        "moduleHints": ["D1.1"],
+                        "evidence": [
+                            {
+                                "anchorId": "DP-API#page-1",
+                                "exactQuote": "药享保提供在线问诊服务",
+                            }
+                        ],
+                    }
+                ]
+            }
+        else:
+            payload = {
+                "candidates": [
+                    {
+                        "candidateId": "C1",
+                        "title": "测试对象 C1",
+                        "objectBoundary": "共享测试业务身份与更新边界",
+                        "classificationBasis": "依据测试模块规则分类",
+                        "identityHints": {"testKey": "C1"},
+                        "sourceClaimIds": ["CL1"],
+                        "domain": "D1",
+                        "module": "D1.1",
+                        "objectType": "PRODUCT_FACT",
+                        "content": _api_contract_content(
+                            "D1.1", "药享保提供在线问诊服务"
+                        ),
+                        "entityMentions": [],
+                        "relations": [],
+                    }
+                ],
+                "weakSignals": [],
+                "unresolvedItems": [],
+            }
         return ModelCompletion(
             provider="test-provider",
             model="test-model",
-            content=json.dumps(
-                {
-                    "candidates": [
-                        {
-                            "candidateId": "C1",
-                            "title": "测试对象 C1",
-                            "objectBoundary": "共享测试业务身份与更新边界",
-                            "classificationBasis": "依据测试模块规则分类",
-                            "identityHints": {"testKey": "C1"},
-                            "domain": "D1",
-                            "module": "D1.1",
-                            "objectType": "PRODUCT_FACT",
-                            "content": _api_contract_content(
-                                "D1.1", "药享保提供在线问诊服务"
-                            ),
-                            "entityMentions": [],
-                            "evidence": ["DP-API#page-1"],
-                            "relations": [],
-                        }
-                    ],
-                    "weakSignals": [],
-                    "unresolvedItems": [],
-                },
-                ensure_ascii=False,
-            ),
+            content=json.dumps(payload, ensure_ascii=False),
         )
 
 
@@ -194,7 +212,7 @@ def test_api_runs_identification_and_reads_the_saved_result(
     assert catalog_response.json()["domains"][0]["question"] == "卖什么"
     assert set(catalog_response.json()["scopeDefinitions"]) == {"core", "optional"}
     assert catalog_response.json()["contentContractVersion"] == (
-        "object-content-contracts-v0.2"
+        "object-content-contracts-v0.3"
     )
     assert catalog_response.json()["modules"][0]["contentContract"][
         "requiredFields"
@@ -202,7 +220,7 @@ def test_api_runs_identification_and_reads_the_saved_result(
     assert run_response.status_code == 200
     assert run_response.json()["status"] == "completed"
     assert run_response.json()["modelConfiguration"]["documentMaxChars"] == 3500
-    assert run_response.json()["candidates"][0]["candidateId"] == "C1"
+    assert run_response.json()["candidates"][0]["candidateId"] == "G1-C1"
     assert formation_response.status_code == 200
     assert formation_response.json()["status"] == "completed"
     assert formation_response.json()["createdCount"] == 1

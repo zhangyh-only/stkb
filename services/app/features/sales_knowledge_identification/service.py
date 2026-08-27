@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from time import perf_counter
@@ -15,8 +16,10 @@ from .catalog import (
     MODULE_BY_CODE,
     validate_candidate_classification,
 )
+from .claims import resolve_verbatim_claim_references, validate_atomic_claims
 from .content_contracts import validate_candidate_content
 from .models import (
+    AtomicClaim,
     CandidateKnowledgeObject,
     CandidateNormalization,
     DocumentPackage,
@@ -26,6 +29,7 @@ from .models import (
     ModelConfigurationSnapshot,
     ModelRequest,
     ProcessingStage,
+    RejectedAtomicClaim,
     RejectedAuxiliaryItem,
     RejectedCandidate,
     UnresolvedItem,
@@ -34,10 +38,13 @@ from .models import (
 from .prompt_builder import (
     PROMPT_VERSION,
     SCHEMA_VERSION,
-    build_model_request,
+    build_claim_discovery_request,
+    build_object_formation_request,
     build_repair_request,
 )
 from .segmenter import DocumentSegment, segment_document
+
+CallPurpose = Literal["claim_discovery", "object_formation"]
 
 
 class ModelGateway(Protocol):
@@ -70,6 +77,7 @@ class SalesKnowledgeIdentificationService:
         self.max_retries = max_retries
         self.max_candidates = max_candidates
         self.document_max_chars = document_max_chars
+        self.claim_discovery_max_chars = max(1, document_max_chars // 2)
         self.max_concurrency = max_concurrency
         self.provider = provider
         self.model = model
@@ -80,401 +88,152 @@ class SalesKnowledgeIdentificationService:
             raise DocumentPackageUnavailable(document_package.document_package_id)
         started_at = datetime.now(UTC)
         run_started = perf_counter()
-        segments = segment_document(document_package, self.document_max_chars)
-        segment_payloads: list[tuple[DocumentSegment, dict[str, Any]]] = []
+        segments = segment_document(
+            document_package, self.claim_discovery_max_chars
+        )
         model_calls: list[ModelCallTrace] = []
 
-        def identify_segment(
-            segment: DocumentSegment,
-        ) -> tuple[DocumentSegment, dict[str, Any], ModelCompletion, list[ModelCallTrace]]:
+        discovery_results, discovery_failures = self._discover_claims(
+            document_package, segments
+        )
+        model_calls.extend(_renumber_calls(discovery_results, model_calls))
+        if discovery_failures:
+            return self._failed_result(
+                document_package=document_package,
+                started_at=started_at,
+                run_started=run_started,
+                model_calls=model_calls,
+                failures=discovery_failures,
+            )
+
+        atomic_claims: list[AtomicClaim] = []
+        rejected_atomic_claims: list[RejectedAtomicClaim] = []
+        for segment, payload, _completion, _calls in discovery_results:
+            namespaced = _namespace_claim_payload(
+                payload, f"S{segment.index}" if len(segments) > 1 else None
+            )
             segment_package = document_package.model_copy(
                 update={"full_markdown": segment.markdown, "anchors": segment.anchors}
             )
-            payload, segment_completion, segment_calls = self._identify_segment(
-                segment_package,
-                segment.label if len(segments) > 1 else None,
+            accepted, rejected = validate_atomic_claims(
+                namespaced.get("claims", []), segment_package
             )
-            return segment, payload, segment_completion, segment_calls
+            atomic_claims.extend(accepted)
+            rejected_atomic_claims.extend(rejected)
 
-        segment_results: list[
-            tuple[DocumentSegment, dict[str, Any], ModelCompletion, list[ModelCallTrace]]
-        ] = []
-        failures: list[str] = []
-        with ThreadPoolExecutor(
-            max_workers=min(len(segments), self.max_concurrency)
-        ) as executor:
-            futures = [
-                (segment, executor.submit(identify_segment, segment))
-                for segment in segments
-            ]
-            for segment, future in futures:
-                try:
-                    segment_results.append(future.result())
-                except SegmentIdentificationFailure as error:
-                    failures.append(f"{segment.label}: {error}")
-                    for call in error.model_calls:
-                        model_calls.append(
-                            call.model_copy(
-                                update={
-                                    "attempt": len(model_calls) + 1,
-                                    "segment": segment.label,
-                                }
-                            )
-                        )
-
-        if failures:
-            for segment, _payload, _completion, segment_calls in segment_results:
-                for call in segment_calls:
-                    model_calls.append(
-                        call.model_copy(
-                            update={
-                                "attempt": len(model_calls) + 1,
-                                "segment": segment.label,
-                            }
-                        )
-                    )
-            finished_at = datetime.now(UTC)
-            return IdentificationResult(
-                document_package_id=document_package.document_package_id,
-                status="failed",
+        object_groups = _group_claims(atomic_claims, self.max_candidates)
+        object_results, object_failures = self._form_candidate_objects(
+            document_package.document_package_id, object_groups
+        )
+        model_calls.extend(_renumber_calls(object_results, model_calls))
+        if object_failures:
+            return self._failed_result(
+                document_package=document_package,
                 started_at=started_at,
-                finished_at=finished_at,
-                duration_ms=round((perf_counter() - run_started) * 1000),
-                provider=self.provider,
-                model=self.model,
-                prompt_version=PROMPT_VERSION,
-                schema_version=SCHEMA_VERSION,
-                catalog_version=CATALOG_VERSION,
-                catalog_fingerprint=CATALOG_FINGERPRINT,
-                raw_model_output="",
+                run_started=run_started,
                 model_calls=model_calls,
-                processing_stages=[
-                    ProcessingStage(
-                        key="model_call",
-                        name="真实模型调用",
-                        status="failed",
-                        duration_ms=sum(call.duration_ms for call in model_calls),
-                        detail="；".join(failures),
-                    )
-                ],
-                candidates=[],
-                rejected_candidates=[],
-                weak_signals=[],
-                unresolved_items=[],
-                coverage_by_module={
-                    module.code: "not_found" for module in KNOWLEDGE_MODULES
-                },
-                call_count=len(model_calls),
-                prompt_tokens=sum(call.prompt_tokens for call in model_calls),
-                completion_tokens=sum(call.completion_tokens for call in model_calls),
-                model_configuration=self.model_configuration,
+                failures=object_failures,
+                atomic_claims=atomic_claims,
+                rejected_atomic_claims=rejected_atomic_claims,
             )
 
-        for segment, payload, _completion, segment_calls in segment_results:
-            if len(segments) > 1:
-                payload = _namespace_payload(payload, f"S{segment.index}")
-            for call in segment_calls:
-                model_calls.append(
-                    call.model_copy(
-                        update={
-                            "attempt": len(model_calls) + 1,
-                            "segment": segment.label if len(segments) > 1 else None,
-                        }
-                    )
-                )
-            segment_payloads.append((segment, payload))
-
-        if not segment_results:
-            raise RuntimeError("document segmentation produced no model result")
-        completion = segment_results[-1][2]
-        payload = {
-            "candidates": [
-                candidate
-                for _, segment_payload in segment_payloads
-                for candidate in segment_payload.get("candidates", [])
-            ],
-            "weakSignals": [
-                signal
-                for _, segment_payload in segment_payloads
-                for signal in segment_payload.get("weakSignals", [])
-            ],
-            "unresolvedItems": [
-                item
-                for _, segment_payload in segment_payloads
-                for item in segment_payload.get("unresolvedItems", [])
-            ],
-        }
-        candidate_anchor_scopes: dict[str, set[str]] = {}
-        weak_signal_inputs: list[tuple[Any, set[str]]] = []
-        unresolved_inputs: list[tuple[Any, set[str]]] = []
-        for segment, segment_payload in segment_payloads:
-            segment_anchor_ids = {anchor.anchor_id for anchor in segment.anchors}
-            for index, raw_candidate in enumerate(
-                segment_payload.get("candidates", []), start=1
-            ):
-                candidate_anchor_scopes[_candidate_id(raw_candidate, index)] = (
-                    segment_anchor_ids
-                )
-            weak_signal_inputs.extend(
-                (raw_signal, segment_anchor_ids)
-                for raw_signal in segment_payload.get("weakSignals", [])
-            )
-            unresolved_inputs.extend(
-                (raw_item, segment_anchor_ids)
-                for raw_item in segment_payload.get("unresolvedItems", [])
-            )
         validation_started = perf_counter()
-        raw_candidates = payload.get("candidates", [])
-        accepted: list[CandidateKnowledgeObject] = []
-        rejected: list[RejectedCandidate] = []
-        seen_candidate_ids: set[str] = set()
-        seen_fingerprints: set[str] = set()
-        normalizations: list[CandidateNormalization] = []
-        known_relation_refs = {
-            reference
-            for raw_candidate in raw_candidates
-            if isinstance(raw_candidate, dict)
-            for reference in _candidate_relation_refs(raw_candidate)
-        }
+        (
+            accepted_candidates,
+            rejected_candidates,
+            rejected_auxiliary_items,
+            normalizations,
+            weak_signals,
+            unresolved_items,
+            coverage,
+        ) = self._validate_object_results(object_results)
 
-        for index, raw_candidate in enumerate(raw_candidates, start=1):
-            candidate_id = _candidate_id(raw_candidate, index)
-            if not isinstance(raw_candidate, dict):
-                rejected.append(
-                    RejectedCandidate(
-                        candidate_id=candidate_id,
-                        reasons=["candidate must be a JSON object"],
-                        raw_candidate={"value": raw_candidate},
-                    )
-                )
-                continue
-            candidate_payload = raw_candidate.copy()
-            module_code = candidate_payload.get("module")
-            if (
-                candidate_payload.get("domain") == module_code
-                and isinstance(module_code, str)
-                and module_code in MODULE_BY_CODE
-            ):
-                normalized_domain = MODULE_BY_CODE[module_code].domain
-                candidate_payload["domain"] = normalized_domain
-                normalizations.append(
-                    CandidateNormalization(
-                        candidate_id=candidate_id,
-                        field="domain",
-                        original_value=module_code,
-                        normalized_value=normalized_domain,
-                        reason="模型将主域重复写为模块码，按已发布目录映射规范化",
-                    )
-                )
-            try:
-                candidate = CandidateKnowledgeObject.model_validate(candidate_payload)
-            except ValidationError as error:
-                rejected.append(
-                    RejectedCandidate(
-                        candidate_id=candidate_id,
-                        reasons=[item["msg"] for item in error.errors()],
-                        raw_candidate=raw_candidate,
-                    )
-                )
-                continue
-
-            reasons = validate_candidate_classification(
-                candidate.domain, candidate.module, candidate.object_type
-            )
-            reasons.extend(
-                validate_candidate_content(
-                    candidate.module,
-                    candidate.object_type,
-                    candidate.content,
-                )
-            )
-            if not candidate.title.strip():
-                reasons.append("candidate title is required")
-            if not candidate.object_boundary.strip():
-                reasons.append("candidate object boundary is required")
-            if not candidate.classification_basis.strip():
-                reasons.append("candidate classification basis is required")
-            if not candidate.identity_hints:
-                reasons.append("candidate identity hints are required")
-            if candidate.candidate_id in seen_candidate_ids:
-                reasons.append(f"duplicate candidate id: {candidate.candidate_id}")
-            seen_candidate_ids.add(candidate.candidate_id)
-            referenced_anchors = set(candidate.evidence)
-            referenced_anchors.update(mention.source_ref for mention in candidate.entity_mentions)
-            for relation in candidate.relations:
-                referenced_anchors.update(relation.evidence)
-                for relation_ref in (relation.source_ref, relation.target_ref):
-                    if relation_ref not in known_relation_refs:
-                        reasons.append(f"unknown relation reference: {relation_ref}")
-            invalid_anchors = referenced_anchors - candidate_anchor_scopes.get(
-                candidate.candidate_id, set()
-            )
-            if invalid_anchors:
-                reasons.append("unknown evidence anchors: " + ", ".join(sorted(invalid_anchors)))
-            fingerprint = json.dumps(
-                [candidate.module, candidate.object_type, candidate.content],
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-            if fingerprint in seen_fingerprints:
-                reasons.append("duplicate candidate content in the same document")
-            seen_fingerprints.add(fingerprint)
-            if reasons:
-                rejected.append(
-                    RejectedCandidate(
-                        candidate_id=candidate.candidate_id,
-                        reasons=reasons,
-                        raw_candidate=raw_candidate,
-                    )
-                )
-                continue
-            accepted.append(candidate)
-
-        accepted = _reject_dangling_relations(accepted, rejected)
-
-        coverage = {module.code: "not_found" for module in KNOWLEDGE_MODULES}
-        for candidate in accepted:
-            coverage[candidate.module] = "hit"
-
-        weak_signals: list[WeakSignal] = []
-        rejected_auxiliary_items: list[RejectedAuxiliaryItem] = []
-        for raw_signal, valid_anchors in weak_signal_inputs:
-            try:
-                signal = WeakSignal.model_validate(raw_signal)
-            except ValidationError as error:
-                rejected_auxiliary_items.append(
-                    RejectedAuxiliaryItem(
-                        kind="weak_signal",
-                        reasons=[item["msg"] for item in error.errors()],
-                        raw_item=_raw_item(raw_signal),
-                    )
-                )
-                continue
-            signal_reasons: list[str] = []
-            if signal.module not in MODULE_BY_CODE:
-                signal_reasons.append(f"unknown knowledge module: {signal.module}")
-            invalid_anchors = set(signal.evidence) - valid_anchors
-            if invalid_anchors:
-                signal_reasons.append(
-                    "unknown evidence anchors: " + ", ".join(sorted(invalid_anchors))
-                )
-            if signal_reasons:
-                rejected_auxiliary_items.append(
-                    RejectedAuxiliaryItem(
-                        kind="weak_signal",
-                        reasons=signal_reasons,
-                        raw_item=_raw_item(raw_signal),
-                    )
-                )
-                continue
-            weak_signals.append(signal)
-            if coverage[signal.module] == "not_found":
-                coverage[signal.module] = "weak_signal"
-
-        unresolved_items: list[UnresolvedItem] = []
-        for raw_item, valid_anchors in unresolved_inputs:
-            try:
-                item = UnresolvedItem.model_validate(raw_item)
-            except ValidationError as error:
-                rejected_auxiliary_items.append(
-                    RejectedAuxiliaryItem(
-                        kind="unresolved_item",
-                        reasons=[item["msg"] for item in error.errors()],
-                        raw_item=_raw_item(raw_item),
-                    )
-                )
-                continue
-            invalid_anchors = set(item.evidence) - valid_anchors
-            item_reasons: list[str] = []
-            if item.module is not None and item.module not in MODULE_BY_CODE:
-                item_reasons.append(f"unknown knowledge module: {item.module}")
-            if invalid_anchors:
-                item_reasons.append(
-                    "unknown evidence anchors: " + ", ".join(sorted(invalid_anchors))
-                )
-            if item_reasons:
-                rejected_auxiliary_items.append(
-                    RejectedAuxiliaryItem(
-                        kind="unresolved_item",
-                        reasons=item_reasons,
-                        raw_item=_raw_item(raw_item),
-                    )
-                )
-                continue
-            unresolved_items.append(item)
-            if item.module in MODULE_BY_CODE and coverage[item.module] == "not_found":
-                coverage[item.module] = "unresolved"
-
-        total_model_duration_ms = sum(call.duration_ms for call in model_calls)
+        completion = _last_completion(object_results, discovery_results)
         validation_duration_ms = round((perf_counter() - validation_started) * 1000)
         finished_at = datetime.now(UTC)
-        duration_ms = round((perf_counter() - run_started) * 1000)
-
         return IdentificationResult(
             document_package_id=document_package.document_package_id,
             started_at=started_at,
             finished_at=finished_at,
-            duration_ms=duration_ms,
-            provider=completion.provider,
-            model=completion.model,
+            duration_ms=round((perf_counter() - run_started) * 1000),
+            provider=completion.provider if completion else self.provider,
+            model=completion.model if completion else self.model,
             prompt_version=PROMPT_VERSION,
             schema_version=SCHEMA_VERSION,
             catalog_version=CATALOG_VERSION,
             catalog_fingerprint=CATALOG_FINGERPRINT,
             raw_model_output=json.dumps(
-                {
-                    "segments": [
-                        {"segment": segment.label, "rawOutput": segment_completion.content}
-                        for segment, _payload, segment_completion, _calls in segment_results
-                    ]
-                },
+                [
+                    {
+                        "purpose": call.purpose,
+                        "segment": call.segment,
+                        "rawOutput": call.raw_output,
+                    }
+                    for call in model_calls
+                    if call.status == "completed"
+                ],
                 ensure_ascii=False,
             ),
             model_calls=model_calls,
             processing_stages=[
                 ProcessingStage(
-                    key="model_call",
-                    name="真实模型调用",
+                    key="claim_discovery",
+                    name="原子主张发现",
                     status="completed",
-                    duration_ms=total_model_duration_ms,
+                    duration_ms=sum(
+                        call.duration_ms
+                        for call in model_calls
+                        if call.purpose == "claim_discovery"
+                    ),
                     detail=(
-                        f"按 {len(segments)} 个文档结构分段综合识别，"
-                        f"共 {len(model_calls)} 次模型调用，"
+                        f"{len(segments)} 个结构分段发现 {len(atomic_claims)} 条可核验主张，"
+                        f"拒绝 {len(rejected_atomic_claims)} 条证据不成立主张；"
+                        f"发现分段上限 {self.claim_discovery_max_chars} 字符"
+                    ),
+                ),
+                ProcessingStage(
+                    key="claim_evidence_validation",
+                    name="原文引句校验",
+                    status="completed",
+                    duration_ms=0,
+                    detail="逐条校验来源锚点、列选择器与逐字引句，并回填完整来源字段",
+                ),
+                ProcessingStage(
+                    key="object_formation",
+                    name="知识对象形成",
+                    status="completed",
+                    duration_ms=sum(
+                        call.duration_ms
+                        for call in model_calls
+                        if call.purpose == "object_formation"
+                    ),
+                    detail=(
+                        f"按主张类型分成 {len(object_groups)} 个对象化批次；"
                         "未按22个模块循环调用"
                     ),
                 ),
                 ProcessingStage(
-                    key="json_parse",
-                    name="JSON 顶层解析",
-                    status="completed",
-                    duration_ms=0,
-                    detail=f"{len(segments)} 个结构分段均解析为 JSON 对象",
-                ),
-                ProcessingStage(
                     key="contract_validation",
-                    name="候选合同校验",
+                    name="对象合同校验",
                     status="completed",
                     duration_ms=max(validation_duration_ms, 0),
-                    detail=f"接受 {len(accepted)} 项，拒绝 {len(rejected)} 项",
+                    detail=(
+                        f"接受 {len(accepted_candidates)} 项，"
+                        f"拒绝 {len(rejected_candidates)} 项"
+                    ),
                 ),
                 ProcessingStage(
                     key="evidence_validation",
-                    name="分段证据校验",
+                    name="主张到对象追溯校验",
                     status="completed",
                     duration_ms=0,
-                    detail="有效候选、关系、弱线索和未决项仅允许引用所属结构段锚点",
-                ),
-                ProcessingStage(
-                    key="document_aggregation",
-                    name="文档内聚合检查",
-                    status="completed",
-                    duration_ms=0,
-                    detail="本轮仅拒绝完全重复候选；跨分段同义聚合仍待下一轮验证",
+                    detail="候选来源锚点由 sourceClaimIds 程序推导，长原文由已核验主张回填",
                 ),
             ],
-            candidates=accepted,
-            rejected_candidates=rejected,
+            atomic_claims=atomic_claims,
+            rejected_atomic_claims=rejected_atomic_claims,
+            candidates=accepted_candidates,
+            rejected_candidates=rejected_candidates,
             rejected_auxiliary_items=rejected_auxiliary_items,
             normalizations=normalizations,
             weak_signals=weak_signals,
@@ -486,59 +245,100 @@ class SalesKnowledgeIdentificationService:
             model_configuration=self.model_configuration,
         )
 
-    def _identify_segment(
+    def _discover_claims(
         self,
         document_package: DocumentPackage,
-        segment_label: str | None,
-    ) -> tuple[dict[str, Any], ModelCompletion, list[ModelCallTrace]]:
-        request = build_model_request(
-            document_package,
-            self.max_candidates,
-            segment_label,
+        segments: list[DocumentSegment],
+    ) -> tuple[
+        list[tuple[DocumentSegment, dict[str, Any], ModelCompletion, list[ModelCallTrace]]],
+        list[str],
+    ]:
+        def run(
+            segment: DocumentSegment,
+        ) -> tuple[DocumentSegment, dict[str, Any], ModelCompletion, list[ModelCallTrace]]:
+            segment_package = document_package.model_copy(
+                update={"full_markdown": segment.markdown, "anchors": segment.anchors}
+            )
+            request = build_claim_discovery_request(
+                segment_package, segment.label if len(segments) > 1 else None
+            )
+            payload, completion, calls = self._complete_json_request(
+                request, "claim_discovery"
+            )
+            return segment, payload, completion, calls
+
+        return _run_parallel(
+            items=segments,
+            worker=run,
+            label=lambda segment: segment.label,
+            max_concurrency=self.max_concurrency,
         )
+
+    def _form_candidate_objects(
+        self,
+        document_package_id: str,
+        groups: list[tuple[str, list[AtomicClaim]]],
+    ) -> tuple[
+        list[tuple[str, list[AtomicClaim], dict[str, Any], ModelCompletion, list[ModelCallTrace]]],
+        list[str],
+    ]:
+        if not groups:
+            return [], []
+
+        def run(
+            item: tuple[str, list[AtomicClaim]],
+        ) -> tuple[str, list[AtomicClaim], dict[str, Any], ModelCompletion, list[ModelCallTrace]]:
+            label, claims = item
+            request = build_object_formation_request(
+                document_package_id, claims, label, self.max_candidates
+            )
+            payload, completion, calls = self._complete_json_request(
+                request, "object_formation"
+            )
+            return label, claims, payload, completion, calls
+
+        return _run_parallel(
+            items=groups,
+            worker=run,
+            label=lambda item: item[0],
+            max_concurrency=self.max_concurrency,
+        )
+
+    def _complete_json_request(
+        self,
+        request: ModelRequest,
+        purpose: CallPurpose,
+    ) -> tuple[dict[str, Any], ModelCompletion, list[ModelCallTrace]]:
         completion, model_calls = self._complete_with_retries(
-            request,
-            purpose="identification",
-            first_attempt=1,
+            request, purpose=purpose, first_attempt=1
         )
         try:
             payload = json.loads(completion.content)
         except json.JSONDecodeError as parse_error:
             if completion.finish_reason == "length":
-                reduced_candidate_limit = max(1, self.max_candidates // 2)
-                limited_request = build_model_request(
-                    document_package,
-                    reduced_candidate_limit,
-                    segment_label,
-                )
-                completion, retry_calls = self._complete_with_retries(
-                    limited_request,
-                    purpose="output_limit_retry",
-                    first_attempt=len(model_calls) + 1,
-                )
-            else:
-                repair_request = build_repair_request(
-                    document_package.document_package_id,
-                    completion.content,
-                    str(parse_error),
-                )
-                completion, retry_calls = self._complete_with_retries(
-                    repair_request,
-                    purpose="repair",
-                    first_attempt=len(model_calls) + 1,
-                )
-            model_calls.extend(retry_calls)
+                raise SegmentIdentificationFailure(
+                    "model output was truncated; reduce the structural batch size",
+                    model_calls,
+                ) from parse_error
+            repair_request = build_repair_request(
+                request.document_package_id, completion.content, str(parse_error)
+            )
+            repaired, repair_calls = self._complete_with_retries(
+                repair_request,
+                purpose="repair",
+                first_attempt=len(model_calls) + 1,
+            )
+            model_calls.extend(repair_calls)
+            completion = repaired
             try:
                 payload = json.loads(completion.content)
             except json.JSONDecodeError as final_error:
                 raise SegmentIdentificationFailure(
-                    f"model output is not valid JSON after {model_calls[-1].purpose}",
-                    model_calls,
+                    "model output is not valid JSON after repair", model_calls
                 ) from final_error
         if not isinstance(payload, dict):
             raise SegmentIdentificationFailure(
-                "model output top level must be a JSON object",
-                model_calls,
+                "model output top level must be a JSON object", model_calls
             )
         return payload, completion, model_calls
 
@@ -546,7 +346,7 @@ class SalesKnowledgeIdentificationService:
         self,
         request: ModelRequest,
         *,
-        purpose: Literal["identification", "output_limit_retry", "repair"],
+        purpose: Literal["claim_discovery", "object_formation", "repair"],
         first_attempt: int,
     ) -> tuple[ModelCompletion, list[ModelCallTrace]]:
         traces: list[ModelCallTrace] = []
@@ -587,18 +387,344 @@ class SalesKnowledgeIdentificationService:
             return completion, traces
         raise RuntimeError("model call exhausted without a result")
 
+    def _validate_object_results(
+        self,
+        object_results: list[
+            tuple[str, list[AtomicClaim], dict[str, Any], ModelCompletion, list[ModelCallTrace]]
+        ],
+    ) -> tuple[
+        list[CandidateKnowledgeObject],
+        list[RejectedCandidate],
+        list[RejectedAuxiliaryItem],
+        list[CandidateNormalization],
+        list[WeakSignal],
+        list[UnresolvedItem],
+        dict[str, Literal["hit", "weak_signal", "not_found", "unresolved"]],
+    ]:
+        raw_candidates: list[dict[str, Any]] = []
+        candidate_claim_scopes: dict[str, dict[str, AtomicClaim]] = {}
+        weak_signal_inputs: list[tuple[Any, set[str]]] = []
+        unresolved_inputs: list[tuple[Any, set[str]]] = []
 
-def _candidate_id(raw_candidate: Any, index: int) -> str:
-    if isinstance(raw_candidate, dict) and isinstance(raw_candidate.get("candidateId"), str):
-        return raw_candidate["candidateId"]
-    return f"INVALID-{index}"
+        for group_index, (_label, claims, payload, _completion, _calls) in enumerate(
+            object_results, start=1
+        ):
+            namespaced = _namespace_candidate_payload(payload, f"G{group_index}")
+            claim_by_id = {claim.claim_id: claim for claim in claims}
+            group_anchors = {
+                evidence.anchor_id for claim in claims for evidence in claim.evidence
+            }
+            for index, raw_candidate in enumerate(
+                namespaced.get("candidates", []), start=1
+            ):
+                candidate_id = _candidate_id(raw_candidate, index)
+                if isinstance(raw_candidate, dict):
+                    raw_candidates.append(raw_candidate)
+                    candidate_claim_scopes[candidate_id] = claim_by_id
+            weak_signal_inputs.extend(
+                (item, group_anchors) for item in namespaced.get("weakSignals", [])
+            )
+            unresolved_inputs.extend(
+                (item, group_anchors) for item in namespaced.get("unresolvedItems", [])
+            )
+
+        accepted: list[CandidateKnowledgeObject] = []
+        rejected: list[RejectedCandidate] = []
+        normalizations: list[CandidateNormalization] = []
+        seen_candidate_ids: set[str] = set()
+        seen_fingerprints: set[str] = set()
+        known_relation_refs = {
+            reference
+            for raw_candidate in raw_candidates
+            for reference in _candidate_relation_refs(raw_candidate)
+        }
+
+        for index, raw_candidate in enumerate(raw_candidates, start=1):
+            candidate_id = _candidate_id(raw_candidate, index)
+            candidate_payload = raw_candidate.copy()
+            reasons: list[str] = []
+            claim_by_id = candidate_claim_scopes.get(candidate_id, {})
+            source_claim_ids = candidate_payload.get("sourceClaimIds")
+            if not isinstance(source_claim_ids, list) or not source_claim_ids:
+                reasons.append("source claim ids are required")
+                source_claim_ids = []
+            unknown_claim_ids = sorted(
+                claim_id
+                for claim_id in source_claim_ids
+                if not isinstance(claim_id, str) or claim_id not in claim_by_id
+            )
+            if unknown_claim_ids:
+                reasons.append("unknown source claim ids: " + ", ".join(unknown_claim_ids))
+            source_claims = [
+                claim_by_id[claim_id]
+                for claim_id in source_claim_ids
+                if isinstance(claim_id, str) and claim_id in claim_by_id
+            ]
+            candidate_payload["evidence"] = sorted(
+                {
+                    evidence.anchor_id
+                    for claim in source_claims
+                    for evidence in claim.evidence
+                }
+            )
+            resolved_content, macro_reasons = resolve_verbatim_claim_references(
+                candidate_payload.get("content", {}), claim_by_id
+            )
+            candidate_payload["content"] = resolved_content
+            reasons.extend(macro_reasons)
+
+            raw_mentions = candidate_payload.get("entityMentions", [])
+            if isinstance(raw_mentions, list):
+                structured_mentions = [
+                    mention for mention in raw_mentions if isinstance(mention, dict)
+                ]
+                discarded_count = len(raw_mentions) - len(structured_mentions)
+                if discarded_count:
+                    candidate_payload["entityMentions"] = structured_mentions
+                    normalizations.append(
+                        CandidateNormalization(
+                            candidate_id=candidate_id,
+                            field="entity_mentions",
+                            original_value=f"{discarded_count}个非结构化实体提及",
+                            normalized_value="已移除，保留对象内容与证据",
+                            reason=(
+                                "模型只返回实体名称，缺少类型、引用角色和来源；"
+                                "不据此创建低质量正式实体"
+                            ),
+                        )
+                    )
+
+            module_code = candidate_payload.get("module")
+            if (
+                candidate_payload.get("domain") == module_code
+                and isinstance(module_code, str)
+                and module_code in MODULE_BY_CODE
+            ):
+                normalized_domain = MODULE_BY_CODE[module_code].domain
+                candidate_payload["domain"] = normalized_domain
+                normalizations.append(
+                    CandidateNormalization(
+                        candidate_id=candidate_id,
+                        field="domain",
+                        original_value=module_code,
+                        normalized_value=normalized_domain,
+                        reason="模型将主域重复写为模块码，按已发布目录映射规范化",
+                    )
+                )
+            try:
+                candidate = CandidateKnowledgeObject.model_validate(candidate_payload)
+            except ValidationError as error:
+                reasons.extend(item["msg"] for item in error.errors())
+                rejected.append(
+                    RejectedCandidate(
+                        candidate_id=candidate_id,
+                        reasons=reasons,
+                        raw_candidate=raw_candidate,
+                    )
+                )
+                continue
+
+            reasons.extend(
+                validate_candidate_classification(
+                    candidate.domain, candidate.module, candidate.object_type
+                )
+            )
+            reasons.extend(
+                validate_candidate_content(
+                    candidate.module, candidate.object_type, candidate.content
+                )
+            )
+            if not candidate.title.strip():
+                reasons.append("candidate title is required")
+            if not candidate.object_boundary.strip():
+                reasons.append("candidate object boundary is required")
+            if not candidate.classification_basis.strip():
+                reasons.append("candidate classification basis is required")
+            if not candidate.identity_hints:
+                reasons.append("candidate identity hints are required")
+            if candidate.candidate_id in seen_candidate_ids:
+                reasons.append(f"duplicate candidate id: {candidate.candidate_id}")
+            seen_candidate_ids.add(candidate.candidate_id)
+
+            valid_anchors = set(candidate.evidence)
+            referenced_anchors = {
+                mention.source_ref for mention in candidate.entity_mentions
+            }
+            for relation in candidate.relations:
+                referenced_anchors.update(relation.evidence)
+                for relation_ref in (relation.source_ref, relation.target_ref):
+                    if relation_ref not in known_relation_refs:
+                        reasons.append(f"unknown relation reference: {relation_ref}")
+            invalid_anchors = referenced_anchors - valid_anchors
+            if invalid_anchors:
+                reasons.append(
+                    "evidence not backed by source claims: "
+                    + ", ".join(sorted(invalid_anchors))
+                )
+            fingerprint = json.dumps(
+                [candidate.module, candidate.object_type, candidate.content],
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            if fingerprint in seen_fingerprints:
+                reasons.append("duplicate candidate content in the same document")
+            seen_fingerprints.add(fingerprint)
+            if reasons:
+                rejected.append(
+                    RejectedCandidate(
+                        candidate_id=candidate.candidate_id,
+                        reasons=reasons,
+                        raw_candidate=raw_candidate,
+                    )
+                )
+                continue
+            accepted.append(candidate)
+
+        accepted = _reject_dangling_relations(accepted, rejected)
+        coverage: dict[
+            str, Literal["hit", "weak_signal", "not_found", "unresolved"]
+        ] = {module.code: "not_found" for module in KNOWLEDGE_MODULES}
+        for candidate in accepted:
+            coverage[candidate.module] = "hit"
+
+        weak_signals, unresolved_items, rejected_auxiliary_items = (
+            _validate_auxiliary_items(weak_signal_inputs, unresolved_inputs, coverage)
+        )
+        return (
+            accepted,
+            rejected,
+            rejected_auxiliary_items,
+            normalizations,
+            weak_signals,
+            unresolved_items,
+            coverage,
+        )
+
+    def _failed_result(
+        self,
+        *,
+        document_package: DocumentPackage,
+        started_at: datetime,
+        run_started: float,
+        model_calls: list[ModelCallTrace],
+        failures: list[str],
+        atomic_claims: list[AtomicClaim] | None = None,
+        rejected_atomic_claims: list[RejectedAtomicClaim] | None = None,
+    ) -> IdentificationResult:
+        return IdentificationResult(
+            document_package_id=document_package.document_package_id,
+            status="failed",
+            started_at=started_at,
+            finished_at=datetime.now(UTC),
+            duration_ms=round((perf_counter() - run_started) * 1000),
+            provider=self.provider,
+            model=self.model,
+            prompt_version=PROMPT_VERSION,
+            schema_version=SCHEMA_VERSION,
+            catalog_version=CATALOG_VERSION,
+            catalog_fingerprint=CATALOG_FINGERPRINT,
+            raw_model_output="",
+            model_calls=model_calls,
+            processing_stages=[
+                ProcessingStage(
+                    key="model_call",
+                    name="两阶段模型调用",
+                    status="failed",
+                    duration_ms=sum(call.duration_ms for call in model_calls),
+                    detail="；".join(failures),
+                )
+            ],
+            atomic_claims=atomic_claims or [],
+            rejected_atomic_claims=rejected_atomic_claims or [],
+            candidates=[],
+            rejected_candidates=[],
+            weak_signals=[],
+            unresolved_items=[],
+            coverage_by_module={
+                module.code: "not_found" for module in KNOWLEDGE_MODULES
+            },
+            call_count=len(model_calls),
+            prompt_tokens=sum(call.prompt_tokens for call in model_calls),
+            completion_tokens=sum(call.completion_tokens for call in model_calls),
+            model_configuration=self.model_configuration,
+        )
 
 
-def _raw_item(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {"value": value}
+def _run_parallel(
+    *,
+    items: list[Any],
+    worker: Any,
+    label: Any,
+    max_concurrency: int,
+) -> tuple[list[Any], list[str]]:
+    results: list[Any] = []
+    failures: list[str] = []
+    with ThreadPoolExecutor(max_workers=min(len(items), max_concurrency)) as executor:
+        futures = [(item, executor.submit(worker, item)) for item in items]
+        for item, future in futures:
+            try:
+                results.append(future.result())
+            except SegmentIdentificationFailure as error:
+                results.append((label(item), {}, None, error.model_calls))
+                failures.append(f"{label(item)}: {error}")
+    return results, failures
 
 
-def _namespace_payload(payload: dict[str, Any], namespace: str) -> dict[str, Any]:
+def _renumber_calls(results: list[Any], existing: list[ModelCallTrace]) -> list[ModelCallTrace]:
+    calls: list[ModelCallTrace] = []
+    for result in results:
+        label = result[0].label if isinstance(result[0], DocumentSegment) else result[0]
+        result_calls = result[-1]
+        for call in result_calls:
+            calls.append(
+                call.model_copy(
+                    update={
+                        "attempt": len(existing) + len(calls) + 1,
+                        "segment": label,
+                    }
+                )
+            )
+    return calls
+
+
+def _last_completion(
+    object_results: list[Any], discovery_results: list[Any]
+) -> ModelCompletion | None:
+    for results in (object_results, discovery_results):
+        for result in reversed(results):
+            completion = result[-2]
+            if isinstance(completion, ModelCompletion):
+                return completion
+    return None
+
+
+def _group_claims(
+    claims: list[AtomicClaim], max_group_size: int
+) -> list[tuple[str, list[AtomicClaim]]]:
+    by_kind: dict[str, list[AtomicClaim]] = defaultdict(list)
+    for claim in claims:
+        by_kind[claim.claim_kind].append(claim)
+    groups: list[tuple[str, list[AtomicClaim]]] = []
+    for kind in sorted(by_kind):
+        kind_claims = by_kind[kind]
+        for offset in range(0, len(kind_claims), max_group_size):
+            part = offset // max_group_size + 1
+            groups.append((f"{kind}-{part}", kind_claims[offset : offset + max_group_size]))
+    return groups
+
+
+def _namespace_claim_payload(payload: dict[str, Any], namespace: str | None) -> dict[str, Any]:
+    namespaced = json.loads(json.dumps(payload, ensure_ascii=False))
+    if namespace is None:
+        return namespaced
+    for raw_claim in namespaced.get("claims", []):
+        if isinstance(raw_claim, dict) and isinstance(raw_claim.get("claimId"), str):
+            raw_claim["claimId"] = f"{namespace}-{raw_claim['claimId']}"
+    return namespaced
+
+
+def _namespace_candidate_payload(payload: dict[str, Any], namespace: str) -> dict[str, Any]:
     namespaced = json.loads(json.dumps(payload, ensure_ascii=False))
     id_mapping: dict[str, str] = {}
     for raw_candidate in namespaced.get("candidates", []):
@@ -609,31 +735,29 @@ def _namespace_payload(payload: dict[str, Any], namespace: str) -> dict[str, Any
             id_mapping[candidate_id] = f"{namespace}-{candidate_id}"
         for mention in raw_candidate.get("entityMentions", []):
             if isinstance(mention, dict) and isinstance(mention.get("mentionId"), str):
-                mention_id = mention["mentionId"]
-                id_mapping[mention_id] = f"{namespace}-{mention_id}"
-
+                id_mapping[mention["mentionId"]] = f"{namespace}-{mention['mentionId']}"
     for raw_candidate in namespaced.get("candidates", []):
         if not isinstance(raw_candidate, dict):
             continue
-        candidate_id = raw_candidate.get("candidateId")
-        if isinstance(candidate_id, str) and candidate_id in id_mapping:
-            raw_candidate["candidateId"] = id_mapping[candidate_id]
+        for field in ("candidateId",):
+            if raw_candidate.get(field) in id_mapping:
+                raw_candidate[field] = id_mapping[raw_candidate[field]]
         for mention in raw_candidate.get("entityMentions", []):
-            if (
-                isinstance(mention, dict)
-                and isinstance(mention.get("mentionId"), str)
-                and mention["mentionId"] in id_mapping
-            ):
-                mention_id = mention["mentionId"]
-                mention["mentionId"] = id_mapping[mention_id]
+            if isinstance(mention, dict) and mention.get("mentionId") in id_mapping:
+                mention["mentionId"] = id_mapping[mention["mentionId"]]
         for relation in raw_candidate.get("relations", []):
             if not isinstance(relation, dict):
                 continue
             for field in ("sourceRef", "targetRef"):
-                reference = relation.get(field)
-                if reference in id_mapping:
-                    relation[field] = id_mapping[reference]
+                if relation.get(field) in id_mapping:
+                    relation[field] = id_mapping[relation[field]]
     return namespaced
+
+
+def _candidate_id(raw_candidate: Any, index: int) -> str:
+    if isinstance(raw_candidate, dict) and isinstance(raw_candidate.get("candidateId"), str):
+        return raw_candidate["candidateId"]
+    return f"INVALID-{index}"
 
 
 def _candidate_relation_refs(raw_candidate: dict[str, Any]) -> set[str]:
@@ -693,3 +817,71 @@ def _reject_dangling_relations(
         remaining = [
             candidate for candidate in remaining if candidate.candidate_id not in invalid_ids
         ]
+
+
+def _validate_auxiliary_items(
+    weak_signal_inputs: list[tuple[Any, set[str]]],
+    unresolved_inputs: list[tuple[Any, set[str]]],
+    coverage: dict[str, Literal["hit", "weak_signal", "not_found", "unresolved"]],
+) -> tuple[list[WeakSignal], list[UnresolvedItem], list[RejectedAuxiliaryItem]]:
+    weak_signals: list[WeakSignal] = []
+    unresolved_items: list[UnresolvedItem] = []
+    rejected: list[RejectedAuxiliaryItem] = []
+    for raw_signal, valid_anchors in weak_signal_inputs:
+        try:
+            signal = WeakSignal.model_validate(raw_signal)
+            reasons = []
+            if signal.module not in MODULE_BY_CODE:
+                reasons.append(f"unknown knowledge module: {signal.module}")
+            invalid = set(signal.evidence) - valid_anchors
+            if invalid:
+                reasons.append("unknown evidence anchors: " + ", ".join(sorted(invalid)))
+            if reasons:
+                raise ValueError("; ".join(reasons))
+        except (ValidationError, ValueError) as error:
+            rejected.append(
+                RejectedAuxiliaryItem(
+                    kind="weak_signal",
+                    reasons=_validation_reasons(error),
+                    raw_item=_raw_item(raw_signal),
+                )
+            )
+            continue
+        weak_signals.append(signal)
+        if coverage[signal.module] == "not_found":
+            coverage[signal.module] = "weak_signal"
+
+    for raw_item, valid_anchors in unresolved_inputs:
+        try:
+            item = UnresolvedItem.model_validate(raw_item)
+            reasons = []
+            if item.module is not None and item.module not in MODULE_BY_CODE:
+                reasons.append(f"unknown knowledge module: {item.module}")
+            invalid = set(item.evidence) - valid_anchors
+            if invalid:
+                reasons.append("unknown evidence anchors: " + ", ".join(sorted(invalid)))
+            if reasons:
+                raise ValueError("; ".join(reasons))
+        except (ValidationError, ValueError) as error:
+            rejected.append(
+                RejectedAuxiliaryItem(
+                    kind="unresolved_item",
+                    reasons=_validation_reasons(error),
+                    raw_item=_raw_item(raw_item),
+                )
+            )
+            continue
+        unresolved_items.append(item)
+        if item.module in MODULE_BY_CODE and coverage[item.module] == "not_found":
+            coverage[item.module] = "unresolved"
+    return weak_signals, unresolved_items, rejected
+
+
+def _validation_reasons(error: ValidationError | ValueError) -> list[str]:
+    if isinstance(error, ValidationError):
+        return [item["msg"] for item in error.errors()]
+    return [str(error)]
+
+
+def _raw_item(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {"value": value}

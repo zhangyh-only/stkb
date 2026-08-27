@@ -3,6 +3,7 @@ from copy import deepcopy
 
 import pytest
 
+from app.features.sales_knowledge_identification.claims import validate_atomic_claims
 from app.features.sales_knowledge_identification.content_contracts import (
     CONTENT_CONTRACT_BY_MODULE,
 )
@@ -19,10 +20,18 @@ from app.features.sales_knowledge_identification.service import (
 )
 
 
-class StubModelGateway:
-    def __init__(self, payload: dict[str, object]) -> None:
-        self.payload = deepcopy(payload)
-        for candidate in self.payload.get("candidates", []):
+class TwoStageGateway:
+    def __init__(
+        self,
+        claims: list[dict[str, object]],
+        object_payload: dict[str, object] | None = None,
+    ) -> None:
+        self.claims = deepcopy(claims)
+        self.object_payload = deepcopy(
+            object_payload
+            or {"candidates": [], "weakSignals": [], "unresolvedItems": []}
+        )
+        for candidate in self.object_payload.get("candidates", []):
             if not isinstance(candidate, dict):
                 continue
             module = candidate.get("module")
@@ -32,17 +41,21 @@ class StubModelGateway:
                 and candidate.get("candidateId") != "C-INCOMPLETE"
             ):
                 candidate["content"] = _contract_content(
-                    module,
-                    candidate.get("content", {}),
+                    module, candidate.get("content", {})
                 )
         self.requests: list[ModelRequest] = []
 
     def complete(self, request: ModelRequest) -> ModelCompletion:
         self.requests.append(request)
+        payload: dict[str, object]
+        if "原子主张发现器" in request.system_prompt:
+            payload = {"claims": self.claims}
+        else:
+            payload = self.object_payload
         return ModelCompletion(
             provider="test-provider",
             model="test-model",
-            content=json.dumps(self.payload, ensure_ascii=False),
+            content=json.dumps(payload, ensure_ascii=False),
             prompt_tokens=120,
             completion_tokens=80,
         )
@@ -84,24 +97,16 @@ class FailingModelGateway:
 
 
 class LengthLimitedModelGateway:
-    def __init__(self, repaired_payload: dict[str, object]) -> None:
-        self.repaired_payload = repaired_payload
+    def __init__(self) -> None:
         self.requests: list[ModelRequest] = []
 
     def complete(self, request: ModelRequest) -> ModelCompletion:
         self.requests.append(request)
-        if len(self.requests) == 1:
-            return ModelCompletion(
-                provider="test-provider",
-                model="test-model",
-                content='{"candidates":[{"candidateId":"C1"',
-                finish_reason="length",
-            )
         return ModelCompletion(
             provider="test-provider",
             model="test-model",
-            content=json.dumps(self.repaired_payload, ensure_ascii=False),
-            finish_reason="stop",
+            content='{"claims":[{"claimId":"CL1"',
+            finish_reason="length",
         )
 
 
@@ -111,281 +116,230 @@ class SegmentAwareGateway:
 
     def complete(self, request: ModelRequest) -> ModelCompletion:
         self.requests.append(request)
-        if "DP-SEGMENT#page-1" in request.user_prompt:
-            module = "D1.1"
-            object_type = "PRODUCT_FACT"
-            anchor = "DP-SEGMENT#page-1"
+        if "原子主张发现器" in request.system_prompt:
+            if "DP-SEGMENT#page-1" in request.user_prompt:
+                claim = _claim(
+                    "DP-SEGMENT#page-1", "产品事实内容", kind="fact"
+                )
+            else:
+                claim = _claim("DP-SEGMENT#page-2", "问答内容", kind="qa")
+            payload: dict[str, object] = {"claims": [claim]}
         else:
-            module = "D4.3"
-            object_type = "QA_PAIR"
-            anchor = "DP-SEGMENT#page-2"
+            is_page_one = "S1-CL1" in request.user_prompt
+            module = "D1.1" if is_page_one else "D4.3"
+            object_type = "PRODUCT_FACT" if is_page_one else "QA_PAIR"
+            payload = {
+                "candidates": [
+                    _candidate(
+                        module,
+                        object_type,
+                        ["S1-CL1" if is_page_one else "S2-CL1"],
+                    )
+                ],
+                "weakSignals": [],
+                "unresolvedItems": [],
+            }
         return ModelCompletion(
             provider="test-provider",
             model="test-model",
-            content=json.dumps(
-                {
-                    "candidates": [
-                        {
-                            "candidateId": "C1",
-                            "title": "测试对象 C1",
-                            "objectBoundary": "共享测试业务身份与更新边界",
-                            "classificationBasis": "依据测试模块规则分类",
-                            "identityHints": {"testKey": "C1"},
-                            "domain": module.split(".")[0],
-                            "module": module,
-                            "objectType": object_type,
-                            "content": _contract_content(module, {"summary": anchor}),
-                            "entityMentions": [],
-                            "evidence": [anchor],
-                            "relations": [],
-                        }
-                    ],
-                    "weakSignals": [],
-                    "unresolvedItems": [],
-                }
-            ),
-            finish_reason="stop",
+            content=json.dumps(payload, ensure_ascii=False),
         )
 
 
-class CrossSegmentEvidenceGateway:
+class CrossSegmentClaimGateway:
     def complete(self, request: ModelRequest) -> ModelCompletion:
-        candidates: list[dict[str, object]] = []
-        if "DP-CROSS#page-1 -->" in request.user_prompt:
-            candidates.append(
-                {
-                    "candidateId": "C1",
-                    "title": "测试对象 C1",
-                    "objectBoundary": "共享测试业务身份与更新边界",
-                    "classificationBasis": "依据测试模块规则分类",
-                    "identityHints": {"testKey": "C1"},
-                    "domain": "D1",
-                    "module": "D1.1",
-                    "objectType": "PRODUCT_FACT",
-                    "content": _contract_content(
-                        "D1.1", {"summary": "错误引用另一分段"}
-                    ),
-                    "entityMentions": [],
-                    "evidence": ["DP-CROSS#page-2"],
-                    "relations": [],
-                }
-            )
+        if "DP-CROSS#page-1" in request.user_prompt:
+            payload = {
+                "claims": [
+                    _claim("DP-CROSS#page-2", "二段内容", kind="fact")
+                ]
+            }
+        else:
+            payload = {"claims": []}
         return ModelCompletion(
             provider="test-provider",
             model="test-model",
-            content=json.dumps(
-                {"candidates": candidates, "weakSignals": [], "unresolvedItems": []}
-            ),
+            content=json.dumps(payload, ensure_ascii=False),
         )
 
 
 def _contract_content(module: str, original: object) -> dict[str, object]:
     contract = CONTENT_CONTRACT_BY_MODULE[module]
-    content = {
-        field: f"测试字段 {field}"
-        for field in contract.required_fields
-    }
+    content = {field: f"测试字段 {field}" for field in contract.required_fields}
     if isinstance(original, dict):
         content.update(original)
     content["contractDetail"] = "用于验证内容合同的结构化测试详情。" * 20
     return content
 
 
-def test_identification_accepts_only_candidates_with_valid_catalog_and_evidence() -> None:
-    gateway = StubModelGateway(
-        {
-            "candidates": [
-                {
-                    "candidateId": "C1",
-                    "title": "测试对象 C1",
-                    "objectBoundary": "共享测试业务身份与更新边界",
-                    "classificationBasis": "依据测试模块规则分类",
-                    "identityHints": {"testKey": "C1"},
-                    "domain": "D4",
-                    "module": "D4.2",
-                    "objectType": "CUSTOMER_OBJECTION",
-                    "content": {"rootConcern": "客户担心药品不在保障目录内"},
-                    "entityMentions": [
-                        {
-                            "mentionId": "M1",
-                            "text": "药享保",
-                            "proposedType": "PRODUCT",
-                            "referenceRole": "ABOUT_PRODUCT",
-                            "sourceRef": "DP-TEST#page-1",
-                        }
-                    ],
-                    "evidence": ["DP-TEST#page-1"],
-                    "relations": [],
-                },
-                {
-                    "candidateId": "C2",
-                    "title": "测试对象 C2",
-                    "objectBoundary": "共享测试业务身份与更新边界",
-                    "classificationBasis": "依据测试模块规则分类",
-                    "identityHints": {"testKey": "C2"},
-                    "domain": "D9",
-                    "module": "D9.1",
-                    "objectType": "UNKNOWN",
-                    "content": {"summary": "非法分类"},
-                    "entityMentions": [],
-                    "evidence": ["DP-TEST#page-1"],
-                    "relations": [],
-                },
-                {
-                    "candidateId": "C3",
-                    "title": "测试对象 C3",
-                    "objectBoundary": "共享测试业务身份与更新边界",
-                    "classificationBasis": "依据测试模块规则分类",
-                    "identityHints": {"testKey": "C3"},
-                    "domain": "D1",
-                    "module": "D1.1",
-                    "objectType": "PRODUCT_FACT",
-                    "content": {"summary": "缺少有效证据"},
-                    "entityMentions": [],
-                    "evidence": ["DP-TEST#page-99"],
-                    "relations": [],
-                },
-            ],
-            "weakSignals": [],
-            "unresolvedItems": [],
-        }
-    )
-    service = SalesKnowledgeIdentificationService(gateway=gateway)
-    document_package = DocumentPackage(
-        document_package_id="DP-TEST",
-        workspace_id="WS-TEST",
-        source_file_name="sample.pdf",
-        source_sha256="source-checksum",
-        full_markdown_path="workspace/documents/DP-TEST/full.md",
-        full_markdown_sha256="markdown-checksum",
-        full_markdown="# 示例\n\n药品需在保障目录内。",
-        processing_method="agent_assisted",
-        status="available",
-        anchors=[SourceAnchor(anchor_id="DP-TEST#page-1", kind="page", page=1)],
-        quality_issues=[],
-    )
-
-    result = service.identify(document_package)
-
-    assert [candidate.candidate_id for candidate in result.candidates] == ["C1"]
-    assert {item.candidate_id for item in result.rejected_candidates} == {"C2", "C3"}
-    assert result.coverage_by_module["D4.2"] == "hit"
-    assert result.coverage_by_module["D1.1"] == "not_found"
-    assert result.call_count == 1
-    assert len(result.catalog_fingerprint) == 64
-    assert result.model_calls[0].system_prompt == gateway.requests[0].system_prompt
-    assert result.model_calls[0].user_prompt == gateway.requests[0].user_prompt
-    assert gateway.requests[0].document_package_id == "DP-TEST"
-    assert "22个知识内容模块" in gateway.requests[0].system_prompt
-    assert "对象边界与分类裁决" in gateway.requests[0].system_prompt
-    assert "全文 Markdown：" in gateway.requests[0].user_prompt
+def _claim(
+    anchor: str,
+    quote: str,
+    *,
+    kind: str = "fact",
+    claim_id: str = "CL1",
+    selector: str | None = None,
+) -> dict[str, object]:
+    return {
+        "claimId": claim_id,
+        "claimKind": kind,
+        "statement": f"关于{quote}的可核验主张",
+        "subject": quote,
+        "attributes": {},
+        "moduleHints": [],
+        "evidence": [
+            {
+                "anchorId": anchor,
+                "exactQuote": quote,
+                "selector": selector,
+            }
+        ],
+    }
 
 
-def test_identification_rejects_relations_to_a_rejected_candidate() -> None:
-    gateway = StubModelGateway(
-        {
-            "candidates": [
-                {
-                    "candidateId": "C1",
-                    "title": "测试对象 C1",
-                    "objectBoundary": "共享测试业务身份与更新边界",
-                    "classificationBasis": "依据测试模块规则分类",
-                    "identityHints": {"testKey": "C1"},
-                    "domain": "D1",
-                    "module": "D1.1",
-                    "objectType": "PRODUCT_FACT",
-                    "content": {"summary": "有效产品"},
-                    "entityMentions": [],
-                    "evidence": ["DP-REL#page-1"],
-                    "relations": [
-                        {
-                            "relationKind": "object",
-                            "relationType": "DEPENDS_ON",
-                            "sourceRef": "C1",
-                            "targetRef": "C2",
-                            "evidence": ["DP-REL#page-1"],
-                        }
-                    ],
-                },
-                {
-                    "candidateId": "C2",
-                    "title": "测试对象 C2",
-                    "objectBoundary": "共享测试业务身份与更新边界",
-                    "classificationBasis": "依据测试模块规则分类",
-                    "identityHints": {"testKey": "C2"},
-                    "domain": "D9",
-                    "module": "D9.1",
-                    "objectType": "UNKNOWN",
-                    "content": {"summary": "非法候选"},
-                    "entityMentions": [],
-                    "evidence": ["DP-REL#page-1"],
-                    "relations": [],
-                },
-            ],
-            "weakSignals": [],
-            "unresolvedItems": [],
-        }
-    )
-    service = SalesKnowledgeIdentificationService(gateway=gateway)
-    package = DocumentPackage(
-        document_package_id="DP-REL",
-        workspace_id="WS-TEST",
-        source_file_name="sample.pdf",
-        source_sha256="source-checksum",
-        full_markdown_path="workspace/documents/DP-REL/full.md",
-        full_markdown_sha256="markdown-checksum",
-        full_markdown="# 示例\n\n关系验证。",
-        processing_method="agent_assisted",
-        status="available",
-        anchors=[SourceAnchor(anchor_id="DP-REL#page-1", kind="page", page=1)],
-        quality_issues=[],
-    )
-
-    result = service.identify(package)
-
-    assert result.candidates == []
-    rejected_by_id = {item.candidate_id: item for item in result.rejected_candidates}
-    assert "relation references rejected or missing objects" in rejected_by_id[
-        "C1"
-    ].reasons[0]
+def _candidate(
+    module: str,
+    object_type: str,
+    source_claim_ids: list[str],
+    *,
+    candidate_id: str = "C1",
+) -> dict[str, object]:
+    return {
+        "candidateId": candidate_id,
+        "title": f"测试对象 {candidate_id}",
+        "objectBoundary": "共享测试业务身份与更新边界",
+        "classificationBasis": "依据测试模块规则分类",
+        "identityHints": {"testKey": candidate_id},
+        "domain": module.split(".")[0],
+        "module": module,
+        "objectType": object_type,
+        "sourceClaimIds": source_claim_ids,
+        "content": _contract_content(module, {}),
+        "entityMentions": [],
+        "relations": [],
+    }
 
 
-def test_identification_rejects_incomplete_candidate_object_contract() -> None:
-    gateway = StubModelGateway(
-        {
-            "candidates": [
-                {
-                    "candidateId": "C-INCOMPLETE",
-                    "domain": "D1",
-                    "module": "D1.1",
-                    "objectType": "PRODUCT_FACT",
-                    "content": {"summary": "只有摘要"},
-                    "entityMentions": [],
-                    "evidence": ["DP-INCOMPLETE#page-1"],
-                    "relations": [],
-                }
-            ],
-            "weakSignals": [],
-            "unresolvedItems": [],
-        }
-    )
-    package = DocumentPackage(
-        document_package_id="DP-INCOMPLETE",
+def _package(
+    package_id: str,
+    markdown: str,
+    anchors: list[SourceAnchor] | None = None,
+) -> DocumentPackage:
+    return DocumentPackage(
+        document_package_id=package_id,
         workspace_id="WS-TEST",
         source_file_name="sample.md",
         source_sha256="source-checksum",
-        full_markdown_path="workspace/documents/DP-INCOMPLETE/full.md",
+        full_markdown_path=f"workspace/documents/{package_id}/full.md",
         full_markdown_sha256="markdown-checksum",
-        full_markdown="# 示例\n\n只有摘要。",
+        full_markdown=markdown,
         processing_method="agent_assisted",
         status="available",
-        anchors=[
-            SourceAnchor(anchor_id="DP-INCOMPLETE#page-1", kind="page", page=1)
-        ],
+        anchors=anchors
+        or [SourceAnchor(anchor_id=f"{package_id}#page-1", kind="page", page=1)],
         quality_issues=[],
     )
 
-    result = SalesKnowledgeIdentificationService(gateway=gateway).identify(package)
+
+def test_two_stage_identification_validates_catalog_and_source_claims() -> None:
+    object_payload = {
+        "candidates": [
+            _candidate("D4.2", "CUSTOMER_OBJECTION", ["CL1"]),
+            {
+                **_candidate("D1.1", "PRODUCT_FACT", ["UNKNOWN"], candidate_id="C2"),
+            },
+            {
+                **_candidate("D1.1", "PRODUCT_FACT", ["CL1"], candidate_id="C3"),
+                "domain": "D9",
+                "module": "D9.1",
+                "objectType": "UNKNOWN",
+            },
+        ],
+        "weakSignals": [],
+        "unresolvedItems": [],
+    }
+    gateway = TwoStageGateway(
+        [_claim("DP-TEST#page-1", "药品需在保障目录内")], object_payload
+    )
+
+    result = SalesKnowledgeIdentificationService(gateway=gateway).identify(
+        _package("DP-TEST", "# 示例\n\n药品需在保障目录内。")
+    )
+
+    assert [candidate.candidate_id for candidate in result.candidates] == ["G1-C1"]
+    assert {item.candidate_id for item in result.rejected_candidates} == {
+        "G1-C2",
+        "G1-C3",
+    }
+    assert result.atomic_claims[0].evidence[0].source_text.endswith(
+        "药品需在保障目录内。"
+    )
+    assert result.coverage_by_module["D4.2"] == "hit"
+    assert result.call_count == 2
+    assert [call.purpose for call in result.model_calls] == [
+        "claim_discovery",
+        "object_formation",
+    ]
+    assert "原子主张发现器" in gateway.requests[0].system_prompt
+    assert "对象形成器" in gateway.requests[1].system_prompt
+
+
+def test_identification_rejects_relations_to_a_rejected_candidate() -> None:
+    first = _candidate("D1.1", "PRODUCT_FACT", ["CL1"])
+    first["relations"] = [
+        {
+            "relationKind": "object",
+            "relationType": "DEPENDS_ON",
+            "sourceRef": "C1",
+            "targetRef": "C2",
+            "evidence": ["DP-REL#page-1"],
+        }
+    ]
+    second = _candidate("D1.1", "PRODUCT_FACT", ["UNKNOWN"], candidate_id="C2")
+    gateway = TwoStageGateway(
+        [_claim("DP-REL#page-1", "关系验证")],
+        {
+            "candidates": [first, second],
+            "weakSignals": [],
+            "unresolvedItems": [],
+        },
+    )
+
+    result = SalesKnowledgeIdentificationService(gateway=gateway).identify(
+        _package("DP-REL", "# 示例\n\n关系验证。")
+    )
+
+    assert result.candidates == []
+    rejected = {item.candidate_id: item for item in result.rejected_candidates}
+    assert (
+        "relation references rejected or missing objects"
+        in rejected["G1-C1"].reasons[0]
+    )
+
+
+def test_identification_rejects_incomplete_candidate_object_contract() -> None:
+    incomplete = {
+        "candidateId": "C-INCOMPLETE",
+        "domain": "D1",
+        "module": "D1.1",
+        "objectType": "PRODUCT_FACT",
+        "sourceClaimIds": ["CL1"],
+        "content": {"summary": "只有摘要"},
+        "entityMentions": [],
+        "relations": [],
+    }
+    gateway = TwoStageGateway(
+        [_claim("DP-INCOMPLETE#page-1", "只有摘要")],
+        {
+            "candidates": [incomplete],
+            "weakSignals": [],
+            "unresolvedItems": [],
+        },
+    )
+
+    result = SalesKnowledgeIdentificationService(gateway=gateway).identify(
+        _package("DP-INCOMPLETE", "# 示例\n\n只有摘要。")
+    )
 
     assert result.candidates == []
     assert set(result.rejected_candidates[0].reasons) >= {
@@ -394,312 +348,220 @@ def test_identification_rejects_incomplete_candidate_object_contract() -> None:
         "candidate classification basis is required",
         "candidate identity hints are required",
     }
+    assert any(
+        "missing required content fields" in reason
+        for reason in result.rejected_candidates[0].reasons
+    )
 
 
 def test_identification_rejects_unavailable_packages_at_capability_boundary() -> None:
-    package = DocumentPackage(
-        document_package_id="DP-UNAVAILABLE",
-        workspace_id="WS-TEST",
-        source_file_name="sample.pdf",
-        source_sha256="source-checksum",
-        full_markdown_path="workspace/documents/DP-UNAVAILABLE/full.md",
-        full_markdown_sha256="markdown-checksum",
-        full_markdown="",
-        processing_method="agent_assisted",
-        status="unavailable",
-        anchors=[],
-        quality_issues=["不可用"],
-    )
-
+    package = _package("DP-OFFLINE", "# 示例")
+    package = package.model_copy(update={"status": "unavailable"})
     with pytest.raises(DocumentPackageUnavailable):
         SalesKnowledgeIdentificationService(
-            gateway=StubModelGateway({})
+            gateway=TwoStageGateway([])
         ).identify(package)
 
 
 def test_identification_canonicalizes_domain_when_model_repeats_module_code() -> None:
-    gateway = StubModelGateway(
+    candidate = _candidate("D1.3", "PROCESS_STEP", ["CL1"])
+    candidate["domain"] = "D1.3"
+    gateway = TwoStageGateway(
+        [_claim("DP-DOMAIN#page-1", "提交问诊", kind="process")],
         {
-            "candidates": [
-                {
-                    "candidateId": "C1",
-                    "title": "测试对象 C1",
-                    "objectBoundary": "共享测试业务身份与更新边界",
-                    "classificationBasis": "依据测试模块规则分类",
-                    "identityHints": {"testKey": "C1"},
-                    "domain": "D1.3",
-                    "module": "D1.3",
-                    "objectType": "PROCESS_STEP",
-                    "content": {"summary": "提交问诊"},
-                    "entityMentions": [],
-                    "evidence": ["DP-DOMAIN#page-1"],
-                    "relations": [],
-                }
-            ],
+            "candidates": [candidate],
             "weakSignals": [],
             "unresolvedItems": [],
-        }
-    )
-    service = SalesKnowledgeIdentificationService(gateway=gateway)
-    package = DocumentPackage(
-        document_package_id="DP-DOMAIN",
-        workspace_id="WS-TEST",
-        source_file_name="sample.pdf",
-        source_sha256="source-checksum",
-        full_markdown_path="workspace/documents/DP-DOMAIN/full.md",
-        full_markdown_sha256="markdown-checksum",
-        full_markdown="# 示例\n\n提交问诊。",
-        processing_method="agent_assisted",
-        status="available",
-        anchors=[SourceAnchor(anchor_id="DP-DOMAIN#page-1", kind="page", page=1)],
-        quality_issues=[],
+        },
     )
 
-    result = service.identify(package)
+    result = SalesKnowledgeIdentificationService(gateway=gateway).identify(
+        _package("DP-DOMAIN", "# 示例\n\n提交问诊。")
+    )
 
-    assert len(result.candidates) == 1
     assert result.candidates[0].domain == "D1"
-    assert result.coverage_by_module["D1.3"] == "hit"
+    assert result.normalizations[0].original_value == "D1.3"
 
 
 def test_identification_uses_an_explicit_repair_call_for_invalid_json() -> None:
-    repaired_payload = {
-        "candidates": [
-            {
-                "candidateId": "C1",
-                "title": "测试对象 C1",
-                "objectBoundary": "共享测试业务身份与更新边界",
-                "classificationBasis": "依据测试模块规则分类",
-                "identityHints": {"testKey": "C1"},
-                "domain": "D1",
-                "module": "D1.1",
-                "objectType": "PRODUCT_FACT",
-                "content": _contract_content(
-                    "D1.1", {"summary": "药享保提供在线问诊"}
-                ),
-                "entityMentions": [],
-                "evidence": ["DP-REPAIR#page-1"],
-                "relations": [],
-            }
-        ],
+    claim_payload = {"claims": [_claim("DP-REPAIR#page-1", "药享保提供在线问诊")]}
+    object_payload = {
+        "candidates": [_candidate("D1.1", "PRODUCT_FACT", ["CL1"])],
         "weakSignals": [],
         "unresolvedItems": [],
     }
     gateway = SequencedModelGateway(
-        ["```json\nnot valid json\n```", json.dumps(repaired_payload, ensure_ascii=False)]
-    )
-    service = SalesKnowledgeIdentificationService(gateway=gateway)
-    document_package = DocumentPackage(
-        document_package_id="DP-REPAIR",
-        workspace_id="WS-TEST",
-        source_file_name="sample.pdf",
-        source_sha256="source-checksum",
-        full_markdown_path="workspace/documents/DP-REPAIR/full.md",
-        full_markdown_sha256="markdown-checksum",
-        full_markdown="# 示例\n\n药享保提供在线问诊。",
-        processing_method="agent_assisted",
-        status="available",
-        anchors=[SourceAnchor(anchor_id="DP-REPAIR#page-1", kind="page", page=1)],
-        quality_issues=[],
+        [
+            "```json\nnot valid json\n```",
+            json.dumps(claim_payload, ensure_ascii=False),
+            json.dumps(object_payload, ensure_ascii=False),
+        ]
     )
 
-    result = service.identify(document_package)
+    result = SalesKnowledgeIdentificationService(gateway=gateway).identify(
+        _package("DP-REPAIR", "# 示例\n\n药享保提供在线问诊。")
+    )
 
-    assert result.call_count == 2
     assert [trace.purpose for trace in result.model_calls] == [
-        "identification",
+        "claim_discovery",
         "repair",
+        "object_formation",
     ]
-    assert result.model_calls[0].raw_output.startswith("```json")
-    assert result.model_calls[1].raw_output.startswith('{"candidates"')
-    assert "修复" in gateway.requests[1].system_prompt
-    assert [candidate.candidate_id for candidate in result.candidates] == ["C1"]
+    assert result.candidates[0].candidate_id == "G1-C1"
 
 
 def test_identification_records_failed_model_attempt_before_retrying() -> None:
-    gateway = FlakyModelGateway({"candidates": [], "weakSignals": [], "unresolvedItems": []})
-    service = SalesKnowledgeIdentificationService(gateway=gateway, max_retries=1)
-    document_package = DocumentPackage(
-        document_package_id="DP-RETRY",
-        workspace_id="WS-TEST",
-        source_file_name="sample.pdf",
-        source_sha256="source-checksum",
-        full_markdown_path="workspace/documents/DP-RETRY/full.md",
-        full_markdown_sha256="markdown-checksum",
-        full_markdown="# 示例\n\n没有销售知识。",
-        processing_method="agent_assisted",
-        status="available",
-        anchors=[SourceAnchor(anchor_id="DP-RETRY#page-1", kind="page", page=1)],
-        quality_issues=[],
-    )
+    gateway = FlakyModelGateway({"claims": []})
+    result = SalesKnowledgeIdentificationService(
+        gateway=gateway, max_retries=1
+    ).identify(_package("DP-RETRY", "# 示例\n\n重试。"))
 
-    result = service.identify(document_package)
-
+    assert result.status == "completed"
     assert result.call_count == 2
     assert [trace.status for trace in result.model_calls] == ["failed", "completed"]
-    assert result.model_calls[0].error == "temporary model service failure"
-    assert result.model_calls[1].attempt == 2
 
 
 def test_identification_returns_auditable_failed_result_after_final_retry() -> None:
-    service = SalesKnowledgeIdentificationService(
-        gateway=FailingModelGateway(),
-        max_retries=1,
-        provider="test-provider",
-        model="test-model",
-    )
-    document_package = DocumentPackage(
-        document_package_id="DP-FAILED",
-        workspace_id="WS-TEST",
-        source_file_name="sample.pdf",
-        source_sha256="source-checksum",
-        full_markdown_path="workspace/documents/DP-FAILED/full.md",
-        full_markdown_sha256="markdown-checksum",
-        full_markdown="# 示例\n\n模型调用失败。",
-        processing_method="agent_assisted",
-        status="available",
-        anchors=[SourceAnchor(anchor_id="DP-FAILED#page-1", kind="page", page=1)],
-        quality_issues=[],
-    )
-
-    result = service.identify(document_package)
+    result = SalesKnowledgeIdentificationService(
+        gateway=FailingModelGateway(), max_retries=1
+    ).identify(_package("DP-FAIL", "# 示例\n\n失败。"))
 
     assert result.status == "failed"
-    assert result.provider == "test-provider"
-    assert result.model == "test-model"
     assert result.call_count == 2
-    assert [call.status for call in result.model_calls] == ["failed", "failed"]
-    assert result.processing_stages[0].status == "failed"
+    assert all(trace.purpose == "claim_discovery" for trace in result.model_calls)
+    assert "model service unavailable" in result.processing_stages[0].detail
 
 
-def test_identification_reduces_candidate_limit_after_output_truncation() -> None:
-    gateway = LengthLimitedModelGateway(
-        {"candidates": [], "weakSignals": [], "unresolvedItems": []}
-    )
-    service = SalesKnowledgeIdentificationService(gateway=gateway, max_candidates=20)
-    document_package = DocumentPackage(
-        document_package_id="DP-LENGTH",
-        workspace_id="WS-TEST",
-        source_file_name="sample.pdf",
-        source_sha256="source-checksum",
-        full_markdown_path="workspace/documents/DP-LENGTH/full.md",
-        full_markdown_sha256="markdown-checksum",
-        full_markdown="# 示例\n\n需要综合识别。",
-        processing_method="agent_assisted",
-        status="available",
-        anchors=[SourceAnchor(anchor_id="DP-LENGTH#page-1", kind="page", page=1)],
-        quality_issues=[],
+def test_identification_fails_closed_when_model_output_is_truncated() -> None:
+    gateway = LengthLimitedModelGateway()
+    result = SalesKnowledgeIdentificationService(gateway=gateway).identify(
+        _package("DP-LENGTH", "# 示例\n\n需要综合识别。")
     )
 
-    result = service.identify(document_package)
-
-    assert result.call_count == 2
-    assert [trace.purpose for trace in result.model_calls] == [
-        "identification",
-        "output_limit_retry",
-    ]
-    assert "最多输出 10 个候选" in gateway.requests[1].system_prompt
+    assert result.status == "failed"
+    assert result.call_count == 1
+    assert "truncated" in result.processing_stages[0].detail
 
 
-def test_identification_aggregates_structural_segments_without_id_collisions() -> None:
+def test_identification_runs_discovery_and_object_formation_per_structural_group() -> None:
     gateway = SegmentAwareGateway()
-    service = SalesKnowledgeIdentificationService(
-        gateway=gateway,
-        document_max_chars=90,
-    )
-    document_package = DocumentPackage(
-        document_package_id="DP-SEGMENT",
-        workspace_id="WS-TEST",
-        source_file_name="sample.pdf",
-        source_sha256="source-checksum",
-        full_markdown_path="workspace/documents/DP-SEGMENT/full.md",
-        full_markdown_sha256="markdown-checksum",
-        full_markdown=(
+    package = _package(
+        "DP-SEGMENT",
+        (
             "# 示例\n\n"
             "## 第 1 页\n\n<!-- source-anchor: DP-SEGMENT#page-1 -->\n\n"
             "产品事实内容。产品事实内容。产品事实内容。\n\n"
             "## 第 2 页\n\n<!-- source-anchor: DP-SEGMENT#page-2 -->\n\n"
             "问答内容。问答内容。问答内容。"
         ),
-        processing_method="agent_assisted",
-        status="available",
-        anchors=[
+        [
             SourceAnchor(anchor_id="DP-SEGMENT#page-1", kind="page", page=1),
             SourceAnchor(anchor_id="DP-SEGMENT#page-2", kind="page", page=2),
         ],
-        quality_issues=[],
     )
 
-    result = service.identify(document_package)
+    result = SalesKnowledgeIdentificationService(
+        gateway=gateway, document_max_chars=90
+    ).identify(package)
 
-    assert result.call_count == 2
+    assert result.call_count == 4
     assert [candidate.candidate_id for candidate in result.candidates] == [
-        "S1-C1",
-        "S2-C1",
+        "G1-C1",
+        "G2-C1",
     ]
-    assert result.coverage_by_module["D1.1"] == "hit"
-    assert result.coverage_by_module["D4.3"] == "hit"
-    assert {trace.segment for trace in result.model_calls} == {"S1/2", "S2/2"}
-    assert all("22个知识内容模块" in request.system_prompt for request in gateway.requests)
-    assert all("Markdown 结构分段：" in request.user_prompt for request in gateway.requests)
+    assert {claim.claim_id for claim in result.atomic_claims} == {"S1-CL1", "S2-CL1"}
 
 
-def test_segmenter_matches_source_anchors_exactly() -> None:
-    package = DocumentPackage(
-        document_package_id="DP-ANCHOR",
-        workspace_id="WS-TEST",
-        source_file_name="sample.pdf",
-        source_sha256="source-checksum",
-        full_markdown_path="workspace/documents/DP-ANCHOR/full.md",
-        full_markdown_sha256="markdown-checksum",
-        full_markdown=(
-            "## 第 1 页\n\n<!-- source-anchor: DP-ANCHOR#page-1 -->\n\n一。\n\n"
-            "## 第 10 页\n\n<!-- source-anchor: DP-ANCHOR#page-10 -->\n\n十。"
+def test_segmenter_matches_source_anchors_exactly_and_supports_spreadsheet_rows() -> None:
+    package = _package(
+        "DP-ROWS",
+        (
+            "# 示例\n\n## 工作表：话术\n\n"
+            "### 第 1 行\n\n<!-- source-anchor: DP-ROWS#row-1 -->\n\n- **D列**：第一行内容。\n\n"
+            "### 第 2 行\n\n<!-- source-anchor: DP-ROWS#row-2 -->\n\n- **D列**：第二行内容。"
         ),
-        processing_method="agent_assisted",
-        status="available",
-        anchors=[
-            SourceAnchor(anchor_id="DP-ANCHOR#page-1", kind="page", page=1),
-            SourceAnchor(anchor_id="DP-ANCHOR#page-10", kind="page", page=10),
+        [
+            SourceAnchor(anchor_id="DP-ROWS#row-1", kind="table"),
+            SourceAnchor(anchor_id="DP-ROWS#row-2", kind="table"),
         ],
-        quality_issues=[],
     )
 
     segments = segment_document(package, max_chars=70)
 
-    assert [[anchor.anchor_id for anchor in segment.anchors] for segment in segments] == [
-        ["DP-ANCHOR#page-1"],
-        ["DP-ANCHOR#page-10"],
-    ]
+    assert len(segments) == 2
+    assert [anchor.anchor_id for anchor in segments[0].anchors] == ["DP-ROWS#row-1"]
+    assert [anchor.anchor_id for anchor in segments[1].anchors] == ["DP-ROWS#row-2"]
 
 
-def test_identification_rejects_evidence_from_another_structural_segment() -> None:
-    service = SalesKnowledgeIdentificationService(
-        gateway=CrossSegmentEvidenceGateway(), document_max_chars=80
-    )
-    package = DocumentPackage(
-        document_package_id="DP-CROSS",
-        workspace_id="WS-TEST",
-        source_file_name="sample.pdf",
-        source_sha256="source-checksum",
-        full_markdown_path="workspace/documents/DP-CROSS/full.md",
-        full_markdown_sha256="markdown-checksum",
-        full_markdown=(
+def test_claim_validation_rejects_cross_segment_evidence() -> None:
+    package = _package(
+        "DP-CROSS",
+        (
             "## 第 1 页\n\n<!-- source-anchor: DP-CROSS#page-1 -->\n\n一段内容。\n\n"
             "## 第 2 页\n\n<!-- source-anchor: DP-CROSS#page-2 -->\n\n二段内容。"
         ),
-        processing_method="agent_assisted",
-        status="available",
-        anchors=[
+        [
             SourceAnchor(anchor_id="DP-CROSS#page-1", kind="page", page=1),
             SourceAnchor(anchor_id="DP-CROSS#page-2", kind="page", page=2),
         ],
-        quality_issues=[],
     )
 
-    result = service.identify(package)
+    result = SalesKnowledgeIdentificationService(
+        gateway=CrossSegmentClaimGateway(), document_max_chars=55
+    ).identify(package)
 
     assert result.candidates == []
-    assert result.rejected_candidates[0].reasons == [
-        "unknown evidence anchors: DP-CROSS#page-2"
+    assert result.atomic_claims == []
+    assert result.rejected_atomic_claims[0].reasons == [
+        "unknown evidence anchor: DP-CROSS#page-2"
     ]
+
+
+def test_claim_selector_and_verbatim_macro_preserve_complete_source_field() -> None:
+    package = _package(
+        "DP-SCRIPT",
+        (
+            "### 第 3 行\n\n<!-- source-anchor: DP-SCRIPT#row-3 -->\n\n"
+            "- **C列**：忙碌上班族推荐\n"
+            "- **D列**：先生您好，这是一段必须被完整保留的标准销售话术。"
+        ),
+        [SourceAnchor(anchor_id="DP-SCRIPT#row-3", kind="table")],
+    )
+    claim = _claim(
+        "DP-SCRIPT#row-3",
+        "必须被完整保留",
+        kind="script",
+        selector="D列",
+    )
+    candidate = _candidate("D4.1", "STANDARD_SCRIPT", ["CL1"])
+    candidate["content"] = _contract_content(
+        "D4.1", {"script": {"$verbatimFromClaim": "CL1"}}
+    )
+
+    result = SalesKnowledgeIdentificationService(
+        gateway=TwoStageGateway(
+            [claim],
+            {
+                "candidates": [candidate],
+                "weakSignals": [],
+                "unresolvedItems": [],
+            },
+        )
+    ).identify(package)
+
+    assert result.atomic_claims[0].evidence[0].source_text == (
+        "先生您好，这是一段必须被完整保留的标准销售话术。"
+    )
+    assert result.candidates[0].content["script"] == (
+        "先生您好，这是一段必须被完整保留的标准销售话术。"
+    )
+
+
+def test_validate_atomic_claims_rejects_non_verbatim_quote() -> None:
+    package = _package("DP-QUOTE", "# 示例\n\n药享保提供在线问诊。")
+    accepted, rejected = validate_atomic_claims(
+        [_claim("DP-QUOTE#page-1", "药享保提供线下问诊")], package
+    )
+
+    assert accepted == []
+    assert rejected[0].reasons == ["exact quote not found in DP-QUOTE#page-1"]

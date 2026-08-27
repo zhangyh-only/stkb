@@ -7,7 +7,7 @@ from app.features.sales_knowledge_identification.content_contracts import (
 
 
 def test_content_contracts_cover_every_module_and_object_type() -> None:
-    assert CONTENT_CONTRACT_VERSION == "object-content-contracts-v0.2"
+    assert CONTENT_CONTRACT_VERSION == "object-content-contracts-v0.3"
     assert set(CONTENT_CONTRACT_BY_MODULE) == {
         module.code for module in KNOWLEDGE_MODULES
     }
@@ -52,6 +52,18 @@ def test_complete_type_specific_content_passes_quality_gate() -> None:
             "不得承诺所有疾病或药品均可赔付",
             "保费、赔付比例和等待期必须引用当前版本事实",
         ],
+    }
+
+    assert validate_candidate_content("D4.1", "STANDARD_SCRIPT", content) == []
+
+
+def test_explicitly_allowed_empty_fields_do_not_force_model_invention() -> None:
+    content = {
+        "communicationGoal": "完整保留资料中的产品引入表达",
+        "applicability": {"customer": "优质车险客户", "stage": "产品引入"},
+        "script": "这是一段来自原始资料且已经过逐字证据校验的完整标准话术。" * 10,
+        "factReferences": [],
+        "complianceConstraints": [],
     }
 
     assert validate_candidate_content("D4.1", "STANDARD_SCRIPT", content) == []

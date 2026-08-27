@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 CONTRACTS_PATH = (
-    Path(__file__).with_name("rules") / "object-content-contracts-v0.2.toml"
+    Path(__file__).with_name("rules") / "object-content-contracts-v0.3.toml"
 )
 
 
@@ -16,6 +16,7 @@ class ObjectContentContract:
     module: str
     object_types: tuple[str, ...]
     required_fields: tuple[str, ...]
+    allow_empty_fields: tuple[str, ...]
     minimum_content_chars: int
     granularity: str
     inclusion: str
@@ -32,6 +33,7 @@ def _load_contracts() -> tuple[str, tuple[ObjectContentContract, ...]]:
             module=item["module"],
             object_types=tuple(item["object_types"]),
             required_fields=tuple(item["required_fields"]),
+            allow_empty_fields=tuple(item.get("allow_empty_fields", [])),
             minimum_content_chars=item["minimum_content_chars"],
             granularity=item["granularity"],
             inclusion=item["inclusion"],
@@ -62,7 +64,11 @@ def validate_candidate_content(module: str, object_type: str, content: dict[str,
     missing_fields = [
         field
         for field in contract.required_fields
-        if field not in content or content[field] in (None, "", [], {})
+        if field not in content
+        or (
+            field not in contract.allow_empty_fields
+            and content[field] in (None, "", [], {})
+        )
     ]
     if missing_fields:
         errors.append("missing required content fields: " + ", ".join(missing_fields))
@@ -86,6 +92,10 @@ def render_content_contracts_for_prompt() -> str:
                     f"### {item.module} 内容合同",
                     f"- 适用对象类型：{', '.join(item.object_types)}",
                     f"- content 必填字段：{', '.join(item.required_fields)}",
+                    (
+                        "- 可显式为空的字段："
+                        + (", ".join(item.allow_empty_fields) or "无")
+                    ),
                     f"- 最小有效内容量：序列化后 {item.minimum_content_chars} 字符",
                     f"- 对象粒度：{item.granularity}",
                     f"- 纳入：{item.inclusion}",

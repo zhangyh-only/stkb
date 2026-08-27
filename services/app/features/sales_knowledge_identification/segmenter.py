@@ -6,7 +6,11 @@ from dataclasses import dataclass
 from .models import DocumentPackage, SourceAnchor
 
 PAGE_HEADING = re.compile(r"(?m)^## 第 \d+ 页\s*$")
+LEVEL_TWO_HEADING = re.compile(r"(?m)^##\s+[^\n]+$")
 SOURCE_ANCHOR = re.compile(r"<!--\s*source-anchor:\s*([^\s>]+)\s*-->")
+ANCHORED_HEADING = re.compile(
+    r"(?m)^#{2,4}\s+[^\n]+\n(?:\n)?(?=<!--\s*source-anchor:)"
+)
 
 
 @dataclass(frozen=True)
@@ -36,7 +40,9 @@ def segment_document(
             )
         ]
 
-    matches = list(PAGE_HEADING.finditer(markdown))
+    matches = list(ANCHORED_HEADING.finditer(markdown))
+    if not matches:
+        matches = list(PAGE_HEADING.finditer(markdown))
     if not matches:
         return [
             DocumentSegment(
@@ -47,11 +53,22 @@ def segment_document(
             )
         ]
 
+    section_starts = [matches[0].start()]
+    for position in range(1, len(matches)):
+        previous = matches[position - 1]
+        current = matches[position]
+        parent_headings = list(
+            LEVEL_TWO_HEADING.finditer(markdown, previous.end(), current.start())
+        )
+        section_starts.append(
+            parent_headings[-1].start() if parent_headings else current.start()
+        )
+
     sections: list[str] = []
-    preamble = markdown[: matches[0].start()]
-    for position, match in enumerate(matches):
-        end = matches[position + 1].start() if position + 1 < len(matches) else len(markdown)
-        section = markdown[match.start() : end]
+    preamble = markdown[: section_starts[0]]
+    for position, start in enumerate(section_starts):
+        end = section_starts[position + 1] if position + 1 < len(section_starts) else len(markdown)
+        section = markdown[start:end]
         if position == 0:
             section = preamble + section
         sections.append(section.strip())
@@ -59,6 +76,10 @@ def segment_document(
     groups: list[str] = []
     current = ""
     for section in sections:
+        hard_boundary = section.startswith("## ") and not section.startswith("### ")
+        if current and hard_boundary:
+            groups.append(current)
+            current = ""
         proposed = f"{current}\n\n{section}".strip() if current else section
         if current and len(proposed) > max_chars:
             groups.append(current)

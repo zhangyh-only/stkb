@@ -82,6 +82,50 @@ class ProposedRelation(ApiModel):
     evidence: list[str] = Field(min_length=1)
 
 
+ClaimKind = Literal[
+    "fact",
+    "list",
+    "process",
+    "rule",
+    "comparison",
+    "customer_signal",
+    "method",
+    "strategy",
+    "script",
+    "objection",
+    "qa",
+    "term",
+    "case",
+    "asset",
+    "value_proposition",
+    "evaluation",
+    "benchmark",
+]
+
+
+class ClaimEvidence(ApiModel):
+    anchor_id: str
+    exact_quote: str = Field(min_length=2)
+    selector: str | None = None
+    source_text: str = ""
+
+
+class AtomicClaim(ApiModel):
+    claim_id: str
+    claim_kind: ClaimKind
+    statement: str = Field(min_length=2)
+    subject: str = Field(min_length=1)
+    attributes: dict[str, Any] = Field(default_factory=dict)
+    module_hints: list[str] = Field(default_factory=list)
+    evidence: list[ClaimEvidence] = Field(min_length=1)
+
+
+class RejectedAtomicClaim(ApiModel):
+    claim_id: str
+    reasons: list[str]
+    raw_claim: dict[str, Any]
+
+
 class CandidateKnowledgeObject(ApiModel):
     candidate_id: str
     title: str = ""
@@ -91,6 +135,7 @@ class CandidateKnowledgeObject(ApiModel):
     object_boundary: str = ""
     classification_basis: str = ""
     identity_hints: dict[str, Any] = Field(default_factory=dict)
+    source_claim_ids: list[str] = Field(default_factory=list)
     content: dict[str, Any]
     entity_mentions: list[EntityMention] = Field(default_factory=list)
     evidence: list[str] = Field(min_length=1)
@@ -118,7 +163,7 @@ class RejectedAuxiliaryItem(ApiModel):
 
 class CandidateNormalization(ApiModel):
     candidate_id: str
-    field: Literal["domain"]
+    field: Literal["domain", "entity_mentions"]
     original_value: str
     normalized_value: str
     reason: str
@@ -142,7 +187,13 @@ class UnresolvedItem(ApiModel):
 
 class ModelCallTrace(ApiModel):
     attempt: int
-    purpose: Literal["identification", "output_limit_retry", "repair"]
+    purpose: Literal[
+        "identification",
+        "claim_discovery",
+        "object_formation",
+        "output_limit_retry",
+        "repair",
+    ]
     status: Literal["completed", "failed"]
     duration_ms: int
     prompt_tokens: int = 0
@@ -183,6 +234,34 @@ class ModelConfigurationSnapshot(ApiModel):
     fingerprint: str
 
 
+class GoldGroupEvaluation(ApiModel):
+    key: str
+    expected_count: int
+    predicted_count: int
+    matched_count: int
+    status: Literal["met", "missed", "under_split_or_recall", "over_split"]
+    predicted_candidate_ids: list[str]
+    required_item_count: int | None = None
+    predicted_item_count: int | None = None
+
+
+class IdentificationQualityReport(ApiModel):
+    gold_version: str
+    gold_status: str
+    overall_status: Literal["pass", "fail", "review"]
+    expected_object_count: int
+    matched_expected_count: int
+    object_recall_proxy: float
+    groups_met: int
+    group_count: int
+    summary_only_count: int
+    evidence_backed_rate: float
+    claim_consumption_rate: float
+    median_content_chars: int
+    groups: list[GoldGroupEvaluation]
+    findings: list[str]
+
+
 class IdentificationResult(ApiModel):
     run_id: str = Field(default_factory=lambda: str(uuid4()))
     document_package_id: str
@@ -199,6 +278,8 @@ class IdentificationResult(ApiModel):
     raw_model_output: str
     model_calls: list[ModelCallTrace]
     processing_stages: list[ProcessingStage]
+    atomic_claims: list[AtomicClaim] = Field(default_factory=list)
+    rejected_atomic_claims: list[RejectedAtomicClaim] = Field(default_factory=list)
     candidates: list[CandidateKnowledgeObject]
     rejected_candidates: list[RejectedCandidate]
     rejected_auxiliary_items: list[RejectedAuxiliaryItem] = Field(default_factory=list)
@@ -210,6 +291,7 @@ class IdentificationResult(ApiModel):
     prompt_tokens: int
     completion_tokens: int
     model_configuration: ModelConfigurationSnapshot | None = None
+    quality_report: IdentificationQualityReport | None = None
     storage_impact: StorageImpact = Field(default_factory=StorageImpact)
 
 
