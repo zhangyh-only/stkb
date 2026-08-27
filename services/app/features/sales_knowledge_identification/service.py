@@ -159,6 +159,7 @@ class SalesKnowledgeIdentificationService:
             planning_weak_inputs,
             planning_unresolved_inputs,
         ) = _validate_object_plans(planning_result, atomic_claims)
+        object_plans = _enforce_plan_granularity(object_plans, atomic_claims)
         planning_validation_duration_ms = round(
             (perf_counter() - planning_validation_started) * 1000
         )
@@ -574,6 +575,7 @@ class SalesKnowledgeIdentificationService:
                     for evidence in claim.evidence
                 }
             )
+            valid_anchors = set(candidate_payload["evidence"])
             resolved_content, macro_reasons = resolve_verbatim_claim_references(
                 candidate_payload.get("content", {}), claim_by_id
             )
@@ -583,7 +585,10 @@ class SalesKnowledgeIdentificationService:
             raw_mentions = candidate_payload.get("entityMentions", [])
             if isinstance(raw_mentions, list):
                 structured_mentions = [
-                    mention for mention in raw_mentions if isinstance(mention, dict)
+                    mention
+                    for mention in raw_mentions
+                    if isinstance(mention, dict)
+                    and mention.get("sourceRef") in valid_anchors
                 ]
                 discarded_count = len(raw_mentions) - len(structured_mentions)
                 if discarded_count:
@@ -595,8 +600,8 @@ class SalesKnowledgeIdentificationService:
                             original_value=f"{discarded_count}个非结构化实体提及",
                             normalized_value="已移除，保留对象内容与证据",
                             reason=(
-                                "模型只返回实体名称，缺少类型、引用角色和来源；"
-                                "不据此创建低质量正式实体"
+                                "实体提及缺少类型、引用角色或使用了非来源锚点；"
+                                "不据此创建低质量正式实体，但保留已核验对象内容"
                             ),
                         )
                     )
@@ -972,6 +977,101 @@ def _validate_object_plans(
             )
         )
     return accepted, rejected, weak_inputs, unresolved_inputs
+
+
+def _enforce_plan_granularity(
+    plans: list[CandidateObjectPlan], claims: list[AtomicClaim]
+) -> list[CandidateObjectPlan]:
+    claim_by_id = {claim.claim_id: claim for claim in claims}
+    enforced: list[CandidateObjectPlan] = []
+    for plan in plans:
+        plan_claims = [
+            claim_by_id[claim_id]
+            for claim_id in plan.source_claim_ids
+            if claim_id in claim_by_id
+        ]
+        if plan.module == "D4.2" and plan.object_type == "CUSTOMER_OBJECTION":
+            objections = [claim for claim in plan_claims if claim.claim_kind == "objection"]
+            if len(objections) > 1:
+                objection_context = plan.identity_hints.get(
+                    "context", "来源资料适用场景"
+                )
+                enforced.extend(
+                    _split_plan_by_anchor(
+                        plan,
+                        plan_claims,
+                        objections,
+                        title=lambda claim: f"客户异议：{claim.subject}",
+                        identity=lambda claim, context=objection_context: {
+                            "rootConcern": claim.subject,
+                            "context": context,
+                        },
+                    )
+                )
+                continue
+        if plan.module == "D3.3" and plan.object_type == "SALES_STRATEGY":
+            combination_claims = [
+                claim
+                for claim in plan_claims
+                if claim.claim_kind == "strategy"
+                and claim.attributes.get("combination")
+            ]
+            combinations = {
+                str(claim.attributes["combination"]) for claim in combination_claims
+            }
+            if len(combinations) > 1:
+                trigger_context = plan.identity_hints.get(
+                    "triggerContext", "组合营销场景"
+                )
+                enforced.extend(
+                    _split_plan_by_anchor(
+                        plan,
+                        plan_claims,
+                        combination_claims,
+                        title=lambda claim: (
+                            f"组合营销策略：{claim.attributes['combination']}"
+                        ),
+                        identity=lambda claim, context=trigger_context: {
+                            "strategyGoal": (
+                                f"组合营销-{claim.attributes['combination']}"
+                            ),
+                            "triggerContext": context,
+                            "applicability": claim.attributes["combination"],
+                        },
+                    )
+                )
+                continue
+        enforced.append(plan)
+    return enforced
+
+
+def _split_plan_by_anchor(
+    plan: CandidateObjectPlan,
+    plan_claims: list[AtomicClaim],
+    pivots: list[AtomicClaim],
+    *,
+    title: Any,
+    identity: Any,
+) -> list[CandidateObjectPlan]:
+    results = []
+    for index, pivot in enumerate(pivots, start=1):
+        anchors = {evidence.anchor_id for evidence in pivot.evidence}
+        related_ids = [
+            claim.claim_id
+            for claim in plan_claims
+            if anchors & {evidence.anchor_id for evidence in claim.evidence}
+        ]
+        results.append(
+            plan.model_copy(
+                update={
+                    "plan_id": f"{plan.plan_id}-{index}",
+                    "title": title(pivot),
+                    "identity_hints": identity(pivot),
+                    "source_claim_ids": related_ids,
+                }
+            )
+        )
+    return results
 
 
 def _group_object_plans(

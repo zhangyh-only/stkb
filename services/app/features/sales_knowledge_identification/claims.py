@@ -146,11 +146,13 @@ def supplement_structured_table_claims(
         if section is None:
             continue
         group = _select_source_text(section, "A列")
-        if group:
+        if group and any(label in group for label in ("FAQ", "问答", "异议")):
             active_group = group
         question = _select_source_text(section, "B列")
         answer = _select_source_text(section, "C列")
         script = _select_source_text(section, "D列")
+        if question in {"问题", "客户问题"} and answer in {"解答", "答案"}:
+            continue
         claim_kind: str | None = None
         module_hint = ""
         source_values: list[tuple[str, str]] = []

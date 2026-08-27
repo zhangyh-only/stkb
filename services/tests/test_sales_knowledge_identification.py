@@ -14,6 +14,9 @@ from app.features.sales_knowledge_identification.identity_contracts import (
     IDENTITY_CONTRACT_BY_MODULE,
 )
 from app.features.sales_knowledge_identification.models import (
+    AtomicClaim,
+    CandidateObjectPlan,
+    ClaimEvidence,
     DocumentPackage,
     ModelCompletion,
     ModelRequest,
@@ -23,6 +26,7 @@ from app.features.sales_knowledge_identification.segmenter import segment_docume
 from app.features.sales_knowledge_identification.service import (
     DocumentPackageUnavailable,
     SalesKnowledgeIdentificationService,
+    _enforce_plan_granularity,
 )
 
 
@@ -672,12 +676,18 @@ def test_structured_table_completeness_adds_missing_qa_and_inherited_objection()
             "### 第 2 行\n\n<!-- source-anchor: DP-STRUCTURED#row-2 -->\n\n"
             "- **B列**：一次能买几年\n- **D列**：产品按年续交。\n\n"
             "### 第 3 行\n\n<!-- source-anchor: DP-STRUCTURED#row-3 -->\n\n"
-            "- **A列**：常见FAQ\n- **B列**：如何问诊\n- **C列**：进入服务页发起问诊。"
+            "- **A列**：常见FAQ\n\n"
+            "### 第 4 行\n\n<!-- source-anchor: DP-STRUCTURED#row-4 -->\n\n"
+            "- **A列**：序号\n- **B列**：问题\n- **C列**：解答\n\n"
+            "### 第 5 行\n\n<!-- source-anchor: DP-STRUCTURED#row-5 -->\n\n"
+            "- **B列**：如何问诊\n- **C列**：进入服务页发起问诊。"
         ),
         [
             SourceAnchor(anchor_id="DP-STRUCTURED#row-1", kind="table"),
             SourceAnchor(anchor_id="DP-STRUCTURED#row-2", kind="table"),
             SourceAnchor(anchor_id="DP-STRUCTURED#row-3", kind="table"),
+            SourceAnchor(anchor_id="DP-STRUCTURED#row-4", kind="table"),
+            SourceAnchor(anchor_id="DP-STRUCTURED#row-5", kind="table"),
         ],
     )
 
@@ -777,3 +787,41 @@ def test_content_realization_cannot_change_planned_identity_or_classification() 
     assert result.candidates[0].source_claim_ids == ["CL1"]
     assert result.candidates[0].relations == []
     assert result.normalizations[-1].field == "relations"
+
+
+def test_granularity_gate_splits_distinct_objections_even_if_model_groups_them() -> None:
+    claims = [
+        AtomicClaim(
+            claim_id=f"CL{index}",
+            claim_kind="objection",
+            statement=f"客户异议：{subject}",
+            subject=subject,
+            evidence=[
+                ClaimEvidence(
+                    anchor_id=f"DP-SPLIT#row-{index}",
+                    exact_quote=subject,
+                    source_text=subject,
+                )
+            ],
+        )
+        for index, subject in enumerate(("价格贵", "已经有医保"), start=1)
+    ]
+    plan = CandidateObjectPlan(
+        plan_id="P1",
+        title="常见异议",
+        domain="D4",
+        module="D4.2",
+        object_type="CUSTOMER_OBJECTION",
+        object_boundary="不同根本顾虑必须拆分",
+        classification_basis="属于客户异议",
+        identity_hints={"rootConcern": "常见异议", "context": "通用"},
+        source_claim_ids=["CL1", "CL2"],
+    )
+
+    split = _enforce_plan_granularity([plan], claims)
+
+    assert [item.plan_id for item in split] == ["P1-1", "P1-2"]
+    assert [item.identity_hints["rootConcern"] for item in split] == [
+        "价格贵",
+        "已经有医保",
+    ]
