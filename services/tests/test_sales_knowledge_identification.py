@@ -7,6 +7,9 @@ from app.features.sales_knowledge_identification.claims import validate_atomic_c
 from app.features.sales_knowledge_identification.content_contracts import (
     CONTENT_CONTRACT_BY_MODULE,
 )
+from app.features.sales_knowledge_identification.identity_contracts import (
+    IDENTITY_CONTRACT_BY_MODULE,
+)
 from app.features.sales_knowledge_identification.models import (
     DocumentPackage,
     ModelCompletion,
@@ -50,8 +53,41 @@ class TwoStageGateway:
         payload: dict[str, object]
         if "原子主张发现器" in request.system_prompt:
             payload = {"claims": self.claims}
+        elif "对象边界规划器" in request.system_prompt:
+            plans = []
+            for candidate in self.object_payload.get("candidates", []):
+                if not isinstance(candidate, dict):
+                    continue
+                plan = deepcopy(candidate)
+                plan["planId"] = plan.pop("candidateId")
+                for field in ("content", "entityMentions", "relations"):
+                    plan.pop(field, None)
+                plans.append(plan)
+            payload = {
+                "objectPlans": plans,
+                "weakSignals": self.object_payload.get("weakSignals", []),
+                "unresolvedItems": self.object_payload.get("unresolvedItems", []),
+            }
         else:
-            payload = self.object_payload
+            requested = {
+                candidate.get("candidateId")
+                for candidate in self.object_payload.get("candidates", [])
+                if isinstance(candidate, dict)
+                and candidate.get("candidateId") in request.user_prompt
+            }
+            payload = {
+                "realizations": [
+                    {
+                        "planId": candidate["candidateId"],
+                        "content": candidate.get("content", {}),
+                        "entityMentions": candidate.get("entityMentions", []),
+                        "relations": candidate.get("relations", []),
+                    }
+                    for candidate in self.object_payload.get("candidates", [])
+                    if isinstance(candidate, dict)
+                    and candidate.get("candidateId") in requested
+                ]
+            }
         return ModelCompletion(
             provider="test-provider",
             model="test-model",
@@ -124,20 +160,38 @@ class SegmentAwareGateway:
             else:
                 claim = _claim("DP-SEGMENT#page-2", "问答内容", kind="qa")
             payload: dict[str, object] = {"claims": [claim]}
-        else:
-            is_page_one = "S1-CL1" in request.user_prompt
-            module = "D1.1" if is_page_one else "D4.3"
-            object_type = "PRODUCT_FACT" if is_page_one else "QA_PAIR"
+        elif "对象边界规划器" in request.system_prompt:
             payload = {
-                "candidates": [
-                    _candidate(
-                        module,
-                        object_type,
-                        ["S1-CL1" if is_page_one else "S2-CL1"],
-                    )
+                "objectPlans": [
+                    {
+                        **_candidate("D1.1", "PRODUCT_FACT", ["S1-CL1"], candidate_id="P1"),
+                        "planId": "P1",
+                    },
+                    {
+                        **_candidate("D4.3", "QA_PAIR", ["S2-CL1"], candidate_id="P2"),
+                        "planId": "P2",
+                    },
                 ],
                 "weakSignals": [],
                 "unresolvedItems": [],
+            }
+            for plan in payload["objectPlans"]:
+                plan.pop("candidateId", None)
+                plan.pop("content", None)
+                plan.pop("entityMentions", None)
+                plan.pop("relations", None)
+        else:
+            payload = {
+                "realizations": [
+                    {
+                        "planId": plan_id,
+                        "content": _contract_content(module, {}),
+                        "entityMentions": [],
+                        "relations": [],
+                    }
+                    for plan_id, module in (("P1", "D1.1"), ("P2", "D4.3"))
+                    if plan_id in request.user_prompt
+                ]
             }
         return ModelCompletion(
             provider="test-provider",
@@ -209,7 +263,10 @@ def _candidate(
         "title": f"测试对象 {candidate_id}",
         "objectBoundary": "共享测试业务身份与更新边界",
         "classificationBasis": "依据测试模块规则分类",
-        "identityHints": {"testKey": candidate_id},
+        "identityHints": {
+            field: f"{candidate_id}-{field}"
+            for field in IDENTITY_CONTRACT_BY_MODULE[module].identity_fields
+        },
         "domain": module.split(".")[0],
         "module": module,
         "objectType": object_type,
@@ -266,22 +323,24 @@ def test_two_stage_identification_validates_catalog_and_source_claims() -> None:
         _package("DP-TEST", "# 示例\n\n药品需在保障目录内。")
     )
 
-    assert [candidate.candidate_id for candidate in result.candidates] == ["G1-C1"]
-    assert {item.candidate_id for item in result.rejected_candidates} == {
-        "G1-C2",
-        "G1-C3",
+    assert [candidate.candidate_id for candidate in result.candidates] == ["C1"]
+    assert {item.plan_id for item in result.rejected_object_plans} == {
+        "C2",
+        "C3",
     }
     assert result.atomic_claims[0].evidence[0].source_text.endswith(
         "药品需在保障目录内。"
     )
     assert result.coverage_by_module["D4.2"] == "hit"
-    assert result.call_count == 2
+    assert result.call_count == 3
     assert [call.purpose for call in result.model_calls] == [
         "claim_discovery",
-        "object_formation",
+        "object_planning",
+        "content_realization",
     ]
     assert "原子主张发现器" in gateway.requests[0].system_prompt
-    assert "对象形成器" in gateway.requests[1].system_prompt
+    assert "对象边界规划器" in gateway.requests[1].system_prompt
+    assert "内容编制器" in gateway.requests[2].system_prompt
 
 
 def test_identification_rejects_relations_to_a_rejected_candidate() -> None:
@@ -311,10 +370,7 @@ def test_identification_rejects_relations_to_a_rejected_candidate() -> None:
 
     assert result.candidates == []
     rejected = {item.candidate_id: item for item in result.rejected_candidates}
-    assert (
-        "relation references rejected or missing objects"
-        in rejected["G1-C1"].reasons[0]
-    )
+    assert "unknown relation reference: C2" in rejected["C1"].reasons
 
 
 def test_identification_rejects_incomplete_candidate_object_contract() -> None:
@@ -323,6 +379,14 @@ def test_identification_rejects_incomplete_candidate_object_contract() -> None:
         "domain": "D1",
         "module": "D1.1",
         "objectType": "PRODUCT_FACT",
+        "title": "不完整内容对象",
+        "objectBoundary": "同一产品与更新周期",
+        "classificationBasis": "符合产品事实边界",
+        "identityHints": {
+            "subject": "药享保",
+            "versionScope": "当前版本",
+            "factTheme": "产品责任",
+        },
         "sourceClaimIds": ["CL1"],
         "content": {"summary": "只有摘要"},
         "entityMentions": [],
@@ -342,12 +406,6 @@ def test_identification_rejects_incomplete_candidate_object_contract() -> None:
     )
 
     assert result.candidates == []
-    assert set(result.rejected_candidates[0].reasons) >= {
-        "candidate title is required",
-        "candidate object boundary is required",
-        "candidate classification basis is required",
-        "candidate identity hints are required",
-    }
     assert any(
         "missing required content fields" in reason
         for reason in result.rejected_candidates[0].reasons
@@ -380,7 +438,7 @@ def test_identification_canonicalizes_domain_when_model_repeats_module_code() ->
     )
 
     assert result.candidates[0].domain == "D1"
-    assert result.normalizations[0].original_value == "D1.3"
+    assert result.object_plans[0].domain == "D1"
 
 
 def test_identification_uses_an_explicit_repair_call_for_invalid_json() -> None:
@@ -395,6 +453,19 @@ def test_identification_uses_an_explicit_repair_call_for_invalid_json() -> None:
             "```json\nnot valid json\n```",
             json.dumps(claim_payload, ensure_ascii=False),
             json.dumps(object_payload, ensure_ascii=False),
+            json.dumps(
+                {
+                    "realizations": [
+                        {
+                            "planId": "C1",
+                            "content": object_payload["candidates"][0]["content"],
+                            "entityMentions": [],
+                            "relations": [],
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
         ]
     )
 
@@ -405,9 +476,10 @@ def test_identification_uses_an_explicit_repair_call_for_invalid_json() -> None:
     assert [trace.purpose for trace in result.model_calls] == [
         "claim_discovery",
         "repair",
-        "object_formation",
+        "object_planning",
+        "content_realization",
     ]
-    assert result.candidates[0].candidate_id == "G1-C1"
+    assert result.candidates[0].candidate_id == "C1"
 
 
 def test_identification_records_failed_model_attempt_before_retrying() -> None:
@@ -465,10 +537,7 @@ def test_identification_runs_discovery_and_object_formation_per_structural_group
     ).identify(package)
 
     assert result.call_count == 4
-    assert [candidate.candidate_id for candidate in result.candidates] == [
-        "G1-C1",
-        "G2-C1",
-    ]
+    assert [candidate.candidate_id for candidate in result.candidates] == ["P1", "P2"]
     assert {claim.claim_id for claim in result.atomic_claims} == {"S1-CL1", "S2-CL1"}
 
 
@@ -565,3 +634,86 @@ def test_validate_atomic_claims_rejects_non_verbatim_quote() -> None:
 
     assert accepted == []
     assert rejected[0].reasons == ["exact quote not found in DP-QUOTE#page-1"]
+
+
+def test_global_planning_can_merge_cross_kind_claims_into_one_object() -> None:
+    claims = [
+        _claim("DP-GLOBAL#page-1", "尊享版保障责任", kind="fact", claim_id="CL1"),
+        _claim("DP-GLOBAL#page-1", "尊享版赔付限制", kind="rule", claim_id="CL2"),
+    ]
+    candidate = _candidate(
+        "D1.1", "PRODUCT_VERSION_FACT", ["CL1", "CL2"], candidate_id="P1"
+    )
+    gateway = TwoStageGateway(
+        claims,
+        {"candidates": [candidate], "weakSignals": [], "unresolvedItems": []},
+    )
+
+    result = SalesKnowledgeIdentificationService(gateway=gateway).identify(
+        _package("DP-GLOBAL", "# 示例\n\n尊享版保障责任，尊享版赔付限制。")
+    )
+
+    assert len(result.object_plans) == 1
+    assert result.object_plans[0].source_claim_ids == ["CL1", "CL2"]
+    planning_request = gateway.requests[1]
+    assert '"claimKind": "fact"' in planning_request.user_prompt
+    assert '"claimKind": "rule"' in planning_request.user_prompt
+
+
+def test_unassigned_claim_is_exposed_as_unresolved_instead_of_disappearing() -> None:
+    gateway = TwoStageGateway(
+        [
+            _claim("DP-MISSING#page-1", "已覆盖主张", claim_id="CL1"),
+            _claim("DP-MISSING#page-1", "遗漏主张", claim_id="CL2"),
+        ],
+        {
+            "candidates": [_candidate("D1.1", "PRODUCT_FACT", ["CL1"])],
+            "weakSignals": [],
+            "unresolvedItems": [],
+        },
+    )
+
+    result = SalesKnowledgeIdentificationService(gateway=gateway).identify(
+        _package("DP-MISSING", "# 示例\n\n已覆盖主张，遗漏主张。")
+    )
+
+    assert any("CL2" in item.description for item in result.unresolved_items)
+    assert result.coverage_by_module["D1.1"] == "hit"
+
+
+def test_content_realization_cannot_change_planned_identity_or_classification() -> None:
+    candidate = _candidate("D1.1", "PRODUCT_FACT", ["CL1"], candidate_id="P1")
+
+    class MutatingRealizationGateway(TwoStageGateway):
+        def complete(self, request: ModelRequest) -> ModelCompletion:
+            completion = super().complete(request)
+            if "内容编制器" not in request.system_prompt:
+                return completion
+            payload = json.loads(completion.content)
+            payload["realizations"][0].update(
+                {
+                    "module": "D9.9",
+                    "objectType": "MUTATED",
+                    "identityHints": {"tampered": True},
+                    "sourceClaimIds": ["UNKNOWN"],
+                }
+            )
+            return completion.model_copy(
+                update={"content": json.dumps(payload, ensure_ascii=False)}
+            )
+
+    result = SalesKnowledgeIdentificationService(
+        gateway=MutatingRealizationGateway(
+            [_claim("DP-LOCKED#page-1", "可信事实")],
+            {"candidates": [candidate], "weakSignals": [], "unresolvedItems": []},
+        )
+    ).identify(_package("DP-LOCKED", "# 示例\n\n可信事实。"))
+
+    assert result.candidates[0].module == "D1.1"
+    assert result.candidates[0].object_type == "PRODUCT_FACT"
+    assert result.candidates[0].identity_hints == {
+        "subject": "P1-subject",
+        "versionScope": "P1-versionScope",
+        "factTheme": "P1-factTheme",
+    }
+    assert result.candidates[0].source_claim_ids == ["CL1"]

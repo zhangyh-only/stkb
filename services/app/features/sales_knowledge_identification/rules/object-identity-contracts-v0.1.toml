@@ -1,0 +1,178 @@
+version = "object-identity-contracts-v0.1"
+status = "sample_validation"
+
+[[contracts]]
+module = "D1.1"
+identity_fields = ["subject", "versionScope", "factTheme"]
+same_object_when = "产品或版本主体、事实主题、适用范围和更新生命周期相同；多个参数、责任、权益和限制是对象内部字段。"
+different_object_when = "产品/版本、事实主题、适用范围或正式生效周期不同。"
+merge_strategy = "字段并集；同名事实值冲突时隔离冲突，不覆盖旧值。"
+conflict_rule = "版本号、生效时间或正式替代声明优先；缺少版本依据时不得仅凭新数值判为更新。"
+
+[[contracts]]
+module = "D1.2"
+identity_fields = ["listName", "versionScope", "applicability"]
+same_object_when = "清单业务名称、版本和适用范围相同；成员变化形成同一清单的新修订。"
+different_object_when = "清单用途、版本或适用产品范围不同。"
+merge_strategy = "按成员业务键合并条目并保留纳入、排除和条件。"
+conflict_rule = "同一成员状态冲突时按正式版本与生效时间裁决，否则隔离。"
+
+[[contracts]]
+module = "D1.3"
+identity_fields = ["purpose", "subject", "scope"]
+same_object_when = "办理目的、业务主体和适用范围相同；步骤、条件和例外属于同一流程。"
+different_object_when = "办理目的、渠道/主体、完成边界或适用范围不同。"
+merge_strategy = "按步骤身份和顺序合并，规则与例外结构化补充。"
+conflict_rule = "正式SOP版本与生效时间优先；顺序冲突但无依据时隔离。"
+
+[[contracts]]
+module = "D1.4"
+identity_fields = ["subjects", "dimensionSet", "effectiveTime"]
+same_object_when = "对比主体集合、维度集合和有效时点相同。"
+different_object_when = "任一对比主体、关键维度集合或有效时点不同。"
+merge_strategy = "按对比维度合并事实与证据，不把跨时点差异覆盖。"
+conflict_rule = "只接受双方同口径证据；时点不同形成独立快照。"
+
+[[contracts]]
+module = "D2.1"
+identity_fields = ["dimensionName", "businessScope"]
+same_object_when = "维度的业务含义和适用业务范围相同；值域是对象内部结构。"
+different_object_when = "同名维度的业务含义或量纲不同。"
+merge_strategy = "合并受控值域、定义和用法。"
+conflict_rule = "值域语义冲突时不得按文本名称强行归并。"
+
+[[contracts]]
+module = "D2.2"
+identity_fields = ["profileName", "stableTraitSet", "businessScope"]
+same_object_when = "稳定特征组合、决策方式和业务适用范围指向同一画像。"
+different_object_when = "决定行为边界的核心特征组合或业务范围不同。"
+merge_strategy = "补充稳定特征、关注点、反应边界和证据，不吸收临时会话状态。"
+conflict_rule = "单次表现不能覆盖跨样本稳定特征；证据不足则保留为待验证。"
+
+[[contracts]]
+module = "D2.3"
+identity_fields = ["subject", "needTheme", "context"]
+same_object_when = "需求/动因根本含义、主体类型和适用上下文相同。"
+different_object_when = "表象相似但根因、主体或消费决策语义不同。"
+merge_strategy = "合并可观察证据、表达变体和适用条件。"
+conflict_rule = "没有根因证据时只保留表象，不提升或覆盖稳定动因。"
+
+[[contracts]]
+module = "D2.4"
+identity_fields = ["triggerTheme", "audience", "context"]
+same_object_when = "触发机制、适用客群/场景和稳定反应模式相同。"
+different_object_when = "触发条件、反应方向或适用客群不同。"
+merge_strategy = "聚合跨样本证据和反应变体。"
+conflict_rule = "单次对话反应不能与稳定机制归并为已确认规则。"
+
+[[contracts]]
+module = "D2.5"
+identity_fields = ["roleName", "decisionContext"]
+same_object_when = "决策角色类型和购买决策上下文相同。"
+different_object_when = "权责、决策场景或角色类型不同。"
+merge_strategy = "补充权责、关注点和影响关系。"
+conflict_rule = "个人姓名不参与通用角色身份；权责冲突需按场景分别建对象。"
+
+[[contracts]]
+module = "D3.1"
+identity_fields = ["name", "scenarioScope"]
+same_object_when = "场景/阶段业务身份和适用范围相同；进入、转移和完成条件属于内部结构。"
+different_object_when = "业务目标、参与角色、阶段完成边界或适用范围不同。"
+merge_strategy = "按阶段身份合并结构、转移条件和完成标志。"
+conflict_rule = "运行时所处阶段不修改稳定场景对象。"
+
+[[contracts]]
+module = "D3.2"
+identity_fields = ["techniqueName", "purpose", "mechanism"]
+same_object_when = "方法目标、作用机制和核心步骤相同，名称或措辞差异不构成新对象。"
+different_object_when = "作用机制、关键步骤或适用边界实质不同。"
+merge_strategy = "合并步骤变体、适用条件和证据。"
+conflict_rule = "单个产品策略不能覆盖跨产品通用方法。"
+
+[[contracts]]
+module = "D3.3"
+identity_fields = ["strategyGoal", "triggerContext", "applicability"]
+same_object_when = "行动目标、触发上下文、适用客群/产品和核心判断逻辑相同。"
+different_object_when = "目标、触发条件、产品组合、客群或退出条件不同。"
+merge_strategy = "合并行动步骤、判断分支和适用证据。"
+conflict_rule = "通用技巧、产品事实和完整话术不得并入策略身份。"
+
+[[contracts]]
+module = "D3.4"
+identity_fields = ["ruleTheme", "basis", "applicability"]
+same_object_when = "合规主题、依据和适用范围相同。"
+different_object_when = "监管/制度依据、适用产品/渠道或风险主题不同。"
+merge_strategy = "合并禁止/要求行为、风险模式与合规做法。"
+conflict_rule = "法规或正式制度版本优先；无依据经验不得覆盖正式规则。"
+
+[[contracts]]
+module = "D4.1"
+identity_fields = ["communicationGoal", "method", "applicability"]
+same_object_when = "沟通目标、处理方法、适用客群/场景和产品范围相同；措辞变化是表达变体。"
+different_object_when = "目标、方法、客群、场景或产品组合不同。"
+merge_strategy = "保留主话术并追加去重表达变体、事实引用和合规约束。"
+conflict_rule = "完整话术不得被摘要覆盖；事实冲突交由D1对象裁决。"
+
+[[contracts]]
+module = "D4.2"
+identity_fields = ["rootConcern", "context"]
+same_object_when = "客户表达指向同一根本顾虑、意图和处理方向。"
+different_object_when = "根本顾虑、购买语境或所需处理方向不同。"
+merge_strategy = "合并表达变体、根因假设证据和化解要素。"
+conflict_rule = "仅表面词相似不能归并；完整应对话术仍保持独立对象。"
+
+[[contracts]]
+module = "D4.3"
+identity_fields = ["collectionName", "applicability"]
+same_object_when = "同一来源维护单元、主题范围和适用范围内共同更新的问答/术语条目。"
+different_object_when = "维护单元、事实主题或适用产品范围不同。"
+merge_strategy = "按问题/术语规范键合并 items、同义问法和事实引用。"
+conflict_rule = "同一问题答案冲突时引用D1正式事实裁决；不得用任一答案静默覆盖。"
+
+[[contracts]]
+module = "D4.4"
+identity_fields = ["caseIdentity", "context", "timeScope"]
+same_object_when = "同一案例身份、参与者上下文和事件时间范围。"
+different_object_when = "案例事件链、主体或时间范围不同。"
+merge_strategy = "按时间顺序补充事件、结果、证据限制和经验。"
+conflict_rule = "跨案例经验只能建立关系，不能把多个案例压成一个对象。"
+
+[[contracts]]
+module = "D4.5"
+identity_fields = ["assetName", "deliveryFormat", "applicability"]
+same_object_when = "资产身份、交付形态和适用范围相同。"
+different_object_when = "独立分发单元、格式用途或适用范围不同。"
+merge_strategy = "更新内容摘要和知识引用，保留资产版本。"
+conflict_rule = "原始来源文件不是销售物料身份；正式发布版本优先。"
+
+[[contracts]]
+module = "D5.1"
+identity_fields = ["customerValue", "factScope", "triggerContext"]
+same_object_when = "客户价值、支撑事实范围和触发/检测条件相同。"
+different_object_when = "客户价值含义、事实主体或触发客群不同。"
+merge_strategy = "合并事实引用、表达方式和可观察检测点。"
+conflict_rule = "无D1事实支撑的宣传表达不能覆盖卖点对象。"
+
+[[contracts]]
+module = "D5.2"
+identity_fields = ["dimensionName", "capabilityScope"]
+same_object_when = "能力本质和适用场景范围相同；等级与行为锚点属于内部结构。"
+different_object_when = "能力定义、观察对象或适用场景不同。"
+merge_strategy = "合并行为锚点、等级描述和场景例证。"
+conflict_rule = "单次运行得分不修改能力维度身份或等级定义。"
+
+[[contracts]]
+module = "D5.3"
+identity_fields = ["evaluationTarget", "scenarioScope", "ruleVersion"]
+same_object_when = "评价目标、场景范围和规则版本相同。"
+different_object_when = "评价目标、证据口径、评分版本或适用场景不同。"
+merge_strategy = "合并标准、证据要求、评分逻辑和宽容边界。"
+conflict_rule = "不同规则版本保持版本关系，不按文本相似覆盖。"
+
+[[contracts]]
+module = "D5.4"
+identity_fields = ["benchmarkName", "targetVersion", "validationGoal"]
+same_object_when = "验证目标、被测版本和基准集合身份相同。"
+different_object_when = "验证目标、被测合同版本或验收口径不同。"
+merge_strategy = "按样本键合并输入、预期结果和检查项。"
+conflict_rule = "未经评审的运行输出不能自动覆盖黄金预期。"

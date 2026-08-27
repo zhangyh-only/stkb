@@ -126,6 +126,24 @@ class RejectedAtomicClaim(ApiModel):
     raw_claim: dict[str, Any]
 
 
+class CandidateObjectPlan(ApiModel):
+    plan_id: str
+    title: str = ""
+    domain: str
+    module: str
+    object_type: str
+    object_boundary: str = ""
+    classification_basis: str = ""
+    identity_hints: dict[str, Any] = Field(default_factory=dict)
+    source_claim_ids: list[str] = Field(min_length=1)
+
+
+class RejectedObjectPlan(ApiModel):
+    plan_id: str
+    reasons: list[str]
+    raw_plan: dict[str, Any]
+
+
 class CandidateKnowledgeObject(ApiModel):
     candidate_id: str
     title: str = ""
@@ -190,6 +208,8 @@ class ModelCallTrace(ApiModel):
     purpose: Literal[
         "identification",
         "claim_discovery",
+        "object_planning",
+        "content_realization",
         "object_formation",
         "output_limit_retry",
         "repair",
@@ -280,6 +300,8 @@ class IdentificationResult(ApiModel):
     processing_stages: list[ProcessingStage]
     atomic_claims: list[AtomicClaim] = Field(default_factory=list)
     rejected_atomic_claims: list[RejectedAtomicClaim] = Field(default_factory=list)
+    object_plans: list[CandidateObjectPlan] = Field(default_factory=list)
+    rejected_object_plans: list[RejectedObjectPlan] = Field(default_factory=list)
     candidates: list[CandidateKnowledgeObject]
     rejected_candidates: list[RejectedCandidate]
     rejected_auxiliary_items: list[RejectedAuxiliaryItem] = Field(default_factory=list)

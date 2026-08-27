@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from time import perf_counter
@@ -18,10 +17,12 @@ from .catalog import (
 )
 from .claims import resolve_verbatim_claim_references, validate_atomic_claims
 from .content_contracts import validate_candidate_content
+from .identity_contracts import canonical_identity, validate_identity_hints
 from .models import (
     AtomicClaim,
     CandidateKnowledgeObject,
     CandidateNormalization,
+    CandidateObjectPlan,
     DocumentPackage,
     IdentificationResult,
     ModelCallTrace,
@@ -32,6 +33,7 @@ from .models import (
     RejectedAtomicClaim,
     RejectedAuxiliaryItem,
     RejectedCandidate,
+    RejectedObjectPlan,
     UnresolvedItem,
     WeakSignal,
 )
@@ -39,12 +41,14 @@ from .prompt_builder import (
     PROMPT_VERSION,
     SCHEMA_VERSION,
     build_claim_discovery_request,
-    build_object_formation_request,
+    build_content_realization_request,
+    build_object_planning_request,
     build_repair_request,
 )
 from .segmenter import DocumentSegment, segment_document
 
-CallPurpose = Literal["claim_discovery", "object_formation"]
+CallPurpose = Literal["claim_discovery", "object_planning", "content_realization"]
+CONTENT_REALIZATION_BATCH_SIZE = 5
 
 
 class ModelGateway(Protocol):
@@ -121,9 +125,37 @@ class SalesKnowledgeIdentificationService:
             atomic_claims.extend(accepted)
             rejected_atomic_claims.extend(rejected)
 
-        object_groups = _group_claims(atomic_claims, self.max_candidates)
-        object_results, object_failures = self._form_candidate_objects(
-            document_package.document_package_id, object_groups
+        planning_result, planning_failures = self._plan_candidate_objects(
+            document_package.document_package_id, atomic_claims
+        )
+        model_calls.extend(_renumber_calls(planning_result, model_calls))
+        if planning_failures:
+            return self._failed_result(
+                document_package=document_package,
+                started_at=started_at,
+                run_started=run_started,
+                model_calls=model_calls,
+                failures=planning_failures,
+                atomic_claims=atomic_claims,
+                rejected_atomic_claims=rejected_atomic_claims,
+            )
+
+        planning_validation_started = perf_counter()
+        (
+            object_plans,
+            rejected_object_plans,
+            planning_weak_inputs,
+            planning_unresolved_inputs,
+        ) = _validate_object_plans(planning_result, atomic_claims)
+        planning_validation_duration_ms = round(
+            (perf_counter() - planning_validation_started) * 1000
+        )
+
+        realization_groups = _group_object_plans(
+            object_plans, atomic_claims, CONTENT_REALIZATION_BATCH_SIZE
+        )
+        object_results, object_failures = self._realize_candidate_objects(
+            document_package.document_package_id, realization_groups
         )
         model_calls.extend(_renumber_calls(object_results, model_calls))
         if object_failures:
@@ -135,6 +167,8 @@ class SalesKnowledgeIdentificationService:
                 failures=object_failures,
                 atomic_claims=atomic_claims,
                 rejected_atomic_claims=rejected_atomic_claims,
+                object_plans=object_plans,
+                rejected_object_plans=rejected_object_plans,
             )
 
         validation_started = perf_counter()
@@ -146,9 +180,11 @@ class SalesKnowledgeIdentificationService:
             weak_signals,
             unresolved_items,
             coverage,
-        ) = self._validate_object_results(object_results)
+        ) = self._validate_object_results(
+            object_results, planning_weak_inputs, planning_unresolved_inputs
+        )
 
-        completion = _last_completion(object_results, discovery_results)
+        completion = _last_completion(object_results, planning_result, discovery_results)
         validation_duration_ms = round((perf_counter() - validation_started) * 1000)
         finished_at = datetime.now(UTC)
         return IdentificationResult(
@@ -199,17 +235,39 @@ class SalesKnowledgeIdentificationService:
                     detail="逐条校验来源锚点、列选择器与逐字引句，并回填完整来源字段",
                 ),
                 ProcessingStage(
-                    key="object_formation",
-                    name="知识对象形成",
+                    key="object_planning",
+                    name="全局对象边界规划",
                     status="completed",
                     duration_ms=sum(
                         call.duration_ms
                         for call in model_calls
-                        if call.purpose == "object_formation"
+                        if call.purpose == "object_planning"
                     ),
                     detail=(
-                        f"按主张类型分成 {len(object_groups)} 个对象化批次；"
-                        "未按22个模块循环调用"
+                        f"一次比较全部 {len(atomic_claims)} 条主张，形成 "
+                        f"{len(object_plans)} 个对象计划，拒绝 {len(rejected_object_plans)} 个；"
+                        "未按主张类型或22个模块割裂对象边界"
+                    ),
+                ),
+                ProcessingStage(
+                    key="object_plan_validation",
+                    name="对象身份与主张覆盖校验",
+                    status="completed",
+                    duration_ms=planning_validation_duration_ms,
+                    detail="校验分类、身份要素、重复对象和主张引用；未覆盖主张显式进入未决项",
+                ),
+                ProcessingStage(
+                    key="content_realization",
+                    name="完整知识内容编制",
+                    status="completed",
+                    duration_ms=sum(
+                        call.duration_ms
+                        for call in model_calls
+                        if call.purpose == "content_realization"
+                    ),
+                    detail=(
+                        f"按对象计划分成 {len(realization_groups)} 个内容批次；"
+                        "边界与分类由全局计划锁定，内容批次不可改写"
                     ),
                 ),
                 ProcessingStage(
@@ -232,6 +290,8 @@ class SalesKnowledgeIdentificationService:
             ],
             atomic_claims=atomic_claims,
             rejected_atomic_claims=rejected_atomic_claims,
+            object_plans=object_plans,
+            rejected_object_plans=rejected_object_plans,
             candidates=accepted_candidates,
             rejected_candidates=rejected_candidates,
             rejected_auxiliary_items=rejected_auxiliary_items,
@@ -274,28 +334,46 @@ class SalesKnowledgeIdentificationService:
             max_concurrency=self.max_concurrency,
         )
 
-    def _form_candidate_objects(
+    def _plan_candidate_objects(
         self,
         document_package_id: str,
-        groups: list[tuple[str, list[AtomicClaim]]],
+        claims: list[AtomicClaim],
     ) -> tuple[
         list[tuple[str, list[AtomicClaim], dict[str, Any], ModelCompletion, list[ModelCallTrace]]],
         list[str],
     ]:
+        if not claims:
+            return [], []
+        request = build_object_planning_request(
+            document_package_id, claims, self.max_candidates
+        )
+        try:
+            payload, completion, calls = self._complete_json_request(
+                request, "object_planning"
+            )
+        except SegmentIdentificationFailure as error:
+            return [("global", claims, {}, None, error.model_calls)], [
+                f"global: {error}"
+            ]
+        return [("global", claims, payload, completion, calls)], []
+
+    def _realize_candidate_objects(
+        self,
+        document_package_id: str,
+        groups: list[tuple[str, list[CandidateObjectPlan], list[AtomicClaim]]],
+    ) -> tuple[list[Any], list[str]]:
         if not groups:
             return [], []
 
-        def run(
-            item: tuple[str, list[AtomicClaim]],
-        ) -> tuple[str, list[AtomicClaim], dict[str, Any], ModelCompletion, list[ModelCallTrace]]:
-            label, claims = item
-            request = build_object_formation_request(
-                document_package_id, claims, label, self.max_candidates
+        def run(item: tuple[str, list[CandidateObjectPlan], list[AtomicClaim]]) -> tuple[Any, ...]:
+            label, plans, claims = item
+            request = build_content_realization_request(
+                document_package_id, plans, claims, label
             )
             payload, completion, calls = self._complete_json_request(
-                request, "object_formation"
+                request, "content_realization"
             )
-            return label, claims, payload, completion, calls
+            return label, plans, claims, payload, completion, calls
 
         return _run_parallel(
             items=groups,
@@ -346,7 +424,9 @@ class SalesKnowledgeIdentificationService:
         self,
         request: ModelRequest,
         *,
-        purpose: Literal["claim_discovery", "object_formation", "repair"],
+        purpose: Literal[
+            "claim_discovery", "object_planning", "content_realization", "repair"
+        ],
         first_attempt: int,
     ) -> tuple[ModelCompletion, list[ModelCallTrace]]:
         traces: list[ModelCallTrace] = []
@@ -389,9 +469,9 @@ class SalesKnowledgeIdentificationService:
 
     def _validate_object_results(
         self,
-        object_results: list[
-            tuple[str, list[AtomicClaim], dict[str, Any], ModelCompletion, list[ModelCallTrace]]
-        ],
+        object_results: list[Any],
+        weak_signal_inputs: list[tuple[Any, set[str]]],
+        unresolved_inputs: list[tuple[Any, set[str]]],
     ) -> tuple[
         list[CandidateKnowledgeObject],
         list[RejectedCandidate],
@@ -403,30 +483,45 @@ class SalesKnowledgeIdentificationService:
     ]:
         raw_candidates: list[dict[str, Any]] = []
         candidate_claim_scopes: dict[str, dict[str, AtomicClaim]] = {}
-        weak_signal_inputs: list[tuple[Any, set[str]]] = []
-        unresolved_inputs: list[tuple[Any, set[str]]] = []
-
-        for group_index, (_label, claims, payload, _completion, _calls) in enumerate(
+        for _group_index, (_label, plans, claims, payload, _completion, _calls) in enumerate(
             object_results, start=1
         ):
-            namespaced = _namespace_candidate_payload(payload, f"G{group_index}")
             claim_by_id = {claim.claim_id: claim for claim in claims}
-            group_anchors = {
-                evidence.anchor_id for claim in claims for evidence in claim.evidence
-            }
-            for index, raw_candidate in enumerate(
-                namespaced.get("candidates", []), start=1
-            ):
-                candidate_id = _candidate_id(raw_candidate, index)
-                if isinstance(raw_candidate, dict):
-                    raw_candidates.append(raw_candidate)
-                    candidate_claim_scopes[candidate_id] = claim_by_id
-            weak_signal_inputs.extend(
-                (item, group_anchors) for item in namespaced.get("weakSignals", [])
-            )
-            unresolved_inputs.extend(
-                (item, group_anchors) for item in namespaced.get("unresolvedItems", [])
-            )
+            plan_by_id = {plan.plan_id: plan for plan in plans}
+            raw_realizations = payload.get("realizations")
+            if raw_realizations is None:
+                raw_realizations = payload.get("candidates", [])
+            realized_plan_ids: set[str] = set()
+            for index, realization in enumerate(raw_realizations, start=1):
+                if not isinstance(realization, dict):
+                    continue
+                plan_id = realization.get("planId", realization.get("candidateId"))
+                plan = plan_by_id.get(plan_id)
+                if plan is None:
+                    raw_candidates.append(
+                        {"candidateId": f"INVALID-REALIZATION-{index}", "content": {}}
+                    )
+                    continue
+                realized_plan_ids.add(plan.plan_id)
+                candidate_payload = plan.model_dump(by_alias=True)
+                candidate_payload["candidateId"] = plan.plan_id
+                candidate_payload.pop("planId", None)
+                candidate_payload["content"] = realization.get("content", {})
+                candidate_payload["entityMentions"] = realization.get("entityMentions", [])
+                candidate_payload["relations"] = realization.get("relations", [])
+                raw_candidates.append(candidate_payload)
+                candidate_claim_scopes[plan.plan_id] = claim_by_id
+            for plan in plans:
+                if plan.plan_id in realized_plan_ids:
+                    continue
+                missing_payload = plan.model_dump(by_alias=True)
+                missing_payload["candidateId"] = plan.plan_id
+                missing_payload.pop("planId", None)
+                missing_payload.update(
+                    {"content": {}, "entityMentions": [], "relations": []}
+                )
+                raw_candidates.append(missing_payload)
+                candidate_claim_scopes[plan.plan_id] = claim_by_id
 
         accepted: list[CandidateKnowledgeObject] = []
         rejected: list[RejectedCandidate] = []
@@ -611,6 +706,8 @@ class SalesKnowledgeIdentificationService:
         failures: list[str],
         atomic_claims: list[AtomicClaim] | None = None,
         rejected_atomic_claims: list[RejectedAtomicClaim] | None = None,
+        object_plans: list[CandidateObjectPlan] | None = None,
+        rejected_object_plans: list[RejectedObjectPlan] | None = None,
     ) -> IdentificationResult:
         return IdentificationResult(
             document_package_id=document_package.document_package_id,
@@ -637,6 +734,8 @@ class SalesKnowledgeIdentificationService:
             ],
             atomic_claims=atomic_claims or [],
             rejected_atomic_claims=rejected_atomic_claims or [],
+            object_plans=object_plans or [],
+            rejected_object_plans=rejected_object_plans or [],
             candidates=[],
             rejected_candidates=[],
             weak_signals=[],
@@ -688,10 +787,8 @@ def _renumber_calls(results: list[Any], existing: list[ModelCallTrace]) -> list[
     return calls
 
 
-def _last_completion(
-    object_results: list[Any], discovery_results: list[Any]
-) -> ModelCompletion | None:
-    for results in (object_results, discovery_results):
+def _last_completion(*result_sets: list[Any]) -> ModelCompletion | None:
+    for results in result_sets:
         for result in reversed(results):
             completion = result[-2]
             if isinstance(completion, ModelCompletion):
@@ -699,18 +796,159 @@ def _last_completion(
     return None
 
 
-def _group_claims(
-    claims: list[AtomicClaim], max_group_size: int
-) -> list[tuple[str, list[AtomicClaim]]]:
-    by_kind: dict[str, list[AtomicClaim]] = defaultdict(list)
-    for claim in claims:
-        by_kind[claim.claim_kind].append(claim)
-    groups: list[tuple[str, list[AtomicClaim]]] = []
-    for kind in sorted(by_kind):
-        kind_claims = by_kind[kind]
-        for offset in range(0, len(kind_claims), max_group_size):
-            part = offset // max_group_size + 1
-            groups.append((f"{kind}-{part}", kind_claims[offset : offset + max_group_size]))
+def _validate_object_plans(
+    planning_results: list[Any],
+    claims: list[AtomicClaim],
+) -> tuple[
+    list[CandidateObjectPlan],
+    list[RejectedObjectPlan],
+    list[tuple[Any, set[str]]],
+    list[tuple[Any, set[str]]],
+]:
+    claim_by_id = {claim.claim_id: claim for claim in claims}
+    valid_anchors = {
+        evidence.anchor_id for claim in claims for evidence in claim.evidence
+    }
+    payload = planning_results[0][2] if planning_results else {}
+    accepted: list[CandidateObjectPlan] = []
+    rejected: list[RejectedObjectPlan] = []
+    seen_plan_ids: set[str] = set()
+    seen_identities: set[str] = set()
+    covered_claim_ids: set[str] = set()
+
+    raw_plans = payload.get("objectPlans")
+    if raw_plans is None:
+        raw_plans = payload.get("candidates", [])
+    for index, raw_plan in enumerate(raw_plans, start=1):
+        plan_id = (
+            raw_plan.get("planId", f"INVALID-{index}")
+            if isinstance(raw_plan, dict)
+            else f"INVALID-{index}"
+        )
+        if not isinstance(raw_plan, dict):
+            rejected.append(
+                RejectedObjectPlan(
+                    plan_id=plan_id,
+                    reasons=["object plan must be a JSON object"],
+                    raw_plan={"value": raw_plan},
+                )
+            )
+            continue
+        candidate_payload = raw_plan.copy()
+        if "planId" not in candidate_payload and "candidateId" in candidate_payload:
+            candidate_payload["planId"] = candidate_payload.pop("candidateId")
+        for field in ("content", "entityMentions", "relations", "evidence"):
+            candidate_payload.pop(field, None)
+        module_code = candidate_payload.get("module")
+        if (
+            candidate_payload.get("domain") == module_code
+            and isinstance(module_code, str)
+            and module_code in MODULE_BY_CODE
+        ):
+            candidate_payload["domain"] = MODULE_BY_CODE[module_code].domain
+        reasons: list[str] = []
+        try:
+            plan = CandidateObjectPlan.model_validate(candidate_payload)
+        except ValidationError as error:
+            rejected.append(
+                RejectedObjectPlan(
+                    plan_id=str(plan_id),
+                    reasons=[item["msg"] for item in error.errors()],
+                    raw_plan=raw_plan,
+                )
+            )
+            continue
+        reasons.extend(
+            validate_candidate_classification(plan.domain, plan.module, plan.object_type)
+        )
+        unknown_claim_ids = sorted(set(plan.source_claim_ids) - set(claim_by_id))
+        if unknown_claim_ids:
+            reasons.append("unknown source claim ids: " + ", ".join(unknown_claim_ids))
+        if not plan.title.strip():
+            reasons.append("object plan title is required")
+        if not plan.object_boundary.strip():
+            reasons.append("object plan boundary is required")
+        if not plan.classification_basis.strip():
+            reasons.append("object plan classification basis is required")
+        if not plan.identity_hints:
+            reasons.append("object plan identity hints are required")
+        else:
+            reasons.extend(validate_identity_hints(plan.module, plan.identity_hints))
+        if plan.plan_id in seen_plan_ids:
+            reasons.append(f"duplicate object plan id: {plan.plan_id}")
+        seen_plan_ids.add(plan.plan_id)
+        if plan.module in MODULE_BY_CODE and not validate_identity_hints(
+            plan.module, plan.identity_hints
+        ):
+            identity_fingerprint = json.dumps(
+                [
+                    plan.module,
+                    plan.object_type,
+                    canonical_identity(plan.module, plan.identity_hints),
+                ],
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).casefold()
+            if identity_fingerprint in seen_identities:
+                reasons.append("duplicate object identity in the same document")
+            seen_identities.add(identity_fingerprint)
+        if reasons:
+            rejected.append(
+                RejectedObjectPlan(
+                    plan_id=plan.plan_id,
+                    reasons=reasons,
+                    raw_plan=raw_plan,
+                )
+            )
+            continue
+        accepted.append(plan)
+        covered_claim_ids.update(plan.source_claim_ids)
+
+    weak_inputs = [(item, valid_anchors) for item in payload.get("weakSignals", [])]
+    unresolved_inputs = [
+        (item, valid_anchors) for item in payload.get("unresolvedItems", [])
+    ]
+    for claim_id in sorted(set(claim_by_id) - covered_claim_ids):
+        claim = claim_by_id[claim_id]
+        unresolved_inputs.append(
+            (
+                {
+                    "description": f"{claim_id}：对象规划未覆盖的原子主张",
+                    "reason": "模型未将该主张分配给任何对象计划，禁止静默丢失",
+                    "evidence": sorted(
+                        {evidence.anchor_id for evidence in claim.evidence}
+                    ),
+                    "module": claim.module_hints[0] if claim.module_hints else None,
+                },
+                valid_anchors,
+            )
+        )
+    return accepted, rejected, weak_inputs, unresolved_inputs
+
+
+def _group_object_plans(
+    plans: list[CandidateObjectPlan],
+    claims: list[AtomicClaim],
+    batch_size: int,
+) -> list[tuple[str, list[CandidateObjectPlan], list[AtomicClaim]]]:
+    claim_by_id = {claim.claim_id: claim for claim in claims}
+    groups = []
+    for offset in range(0, len(plans), batch_size):
+        batch_plans = plans[offset : offset + batch_size]
+        claim_ids = {
+            claim_id for plan in batch_plans for claim_id in plan.source_claim_ids
+        }
+        batch_claims = [
+            claim for claim_id, claim in claim_by_id.items() if claim_id in claim_ids
+        ]
+        groups.append(
+            (
+                f"objects-{offset // batch_size + 1}",
+                batch_plans,
+                batch_claims,
+            )
+        )
     return groups
 
 

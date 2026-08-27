@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .identity_contracts import canonical_identity, validate_identity_hints
 from .models import (
     CandidateKnowledgeObject,
     DocumentPackage,
@@ -266,8 +267,11 @@ class KnowledgeObjectFormationService:
 
     @staticmethod
     def _identity_key(candidate: CandidateKnowledgeObject) -> str:
+        errors = validate_identity_hints(candidate.module, candidate.identity_hints)
+        if errors:
+            raise ValueError("; ".join(errors))
         canonical = json.dumps(
-            candidate.identity_hints,
+            canonical_identity(candidate.module, candidate.identity_hints),
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),

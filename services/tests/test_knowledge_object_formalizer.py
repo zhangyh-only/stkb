@@ -38,7 +38,11 @@ def _identification(summary: str = "药享保提供在线问诊") -> Identificat
         object_type="PRODUCT_FACT",
         object_boundary="围绕同一产品服务共同更新",
         classification_basis="属于可核验产品事实",
-        identity_hints={"product": "药享保", "factType": "在线问诊服务"},
+        identity_hints={
+            "subject": "药享保",
+            "versionScope": "当前产品版本",
+            "factTheme": "在线问诊服务",
+        },
         content={"summary": summary},
         entity_mentions=[
             EntityMention(
