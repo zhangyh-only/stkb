@@ -1056,12 +1056,17 @@ def _split_plan_by_anchor(
     identity: Any,
 ) -> list[CandidateObjectPlan]:
     results = []
+    pivot_ids = {pivot.claim_id for pivot in pivots}
     for index, pivot in enumerate(pivots, start=1):
         anchors = {evidence.anchor_id for evidence in pivot.evidence}
         related_ids = [
             claim.claim_id
             for claim in plan_claims
-            if anchors & {evidence.anchor_id for evidence in claim.evidence}
+            if claim.claim_id == pivot.claim_id
+            or (
+                claim.claim_id not in pivot_ids
+                and anchors & {evidence.anchor_id for evidence in claim.evidence}
+            )
         ]
         results.append(
             plan.model_copy(
@@ -1081,23 +1086,27 @@ def _group_object_plans(
     claims: list[AtomicClaim],
     batch_size: int,
 ) -> list[tuple[str, list[CandidateObjectPlan], list[AtomicClaim]]]:
-    claim_by_id = {claim.claim_id: claim for claim in claims}
     groups = []
-    for offset in range(0, len(plans), batch_size):
-        batch_plans = plans[offset : offset + batch_size]
-        claim_ids = {
-            claim_id for plan in batch_plans for claim_id in plan.source_claim_ids
-        }
-        batch_claims = [
-            claim for claim_id, claim in claim_by_id.items() if claim_id in claim_ids
-        ]
-        groups.append(
-            (
-                f"objects-{offset // batch_size + 1}",
-                batch_plans,
-                batch_claims,
+    compatible_plans: dict[tuple[str, str], list[CandidateObjectPlan]] = {}
+    for plan in plans:
+        compatible_plans.setdefault((plan.module, plan.object_type), []).append(plan)
+    group_index = 0
+    for (module, object_type), same_contract_plans in compatible_plans.items():
+        for offset in range(0, len(same_contract_plans), batch_size):
+            group_index += 1
+            batch_plans = same_contract_plans[offset : offset + batch_size]
+            claim_ids = {
+                claim_id
+                for plan in batch_plans
+                for claim_id in plan.source_claim_ids
+            }
+            groups.append(
+                (
+                    f"{module}-{object_type}-{group_index}",
+                    batch_plans,
+                    [claim for claim in claims if claim.claim_id in claim_ids],
+                )
             )
-        )
     return groups
 
 

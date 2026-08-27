@@ -560,9 +560,23 @@ def test_identification_runs_discovery_and_object_formation_per_structural_group
         gateway=gateway, document_max_chars=90
     ).identify(package)
 
-    assert result.call_count == 4
+    assert result.call_count == 5
     assert [candidate.candidate_id for candidate in result.candidates] == ["P1", "P2"]
     assert {claim.claim_id for claim in result.atomic_claims} == {"S1-CL1", "S2-CL1"}
+    realization_prompts = [
+        request.system_prompt
+        for request in gateway.requests
+        if "内容编制器" in request.system_prompt
+    ]
+    assert len(realization_prompts) == 2
+    assert any(
+        "### D1.1 内容合同" in prompt and "### D4.3 内容合同" not in prompt
+        for prompt in realization_prompts
+    )
+    assert any(
+        "### D4.3 内容合同" in prompt and "### D1.1 内容合同" not in prompt
+        for prompt in realization_prompts
+    )
 
 
 def test_segmenter_matches_source_anchors_exactly_and_supports_spreadsheet_rows() -> None:
@@ -840,7 +854,7 @@ def test_content_realization_cannot_change_planned_identity_or_classification() 
     assert result.normalizations[-1].field == "relations"
 
 
-def test_granularity_gate_splits_distinct_objections_even_if_model_groups_them() -> None:
+def test_granularity_gate_splits_objections_sharing_one_source_anchor() -> None:
     claims = [
         AtomicClaim(
             claim_id=f"CL{index}",
@@ -849,7 +863,7 @@ def test_granularity_gate_splits_distinct_objections_even_if_model_groups_them()
             subject=subject,
             evidence=[
                 ClaimEvidence(
-                    anchor_id=f"DP-SPLIT#row-{index}",
+                    anchor_id="DP-SPLIT#section-1",
                     exact_quote=subject,
                     source_text=subject,
                 )
@@ -876,3 +890,4 @@ def test_granularity_gate_splits_distinct_objections_even_if_model_groups_them()
         "价格贵",
         "已经有医保",
     ]
+    assert [item.source_claim_ids for item in split] == [["CL1"], ["CL2"]]

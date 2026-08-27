@@ -1,4 +1,4 @@
-version = "object-content-contracts-v0.7"
+version = "object-content-contracts-v0.8"
 
 [[contracts]]
 module = "D1.1"
@@ -51,11 +51,11 @@ module = "D2.1"
 object_types = ["PROFILE_DIMENSION", "PROFILE_DIMENSION_VALUE"]
 required_fields = ["dimensionName", "businessMeaning", "allowedValues", "usage"]
 minimum_content_chars = 160
-granularity = "一个可稳定复用的客户区分维度及其受控值域构成对象。"
-inclusion = "能支持画像、策略或评价的稳定客户维度。"
-exclusion = "单个客户临时状态、一次对话标签、无法复用的任意形容词。"
-positive_example = "价格敏感度维度及高/中/低值的业务含义。"
-negative_example = "客户今天有点着急。"
+granularity = "一个业务含义和更新口径稳定的客户区分维度及其完整受控值域构成对象；不同含义的枚举必须拆分。"
+inclusion = "能支持画像、策略、运营状态或评价的稳定维度定义；维度值可随客户变化，但维度口径必须可复用。"
+exclusion = "某个客户当前取值、一次对话标签、值域对应的判定/迁移动作规则、无法复用的任意形容词。"
+positive_example = "客户购买意向优先级及三个值形成一项维度；系统名单A/B/C状态因业务含义不同形成另一项维度。"
+negative_example = "把A/B/C判定流程包装为通用销售技巧，或把客户今天处于A类建成维度对象。"
 
 [[contracts]]
 module = "D2.2"

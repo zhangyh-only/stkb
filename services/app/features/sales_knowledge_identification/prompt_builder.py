@@ -106,6 +106,10 @@ def build_object_planning_request(
    - D1.3 的用户操作顺序形成 BUSINESS_PROCESS；处方限量、同功效药限制、目录限制、发票条件等
      可独立查询的约束形成 POLICY_RULE_SET，不得塞进一个“通用流程与规则”对象；
    - 同一规则主题可聚合多条约束，但处方规则与发票规则因消费问题和更新依据不同必须拆分。
+   - 稳定的客户优先级、状态枚举及其完整值域属于 D2.1 PROFILE_DIMENSION；值域判定和迁移属于
+     D3.3 DECISION_RULE。两者可以关联共存，但不得再把同一套枚举重复包装为 D3.2 通用技巧。
+   - 只有“客户原话参考”而没有来源支持的根本顾虑、处理要素或标准回应时，不足以形成 D4.2
+     正式异议对象；应保留为未决素材，禁止模型补造心理原因和化解动作。
    - 单一培训材料中的谚语、经验性“往往/可能”或讲师判断，只能形成术语解释或待验证信号；
      没有跨样本证据、明确触发条件与可执行动作时，不得规划为 D2.4 客户反应规律或 D3.3 行动规则。
 7. 每条主张必须至少进入一个 plan，或在 unresolvedItems 中逐条列明 claimId 与原因；不得静默丢失。
@@ -188,8 +192,8 @@ def build_content_realization_request(
    "targetRef":"P2或P2-M1","evidence":["真实anchorId"]}}。无法同时满足引用和证据时不输出。
 8. 只输出合法 JSON，不输出额外字段。
 
-当前22个模块对象内容合同：
-{render_content_contracts_for_prompt()}
+当前本批对象内容合同：
+{render_content_contracts_for_prompt({plan.module for plan in plans})}
 
 输出形态：
 {{"realizations":[{{"planId":"P1","content":{{}},"entityMentions":[],"relations":[]}}]}}"""

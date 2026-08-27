@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 CONTRACTS_PATH = (
-    Path(__file__).with_name("rules") / "object-content-contracts-v0.7.toml"
+    Path(__file__).with_name("rules") / "object-content-contracts-v0.8.toml"
 )
 
 
@@ -117,9 +117,13 @@ def validate_candidate_content(module: str, object_type: str, content: dict[str,
     return errors
 
 
-def render_content_contracts_for_prompt() -> str:
+def render_content_contracts_for_prompt(
+    module_codes: set[str] | None = None,
+) -> str:
     sections = []
     for item in OBJECT_CONTENT_CONTRACTS:
+        if module_codes is not None and item.module not in module_codes:
+            continue
         sections.append(
             "\n".join(
                 [

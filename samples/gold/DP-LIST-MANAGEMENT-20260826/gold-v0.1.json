@@ -5,16 +5,16 @@
   "expectedObjectGroups": [
     {
       "key": "lead-status-dimension",
-      "expectedCount": 1,
+      "expectedCount": 2,
       "module": "D2.1",
       "objectTypes": ["PROFILE_DIMENSION"],
-      "requiredItemCount": 3,
+      "requiredItemCount": 6,
       "requiredItemField": "allowedValues",
       "evidence": [
         "DP-LIST-MANAGEMENT-20260826#section-2",
         "DP-LIST-MANAGEMENT-20260826#section-3"
       ],
-      "splitRule": "A/B/C是同一客户跟进状态维度的受控值，不逐值建KnowledgeObject"
+      "splitRule": "购买意向优先级与系统A/B/C状态的业务含义不同，应形成两个维度；每个维度的三个值保留在对象内部"
     },
     {
       "key": "lead-classification-decisions",
@@ -26,11 +26,29 @@
         "DP-LIST-MANAGEMENT-20260826#section-5"
       ],
       "splitRule": "初次分类判定与复播只升不降是两个独立触发上下文和更新规则"
+    },
+    {
+      "key": "duplicate-classification-technique",
+      "expectedCount": 0,
+      "module": "D3.2",
+      "objectTypes": ["SALES_TECHNIQUE"],
+      "evidence": ["DP-LIST-MANAGEMENT-20260826#section-3"],
+      "splitRule": "A/B/C受控值域及判定规则已分别由D2.1和D3.3承载，不重复包装为通用技巧"
+    },
+    {
+      "key": "unsupported-objection-objects",
+      "expectedCount": 0,
+      "module": "D4.2",
+      "objectTypes": ["CUSTOMER_OBJECTION"],
+      "evidence": ["DP-LIST-MANAGEMENT-20260826#section-6"],
+      "requiredUnresolvedEvidence": ["DP-LIST-MANAGEMENT-20260826#section-6"],
+      "splitRule": "只有客户原话而没有来源支持的根因和处理要素，不发布正式异议对象"
     }
   ],
   "prohibitedPatterns": [
     "因为资料标题含名单就归入D1.2清单事实库",
     "把忙碌、已买等客户原话直接当成完整标准话术",
+    "根据客户原话自行补造根本顾虑和化解动作后发布异议对象",
     "把A/B/C三个值拆成三个画像维度对象"
   ]
 }
