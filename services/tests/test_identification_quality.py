@@ -47,6 +47,14 @@ def test_quality_report_detects_group_recall_and_over_split(tmp_path) -> None:
                         "requiredContentFields": ["usageBoundary"],
                         "evidence": ["A3", "A4"],
                     },
+                    {
+                        "key": "unsupported-rule",
+                        "expectedCount": 0,
+                        "module": "D3.3",
+                        "objectTypes": ["DECISION_RULE"],
+                        "evidence": ["A2"],
+                        "requiredUnresolvedEvidence": ["A2"],
+                    },
                 ],
             },
             ensure_ascii=False,
@@ -78,7 +86,13 @@ def test_quality_report_detects_group_recall_and_over_split(tmp_path) -> None:
             ],
             "rejectedCandidates": [],
             "weakSignals": [],
-            "unresolvedItems": [],
+            "unresolvedItems": [
+                {
+                    "description": "CL2 不具备稳定规则证据",
+                    "reason": "保留为待验证项",
+                    "evidence": ["A2"],
+                }
+            ],
             "coverageByModule": {},
             "callCount": 0,
             "promptTokens": 0,
@@ -91,9 +105,12 @@ def test_quality_report_detects_group_recall_and_over_split(tmp_path) -> None:
     assert report.overall_status == "fail"
     assert report.object_recall_proxy == 0.6667
     assert report.claim_consumption_rate == 0.75
+    assert report.claim_accounting_rate == 1.0
     assert report.groups[0].status == "under_split_or_recall"
     assert report.groups[1].status == "over_split"
     assert report.groups[1].predicted_item_count == 2
+    assert report.groups[2].status == "met"
+    assert report.groups[2].missing_unresolved_evidence == []
 
 
 def test_quality_report_detects_missing_required_nested_item_fields(tmp_path) -> None:

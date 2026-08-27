@@ -274,6 +274,8 @@ class GoldGroupEvaluation(ApiModel):
     missing_content_fields: list[str] = Field(default_factory=list)
     required_item_fields: list[str] = Field(default_factory=list)
     missing_item_fields: list[str] = Field(default_factory=list)
+    required_unresolved_evidence: list[str] = Field(default_factory=list)
+    missing_unresolved_evidence: list[str] = Field(default_factory=list)
 
 
 class IdentificationQualityReport(ApiModel):
@@ -288,6 +290,7 @@ class IdentificationQualityReport(ApiModel):
     summary_only_count: int
     evidence_backed_rate: float
     claim_consumption_rate: float
+    claim_accounting_rate: float
     median_content_chars: int
     groups: list[GoldGroupEvaluation]
     findings: list[str]

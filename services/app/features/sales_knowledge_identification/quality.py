@@ -23,6 +23,18 @@ def evaluate_against_gold(
     used_claim_ids = {
         claim_id for candidate in result.candidates for claim_id in candidate.source_claim_ids
     }
+    unresolved_evidence = {
+        evidence
+        for item in [*result.unresolved_items, *result.weak_signals]
+        for evidence in item.evidence
+    }
+    accounted_claim_ids = used_claim_ids | {
+        claim.claim_id
+        for claim in result.atomic_claims
+        if any(
+            evidence.anchor_id in unresolved_evidence for evidence in claim.evidence
+        )
+    }
     content_lengths = [
         len(json.dumps(candidate.content, ensure_ascii=False, sort_keys=True))
         for candidate in result.candidates
@@ -55,6 +67,11 @@ def evaluate_against_gold(
         if result.candidates
         else 0.0,
         claim_consumption_rate=round(len(used_claim_ids) / len(result.atomic_claims), 4)
+        if result.atomic_claims
+        else 0.0,
+        claim_accounting_rate=round(
+            len(accounted_claim_ids) / len(result.atomic_claims), 4
+        )
         if result.atomic_claims
         else 0.0,
         median_content_chars=int(statistics.median(content_lengths))
@@ -106,6 +123,15 @@ def _evaluate_group(
     required_item_count = group.get("requiredItemCount")
     required_item_field = group.get("requiredItemField", "items")
     required_item_fields = group.get("requiredItemFields", [])
+    required_unresolved_evidence = group.get("requiredUnresolvedEvidence", [])
+    unresolved_evidence = {
+        evidence
+        for item in [*result.unresolved_items, *result.weak_signals]
+        for evidence in item.evidence
+    }
+    missing_unresolved_evidence = sorted(
+        set(required_unresolved_evidence) - unresolved_evidence
+    )
     required_content_fields = group.get("requiredContentFields", [])
     missing_content_fields = sorted(
         {
@@ -137,13 +163,18 @@ def _evaluate_group(
         and (required_item_count is None or predicted_item_count == required_item_count)
         and not missing_content_fields
         and not missing_item_fields
+        and not missing_unresolved_evidence
     ):
         status = "met"
     elif predicted_count == 0:
         status = "missed"
     elif predicted_count > expected_count:
         status = "over_split"
-    elif missing_content_fields or missing_item_fields:
+    elif (
+        missing_content_fields
+        or missing_item_fields
+        or missing_unresolved_evidence
+    ):
         status = "contract_failed"
     else:
         status = "under_split_or_recall"
@@ -162,6 +193,8 @@ def _evaluate_group(
         missing_content_fields=missing_content_fields,
         required_item_fields=required_item_fields,
         missing_item_fields=missing_item_fields,
+        required_unresolved_evidence=required_unresolved_evidence,
+        missing_unresolved_evidence=missing_unresolved_evidence,
     )
 
 

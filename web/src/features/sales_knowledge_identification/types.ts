@@ -204,6 +204,8 @@ export type GoldGroupEvaluation = {
   missingContentFields: string[]
   requiredItemFields: string[]
   missingItemFields: string[]
+  requiredUnresolvedEvidence: string[]
+  missingUnresolvedEvidence: string[]
 }
 
 export type IdentificationQualityReport = {
@@ -218,6 +220,7 @@ export type IdentificationQualityReport = {
   summaryOnlyCount: number
   evidenceBackedRate: number
   claimConsumptionRate: number
+  claimAccountingRate: number
   medianContentChars: number
   groups: GoldGroupEvaluation[]
   findings: string[]
