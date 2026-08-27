@@ -370,6 +370,32 @@ def test_uncovered_claim_does_not_promote_module_hint_to_classification() -> Non
     assert "禁止静默丢失" in result.unresolved_items[0].reason
 
 
+def test_explicitly_unresolved_claim_is_not_duplicated_by_fallback() -> None:
+    gateway = TwoStageGateway(
+        [_claim("DP-UNRESOLVED#page-1", "待补充范本", kind="rule")],
+        {
+            "candidates": [],
+            "weakSignals": [],
+            "unresolvedItems": [
+                {
+                    "claimId": "CL1",
+                    "description": "资料要求使用范本但没有提供范本文字",
+                    "reason": "无法形成标准话术",
+                    "evidence": ["DP-UNRESOLVED#page-1"],
+                    "module": None,
+                }
+            ],
+        },
+    )
+
+    result = SalesKnowledgeIdentificationService(gateway=gateway).identify(
+        _package("DP-UNRESOLVED", "# 示例\n\n待补充范本。")
+    )
+
+    assert len(result.unresolved_items) == 1
+    assert result.unresolved_items[0].claim_id == "CL1"
+
+
 def test_planning_rejects_objection_built_from_expression_only() -> None:
     gateway = TwoStageGateway(
         [_claim("DP-EXPRESSION#page-1", "我没时间", kind="objection")],
@@ -635,6 +661,12 @@ def test_identification_runs_discovery_and_object_formation_per_structural_group
         if "内容编制器" in request.system_prompt
     ]
     assert len(realization_prompts) == 2
+    realization_requests = [
+        request
+        for request in gateway.requests
+        if "内容编制器" in request.system_prompt
+    ]
+    assert all('"sourceText"' not in request.user_prompt for request in realization_requests)
     assert any(
         "### D1.1 内容合同" in prompt and "### D4.3 内容合同" not in prompt
         for prompt in realization_prompts

@@ -196,12 +196,14 @@ CoverageStatus = Literal["hit", "weak_signal", "not_found", "unresolved"]
 
 
 class WeakSignal(ApiModel):
+    claim_id: str | None = None
     module: str
     reason: str
     evidence: list[str] = Field(min_length=1)
 
 
 class UnresolvedItem(ApiModel):
+    claim_id: str | None = None
     description: str
     reason: str
     evidence: list[str] = Field(default_factory=list)

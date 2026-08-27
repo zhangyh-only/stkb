@@ -5,7 +5,7 @@
   "expectedObjectGroups": [
     {
       "key": "compliance-rule-themes",
-      "expectedCount": 12,
+      "expectedCount": 13,
       "module": "D3.4",
       "objectTypes": ["COMPLIANCE_RULE"],
       "evidence": [
@@ -51,14 +51,6 @@
       "splitRule": "信息授权分支与受限客群产品选择是两个触发上下文"
     },
     {
-      "key": "prohibited-customer-data-expression",
-      "expectedCount": 1,
-      "module": "D3.4",
-      "objectTypes": ["PROHIBITED_EXPRESSION"],
-      "evidence": ["DP-COMPLIANCE-20260826#rule-5"],
-      "splitRule": "禁用表达作为合规规则的可检索检查项，不展开成整段来源材料"
-    },
-    {
       "key": "internal-quality-term",
       "expectedCount": 1,
       "module": "D4.3",
@@ -68,6 +60,14 @@
       "requiredItemField": "terms",
       "requiredItemFields": ["termText", "standardExplanation", "sourceStance", "usageBoundary"],
       "splitRule": "1010电话作为内部质检语境术语维护，不与禁止透露核保原因的合规规则混为一项"
+    },
+    {
+      "key": "conversation-branch-is-not-business-process",
+      "expectedCount": 0,
+      "module": "D1.3",
+      "objectTypes": ["BUSINESS_PROCESS"],
+      "evidence": ["DP-COMPLIANCE-20260826#rule-5"],
+      "splitRule": "信息来源异议与授权分支属于销售行动规则，不是投保、核保或服务办理流程"
     },
     {
       "key": "missing-template-must-not-be-invented",

@@ -136,12 +136,14 @@ export type RejectedAuxiliaryItem = {
 }
 
 export type WeakSignal = {
+  claimId: string | null
   module: string
   reason: string
   evidence: string[]
 }
 
 export type UnresolvedItem = {
+  claimId: string | null
   description: string
   reason: string
   evidence: string[]

@@ -1009,11 +1009,22 @@ def _validate_object_plans(
     unresolved_inputs = [
         (item, valid_anchors) for item in payload.get("unresolvedItems", [])
     ]
-    for claim_id in sorted(set(claim_by_id) - covered_claim_ids):
+    explicitly_accounted_claim_ids = {
+        item.get("claimId")
+        for item in [
+            *payload.get("weakSignals", []),
+            *payload.get("unresolvedItems", []),
+        ]
+        if isinstance(item, dict) and item.get("claimId") in claim_by_id
+    }
+    for claim_id in sorted(
+        set(claim_by_id) - covered_claim_ids - explicitly_accounted_claim_ids
+    ):
         claim = claim_by_id[claim_id]
         unresolved_inputs.append(
             (
                 {
+                    "claimId": claim_id,
                     "description": f"{claim_id}：对象规划未覆盖的原子主张",
                     "reason": "模型未将该主张分配给任何对象计划，禁止静默丢失",
                     "evidence": sorted(

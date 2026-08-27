@@ -112,6 +112,8 @@ def build_object_planning_request(
      后改写为 D3.3 策略。
    - 初次状态判定与后续复播/重评迁移的触发时机、更新生命周期不同，必须形成两个 D3.3 规则；
      不得因共同使用同一状态值域而合并。
+   - 销售通话中基于客户异议、授权选择或沟通反馈的条件分支属于 D3.3 DECISION_RULE；D1.3
+     BUSINESS_PROCESS 只承载投保、核保、理赔、服务交付等业务办理流程，不承载会话应对分支。
    - 只有“客户原话参考”而没有来源支持的根本顾虑、处理要素或标准回应时，不足以形成 D4.2
      正式异议对象；应保留为未决素材，禁止模型补造心理原因和化解动作。
    - 资料只说“按照范本/标准话术回应”但没有提供范本文字时，不得形成 D4.1 STANDARD_SCRIPT；
@@ -146,11 +148,13 @@ def build_object_planning_request(
     "sourceClaimIds": ["CL1"]
   }}],
   "weakSignals": [{{
+    "claimId":"CL9",
     "module":"D2.4",
     "reason":"CL9：仅为待验证信号的具体原因",
     "evidence":["真实anchorId"]
   }}],
   "unresolvedItems": [{{
+    "claimId":"CL10",
     "description":"CL10：无法确定对象边界",
     "reason":"具体原因",
     "evidence":["真实anchorId"],
@@ -174,11 +178,17 @@ def build_content_realization_request(
     batch_label: str,
 ) -> ModelRequest:
     claim_by_id = {claim.claim_id: claim for claim in claims}
+    compact_claims: dict[str, dict[str, object]] = {}
+    for claim in claims:
+        compact = claim.model_dump(by_alias=True)
+        for evidence in compact["evidence"]:
+            evidence.pop("sourceText", None)
+        compact_claims[claim.claim_id] = compact
     object_tasks = [
         {
             "plan": plan.model_dump(by_alias=True),
             "verifiedClaims": [
-                claim_by_id[claim_id].model_dump(by_alias=True)
+                compact_claims[claim_id]
                 for claim_id in plan.source_claim_ids
                 if claim_id in claim_by_id
             ],
