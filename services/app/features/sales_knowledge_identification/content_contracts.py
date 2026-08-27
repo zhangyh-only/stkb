@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 CONTRACTS_PATH = (
-    Path(__file__).with_name("rules") / "object-content-contracts-v0.4.toml"
+    Path(__file__).with_name("rules") / "object-content-contracts-v0.5.toml"
 )
 
 
@@ -17,6 +17,7 @@ class ObjectContentContract:
     object_types: tuple[str, ...]
     required_fields: tuple[str, ...]
     required_fields_by_type: dict[str, tuple[str, ...]]
+    item_fields_by_type: dict[str, tuple[str, ...]]
     allow_empty_fields: tuple[str, ...]
     minimum_content_chars: int
     granularity: str
@@ -39,6 +40,10 @@ def _load_contracts() -> tuple[str, tuple[ObjectContentContract, ...]]:
                 for object_type, fields in item.get(
                     "required_fields_by_type", {}
                 ).items()
+            },
+            item_fields_by_type={
+                object_type: tuple(fields)
+                for object_type, fields in item.get("item_fields_by_type", {}).items()
             },
             allow_empty_fields=tuple(item.get("allow_empty_fields", [])),
             minimum_content_chars=item["minimum_content_chars"],
@@ -82,6 +87,25 @@ def validate_candidate_content(module: str, object_type: str, content: dict[str,
     ]
     if missing_fields:
         errors.append("missing required content fields: " + ", ".join(missing_fields))
+    item_fields = contract.item_fields_by_type.get(object_type)
+    if item_fields:
+        collection_field = next(
+            (field for field in required_fields if isinstance(content.get(field), list)),
+            None,
+        )
+        items = content.get(collection_field, []) if collection_field else []
+        for index, item in enumerate(items, start=1):
+            if not isinstance(item, dict):
+                errors.append(f"content item {index} must be an object")
+                continue
+            missing_item_fields = [
+                field for field in item_fields if item.get(field) in (None, "", [], {})
+            ]
+            if missing_item_fields:
+                errors.append(
+                    f"content item {index} missing fields: "
+                    + ", ".join(missing_item_fields)
+                )
     serialized = json.dumps(content, ensure_ascii=False, sort_keys=True)
     if len(serialized) < contract.minimum_content_chars:
         errors.append(
@@ -111,6 +135,17 @@ def render_content_contracts_for_prompt() -> str:
                             )
                         ]
                         if item.required_fields_by_type
+                        else []
+                    ),
+                    *(
+                        [
+                            "- 分对象类型条目必填："
+                            + "；".join(
+                                f"{object_type}=[{', '.join(fields)}]"
+                                for object_type, fields in item.item_fields_by_type.items()
+                            )
+                        ]
+                        if item.item_fields_by_type
                         else []
                     ),
                     (

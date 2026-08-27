@@ -102,6 +102,9 @@ def identification_catalog() -> dict[str, object]:
                     "requiredFieldsByType": CONTENT_CONTRACT_BY_MODULE[
                         module.code
                     ].required_fields_by_type,
+                    "itemFieldsByType": CONTENT_CONTRACT_BY_MODULE[
+                        module.code
+                    ].item_fields_by_type,
                     "allowEmptyFields": CONTENT_CONTRACT_BY_MODULE[
                         module.code
                     ].allow_empty_fields,
