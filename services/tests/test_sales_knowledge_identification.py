@@ -674,6 +674,22 @@ def test_validate_atomic_claims_rejects_non_verbatim_quote() -> None:
     assert rejected[0].reasons == ["exact quote not found in DP-QUOTE#page-1"]
 
 
+def test_claim_validation_recovers_literal_quote_with_markdown_emphasis() -> None:
+    package = _package(
+        "DP-MARKDOWN",
+        "# 示例\n\n- **A 类（已报价）**：接通电话并完成报价。",
+    )
+    accepted, rejected = validate_atomic_claims(
+        [_claim("DP-MARKDOWN#page-1", "A 类（已报价）：接通电话并完成报价")],
+        package,
+    )
+
+    assert rejected == []
+    assert accepted[0].evidence[0].exact_quote == (
+        "A 类（已报价）**：接通电话并完成报价"
+    )
+
+
 def test_claim_validation_supports_anchor_before_its_markdown_heading() -> None:
     package = _package(
         "DP-BEFORE",

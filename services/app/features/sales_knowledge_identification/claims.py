@@ -84,7 +84,10 @@ def validate_atomic_claims(
                     f"unknown evidence selector for {evidence.anchor_id}: {evidence.selector}"
                 )
                 continue
-            if evidence.exact_quote not in source_text:
+            resolved_quote = _resolve_markdown_formatted_quote(
+                source_text, evidence.exact_quote
+            )
+            if resolved_quote is None:
                 if evidence.selector is not None:
                     resolved_evidence.append(
                         evidence.model_copy(
@@ -101,7 +104,12 @@ def validate_atomic_claims(
                 )
                 continue
             resolved_evidence.append(
-                evidence.model_copy(update={"source_text": source_text})
+                evidence.model_copy(
+                    update={
+                        "exact_quote": resolved_quote,
+                        "source_text": source_text,
+                    }
+                )
             )
 
         if reasons:
@@ -122,6 +130,28 @@ def validate_atomic_claims(
             )
         )
     return accepted, rejected
+
+
+def _resolve_markdown_formatted_quote(source_text: str, quote: str) -> str | None:
+    """Recover a literal source span when the model omits inline Markdown marks."""
+    if quote in source_text:
+        return quote
+    ignored = {"*", "`"}
+    normalized_chars: list[str] = []
+    source_indexes: list[int] = []
+    for index, char in enumerate(source_text):
+        if char in ignored:
+            continue
+        normalized_chars.append(char)
+        source_indexes.append(index)
+    normalized_source = "".join(normalized_chars)
+    normalized_quote = "".join(char for char in quote if char not in ignored)
+    offset = normalized_source.find(normalized_quote)
+    if offset < 0 or not normalized_quote:
+        return None
+    start = source_indexes[offset]
+    end = source_indexes[offset + len(normalized_quote) - 1] + 1
+    return source_text[start:end]
 
 
 def supplement_structured_table_claims(
