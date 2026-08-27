@@ -855,7 +855,11 @@ class SalesKnowledgeIdentificationService:
                     if claim.claim_kind == "script"
                     for evidence in claim.evidence
                 }
-                if candidate.content.get("script") not in verified_script_texts:
+                script = candidate.content.get("script")
+                if (
+                    not isinstance(script, str)
+                    or script not in verified_script_texts
+                ):
                     reasons.append(
                         "standard script must equal verified source text from a script claim"
                     )

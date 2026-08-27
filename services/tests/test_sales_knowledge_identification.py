@@ -935,6 +935,37 @@ def test_json_encoded_verbatim_macro_is_normalized_to_verified_source() -> None:
     assert resolved == {"script": "来自资料的完整标准话术。"}
 
 
+def test_nested_script_object_is_rejected_without_crashing_source_gate() -> None:
+    claim = _claim(
+        "DP-SCRIPT-GATE#page-1",
+        "来自资料的完整标准话术。",
+        kind="script",
+    )
+    candidate = _candidate("D4.1", "STANDARD_SCRIPT", ["CL1"])
+    candidate["content"] = {
+        "script": {"fullText": "未解析的模型结构"},
+    }
+
+    result = SalesKnowledgeIdentificationService(
+        gateway=TwoStageGateway(
+            [claim],
+            {
+                "candidates": [candidate],
+                "weakSignals": [],
+                "unresolvedItems": [],
+            },
+        )
+    ).identify(
+        _package("DP-SCRIPT-GATE", "# 示例\n\n来自资料的完整标准话术。")
+    )
+
+    assert result.candidates == []
+    assert any(
+        "standard script must equal verified source text" in reason
+        for reason in result.rejected_candidates[0].reasons
+    )
+
+
 def test_validate_atomic_claims_rejects_non_verbatim_quote() -> None:
     package = _package("DP-QUOTE", "# 示例\n\n药享保提供在线问诊。")
     accepted, rejected = validate_atomic_claims(
