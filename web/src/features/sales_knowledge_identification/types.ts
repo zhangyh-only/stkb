@@ -299,11 +299,20 @@ export type FormalKnowledgeObject = {
   module: string
   objectType: string
   identityKey: string
+  sourceLineageKeys: string[]
   contentFingerprint: string
   content: Record<string, unknown>
   entityReferences: KnowledgeObjectEntityReference[]
   evidence: string[]
   sourceCandidateIds: string[]
+  sourceTraces: Array<{
+    candidateId: string
+    sourceClaimIds: string[]
+    claimUsage: CandidateKnowledgeObject['claimUsage']
+    contentLeafCount: number
+    attributedContentLeafCount: number
+    unattributedContentPaths: string[]
+  }>
   filePath: string
   fileSha256: string
 }
@@ -326,6 +335,7 @@ export type KnowledgeFormationResult = {
   createdCount: number
   updatedCount: number
   reusedCount: number
+  supersededCount: number
   formalKnowledgeFiles: number
 }
 

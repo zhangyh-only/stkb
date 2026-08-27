@@ -77,6 +77,60 @@ CREATE TABLE IF NOT EXISTS knowledge_object_sources (
     PRIMARY KEY (knowledge_object_id, document_package_id, candidate_id)
 );
 
+ALTER TABLE knowledge_object_sources
+    ADD COLUMN IF NOT EXISTS source_occurrence_id BIGSERIAL,
+    ADD COLUMN IF NOT EXISTS run_id UUID,
+    ADD COLUMN IF NOT EXISTS source_claim_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+    ADD COLUMN IF NOT EXISTS claim_usage JSONB NOT NULL DEFAULT '[]'::jsonb,
+    ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM pg_constraint constraint_record
+        JOIN unnest(constraint_record.conkey) AS key(attnum) ON TRUE
+        JOIN pg_attribute attribute_record
+          ON attribute_record.attrelid = constraint_record.conrelid
+         AND attribute_record.attnum = key.attnum
+        WHERE constraint_record.conrelid = 'knowledge_object_sources'::regclass
+          AND constraint_record.contype = 'p'
+          AND attribute_record.attname <> 'source_occurrence_id'
+    ) THEN
+        ALTER TABLE knowledge_object_sources
+            DROP CONSTRAINT knowledge_object_sources_pkey;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'knowledge_object_sources'::regclass AND contype = 'p'
+    ) THEN
+        ALTER TABLE knowledge_object_sources
+            ADD CONSTRAINT knowledge_object_sources_pkey
+            PRIMARY KEY (source_occurrence_id);
+    END IF;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_knowledge_object_source_run
+    ON knowledge_object_sources (
+        knowledge_object_id, document_package_id, run_id, candidate_id
+    )
+    WHERE run_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_object_sources_active_package
+    ON knowledge_object_sources (document_package_id, active);
+
+CREATE TABLE IF NOT EXISTS knowledge_object_lineages (
+    workspace_id TEXT NOT NULL,
+    source_lineage_key TEXT NOT NULL,
+    knowledge_object_id TEXT NOT NULL REFERENCES knowledge_objects(knowledge_object_id),
+    document_package_id TEXT NOT NULL REFERENCES document_packages(document_package_id),
+    module TEXT NOT NULL,
+    object_type TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (workspace_id, source_lineage_key)
+);
+
 CREATE TABLE IF NOT EXISTS knowledge_build_results (
     build_id UUID PRIMARY KEY,
     run_id UUID NOT NULL UNIQUE,

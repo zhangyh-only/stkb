@@ -234,6 +234,24 @@ class PsycopgIdentificationRepository:
             for row in rows
         }
 
+    def get_existing_lineage_object_ids(
+        self, workspace_id: str, lineage_keys: set[str]
+    ) -> dict[str, str]:
+        if not lineage_keys:
+            return {}
+        with psycopg.connect(self.postgres_dsn, row_factory=dict_row) as connection:
+            rows = connection.execute(
+                """
+                SELECT source_lineage_key, knowledge_object_id
+                FROM knowledge_object_lineages
+                WHERE workspace_id = %s AND source_lineage_key = ANY(%s)
+                """,
+                (workspace_id, list(lineage_keys)),
+            ).fetchall()
+        return {
+            row["source_lineage_key"]: row["knowledge_object_id"] for row in rows
+        }
+
     def save_knowledge_formation(
         self,
         *,
@@ -241,6 +259,28 @@ class PsycopgIdentificationRepository:
         formation: KnowledgeFormationResult,
     ) -> None:
         with psycopg.connect(self.postgres_dsn) as connection:
+            current_object_ids = {
+                item.knowledge_object_id for item in formation.knowledge_objects
+            }
+            previous_rows = connection.execute(
+                """
+                SELECT DISTINCT knowledge_object_id
+                FROM knowledge_object_sources
+                WHERE document_package_id = %s AND active = TRUE
+                """,
+                (formation.document_package_id,),
+            ).fetchall()
+            previous_object_ids = {row[0] for row in previous_rows}
+            superseded_object_ids = previous_object_ids - current_object_ids
+            formation.superseded_count = len(superseded_object_ids)
+            connection.execute(
+                """
+                UPDATE knowledge_object_sources
+                SET active = FALSE
+                WHERE document_package_id = %s AND active = TRUE
+                """,
+                (formation.document_package_id,),
+            )
             for entity in formation.entities:
                 connection.execute(
                     """
@@ -283,6 +323,7 @@ class PsycopgIdentificationRepository:
                         evidence = EXCLUDED.evidence,
                         file_path = EXCLUDED.file_path,
                         file_sha256 = EXCLUDED.file_sha256,
+                        status = 'active',
                         updated_at = NOW()
                     """,
                     (
@@ -307,22 +348,76 @@ class PsycopgIdentificationRepository:
                         item.file_sha256,
                     ),
                 )
-                for candidate_id in item.source_candidate_ids:
+                for trace in item.source_traces:
                     connection.execute(
                         """
                         INSERT INTO knowledge_object_sources (
-                            knowledge_object_id, document_package_id, candidate_id, evidence
-                        ) VALUES (%s, %s, %s, %s)
-                        ON CONFLICT (knowledge_object_id, document_package_id, candidate_id)
-                        DO UPDATE SET evidence = EXCLUDED.evidence
+                            knowledge_object_id, document_package_id, run_id, candidate_id,
+                            evidence, source_claim_ids, claim_usage, active
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE)
+                        ON CONFLICT (
+                            knowledge_object_id, document_package_id, run_id, candidate_id
+                        ) WHERE run_id IS NOT NULL
+                        DO UPDATE SET
+                            evidence = EXCLUDED.evidence,
+                            source_claim_ids = EXCLUDED.source_claim_ids,
+                            claim_usage = EXCLUDED.claim_usage,
+                            active = TRUE
                         """,
                         (
                             item.knowledge_object_id,
                             formation.document_package_id,
-                            candidate_id,
+                            formation.run_id,
+                            trace.candidate_id,
                             Jsonb(item.evidence),
+                            Jsonb(trace.source_claim_ids),
+                            Jsonb(
+                                [
+                                    usage.model_dump(mode="json", by_alias=True)
+                                    for usage in trace.claim_usage
+                                ]
+                            ),
                         ),
                     )
+                for lineage_key in item.source_lineage_keys:
+                    connection.execute(
+                        """
+                        INSERT INTO knowledge_object_lineages (
+                            workspace_id, source_lineage_key, knowledge_object_id,
+                            document_package_id, module, object_type
+                        ) VALUES (%s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (workspace_id, source_lineage_key) DO UPDATE SET
+                            knowledge_object_id = EXCLUDED.knowledge_object_id,
+                            document_package_id = EXCLUDED.document_package_id,
+                            module = EXCLUDED.module,
+                            object_type = EXCLUDED.object_type,
+                            updated_at = NOW()
+                        """,
+                        (
+                            workspace_id,
+                            lineage_key,
+                            item.knowledge_object_id,
+                            formation.document_package_id,
+                            item.module,
+                            item.object_type,
+                        ),
+                    )
+            if superseded_object_ids:
+                connection.execute(
+                    """
+                    UPDATE knowledge_objects object_record
+                    SET status = 'superseded', updated_at = NOW()
+                    WHERE object_record.knowledge_object_id = ANY(%s)
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM knowledge_object_sources source_record
+                          WHERE source_record.knowledge_object_id =
+                                object_record.knowledge_object_id
+                            AND source_record.active = TRUE
+                      )
+                    """,
+                    (list(superseded_object_ids),),
+                )
             serialized = formation.model_dump(mode="json", by_alias=True)
             connection.execute(
                 """

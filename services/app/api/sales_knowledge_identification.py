@@ -284,12 +284,21 @@ def form_knowledge_objects(
     if identification.status != "completed":
         raise HTTPException(status_code=409, detail="identification run is not completed")
     entity_ids = service.candidate_entity_ids(package.workspace_id, identification.candidates)
-    object_ids = service.candidate_object_ids(package.workspace_id, identification.candidates)
+    lineage_keys = service.candidate_lineage_keys(identification.candidates)
+    existing_lineages = repository.get_existing_lineage_object_ids(
+        package.workspace_id, lineage_keys
+    )
+    object_ids = service.candidate_object_ids(
+        package.workspace_id,
+        identification.candidates,
+        existing_lineages,
+    )
     formation = service.form(
         document_package=package,
         identification=identification,
         existing_entities=repository.get_existing_entity_ids(entity_ids),
         existing_objects=repository.get_existing_object_states(object_ids),
+        existing_lineages=existing_lineages,
     )
     repository.save_knowledge_formation(
         workspace_id=package.workspace_id,

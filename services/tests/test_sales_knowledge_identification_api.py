@@ -68,6 +68,11 @@ class InMemoryRepository:
     def get_existing_object_states(self, object_ids: set[str]) -> dict[str, object]:
         return {}
 
+    def get_existing_lineage_object_ids(
+        self, workspace_id: str, lineage_keys: set[str]
+    ) -> dict[str, str]:
+        return {}
+
     def save_knowledge_formation(self, *, workspace_id: str, formation) -> None:  # type: ignore[no-untyped-def]
         self.formations[formation.run_id] = formation.model_dump(mode="json", by_alias=True)
 

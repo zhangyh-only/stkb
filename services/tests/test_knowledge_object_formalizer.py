@@ -139,3 +139,44 @@ def test_formalizer_reuses_unchanged_object_and_revises_changed_content(
     assert reused.entities[0].action == "reused"
     assert updated.knowledge_objects[0].action == "updated"
     assert updated.knowledge_objects[0].revision == 2
+
+
+def test_formalizer_resolves_model_wording_drift_through_source_lineage(
+    tmp_path: Path,
+) -> None:
+    service = KnowledgeObjectFormationService(project_root=tmp_path)
+    first_identification = _identification()
+    first = service.form(
+        document_package=_package(),
+        identification=first_identification,
+        existing_entities=set(),
+        existing_objects={},
+    )
+    first_object = first.knowledge_objects[0]
+    changed_identity = _identification().model_copy(deep=True)
+    changed_identity.candidates[0].identity_hints["factTheme"] = "线上医疗服务"
+    lineage_key = next(
+        iter(service.candidate_lineage_keys(changed_identity.candidates))
+    )
+
+    resolved_ids = service.candidate_object_ids(
+        _package().workspace_id,
+        changed_identity.candidates,
+        {lineage_key: first_object.knowledge_object_id},
+    )
+    second = service.form(
+        document_package=_package(),
+        identification=changed_identity,
+        existing_entities=set(),
+        existing_objects={
+            first_object.knowledge_object_id: ExistingKnowledgeObjectState(
+                revision=first_object.revision,
+                content_fingerprint=first_object.content_fingerprint,
+            )
+        },
+        existing_lineages={lineage_key: first_object.knowledge_object_id},
+    )
+
+    assert resolved_ids == {first_object.knowledge_object_id}
+    assert second.knowledge_objects[0].knowledge_object_id == first_object.knowledge_object_id
+    assert second.knowledge_objects[0].action == "reused"

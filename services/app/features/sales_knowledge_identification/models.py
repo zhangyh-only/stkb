@@ -362,6 +362,15 @@ class KnowledgeObjectEntityReference(ApiModel):
     evidence: list[str]
 
 
+class KnowledgeObjectSourceTrace(ApiModel):
+    candidate_id: str
+    source_claim_ids: list[str]
+    claim_usage: list[ContentClaimUsage]
+    content_leaf_count: int
+    attributed_content_leaf_count: int
+    unattributed_content_paths: list[str]
+
+
 class FormalKnowledgeObject(ApiModel):
     knowledge_object_id: str
     revision: int
@@ -371,11 +380,13 @@ class FormalKnowledgeObject(ApiModel):
     module: str
     object_type: str
     identity_key: str
+    source_lineage_keys: list[str]
     content_fingerprint: str
     content: dict[str, Any]
     entity_references: list[KnowledgeObjectEntityReference]
     evidence: list[str]
     source_candidate_ids: list[str]
+    source_traces: list[KnowledgeObjectSourceTrace]
     file_path: str
     file_sha256: str
 
@@ -398,4 +409,5 @@ class KnowledgeFormationResult(ApiModel):
     created_count: int
     updated_count: int
     reused_count: int
+    superseded_count: int = 0
     formal_knowledge_files: int
