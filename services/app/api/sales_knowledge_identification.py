@@ -35,6 +35,10 @@ from app.features.sales_knowledge_identification.models import (
     SourceMaterial,
     to_camel,
 )
+from app.features.sales_knowledge_identification.quality import (
+    evaluate_against_gold,
+    find_gold_path,
+)
 from app.features.sales_knowledge_identification.repository import (
     IdentificationRecordNotFound,
     PsycopgIdentificationRepository,
@@ -88,6 +92,9 @@ def identification_catalog() -> dict[str, object]:
                 "consumers": module.consumers,
                 "contentContract": {
                     "requiredFields": CONTENT_CONTRACT_BY_MODULE[module.code].required_fields,
+                    "allowEmptyFields": CONTENT_CONTRACT_BY_MODULE[
+                        module.code
+                    ].allow_empty_fields,
                     "minimumContentChars": CONTENT_CONTRACT_BY_MODULE[
                         module.code
                     ].minimum_content_chars,
@@ -214,6 +221,11 @@ def run_identification(
         raise HTTPException(
             status_code=409, detail="DocumentPackage is unavailable"
         ) from error
+    gold_path = find_gold_path(settings.workspace_root, package.document_package_id)
+    if gold_path is not None and result.status == "completed":
+        result = result.model_copy(
+            update={"quality_report": evaluate_against_gold(result, gold_path)}
+        )
     serialized = result.model_dump(mode="json", by_alias=True)
     repository.save_run(serialized)
     return result

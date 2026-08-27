@@ -1,7 +1,12 @@
 export type ProcessingMethod = 'agent_assisted' | 'capability'
 export type PackageStatus = 'available' | 'unavailable'
 export type CoverageStatus = 'hit' | 'weak_signal' | 'not_found' | 'unresolved'
-export type ModelCallPurpose = 'identification' | 'output_limit_retry' | 'repair'
+export type ModelCallPurpose =
+  | 'identification'
+  | 'claim_discovery'
+  | 'object_formation'
+  | 'output_limit_retry'
+  | 'repair'
 export type ModelCallStatus = 'completed' | 'failed'
 export type ProcessingStageStatus = 'completed' | 'failed'
 
@@ -51,6 +56,29 @@ export type ProposedRelation = {
   evidence: string[]
 }
 
+export type ClaimEvidence = {
+  anchorId: string
+  exactQuote: string
+  selector: string | null
+  sourceText: string
+}
+
+export type AtomicClaim = {
+  claimId: string
+  claimKind: string
+  statement: string
+  subject: string
+  attributes: Record<string, unknown>
+  moduleHints: string[]
+  evidence: ClaimEvidence[]
+}
+
+export type RejectedAtomicClaim = {
+  claimId: string
+  reasons: string[]
+  rawClaim: Record<string, unknown>
+}
+
 export type CandidateKnowledgeObject = {
   candidateId: string
   title: string
@@ -60,6 +88,7 @@ export type CandidateKnowledgeObject = {
   objectBoundary: string
   classificationBasis: string
   identityHints: Record<string, unknown>
+  sourceClaimIds: string[]
   content: Record<string, unknown>
   entityMentions: EntityMention[]
   evidence: string[]
@@ -74,7 +103,7 @@ export type RejectedCandidate = {
 
 export type CandidateNormalization = {
   candidateId: string
-  field: 'domain'
+  field: 'domain' | 'entity_mentions'
   originalValue: string
   normalizedValue: string
   reason: string
@@ -142,6 +171,34 @@ export type ModelConfigurationSnapshot = {
   fingerprint: string
 }
 
+export type GoldGroupEvaluation = {
+  key: string
+  expectedCount: number
+  predictedCount: number
+  matchedCount: number
+  status: 'met' | 'missed' | 'under_split_or_recall' | 'over_split'
+  predictedCandidateIds: string[]
+  requiredItemCount: number | null
+  predictedItemCount: number | null
+}
+
+export type IdentificationQualityReport = {
+  goldVersion: string
+  goldStatus: string
+  overallStatus: 'pass' | 'fail' | 'review'
+  expectedObjectCount: number
+  matchedExpectedCount: number
+  objectRecallProxy: number
+  groupsMet: number
+  groupCount: number
+  summaryOnlyCount: number
+  evidenceBackedRate: number
+  claimConsumptionRate: number
+  medianContentChars: number
+  groups: GoldGroupEvaluation[]
+  findings: string[]
+}
+
 export type IdentificationResult = {
   runId: string
   documentPackageId: string
@@ -158,6 +215,8 @@ export type IdentificationResult = {
   rawModelOutput: string
   modelCalls: ModelCallTrace[]
   processingStages: ProcessingStage[]
+  atomicClaims: AtomicClaim[]
+  rejectedAtomicClaims: RejectedAtomicClaim[]
   candidates: CandidateKnowledgeObject[]
   rejectedCandidates: RejectedCandidate[]
   rejectedAuxiliaryItems: RejectedAuxiliaryItem[]
@@ -169,6 +228,7 @@ export type IdentificationResult = {
   promptTokens: number
   completionTokens: number
   modelConfiguration: ModelConfigurationSnapshot | null
+  qualityReport: IdentificationQualityReport | null
   storageImpact: StorageImpact
 }
 
@@ -239,6 +299,7 @@ export type KnowledgeModule = {
   consumers: string[]
   contentContract: {
     requiredFields: string[]
+    allowEmptyFields: string[]
     minimumContentChars: number
     granularity: string
     inclusion: string
