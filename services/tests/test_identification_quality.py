@@ -24,6 +24,29 @@ def test_find_gold_path_falls_back_to_reviewable_samples(tmp_path) -> None:
     assert found == gold_path
 
 
+def test_find_gold_path_prefers_reviewable_sample_over_stale_workspace_copy(
+    tmp_path,
+) -> None:
+    workspace_dir = tmp_path / "workspace/evaluations/DP-SAMPLE"
+    workspace_dir.mkdir(parents=True)
+    workspace_gold = workspace_dir / "gold-v9.json"
+    workspace_gold.write_text(
+        '{"expectedObjectGroups": [{"key": "stale"}]}', encoding="utf-8"
+    )
+    sample_dir = tmp_path / "samples/DP-SAMPLE"
+    sample_dir.mkdir(parents=True)
+    sample_gold = sample_dir / "gold-v0.2.json"
+    sample_gold.write_text(
+        '{"expectedObjectGroups": [{"key": "reviewable"}]}', encoding="utf-8"
+    )
+
+    found = find_gold_path(
+        tmp_path / "workspace", "DP-SAMPLE", tmp_path / "samples"
+    )
+
+    assert found == sample_gold
+
+
 def test_quality_report_detects_group_recall_and_over_split(tmp_path) -> None:
     gold_path = tmp_path / "gold-v0.1.json"
     gold_path.write_text(
@@ -232,6 +255,105 @@ def test_quality_gold_can_require_a_field_while_allowing_explicit_empty_value(
 
     assert report.overall_status == "pass"
     assert report.groups[0].status == "met"
+
+
+def test_quality_gold_accepts_reviewed_object_count_range(tmp_path) -> None:
+    gold_path = tmp_path / "gold-v0.1.json"
+    gold_path.write_text(
+        json.dumps(
+            {
+                "status": "approved",
+                "expectedObjectGroups": [
+                    {
+                        "key": "compliance",
+                        "expectedCount": 1,
+                        "minimumExpectedCount": 1,
+                        "maximumExpectedCount": 2,
+                        "module": "D3.4",
+                        "objectTypes": ["COMPLIANCE_RULE"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = IdentificationResult.model_validate(
+        {
+            "documentPackageId": "DP-QUALITY",
+            "provider": "test",
+            "model": "test",
+            "promptVersion": "test",
+            "schemaVersion": "test",
+            "catalogVersion": "test",
+            "catalogFingerprint": "test",
+            "rawModelOutput": "{}",
+            "modelCalls": [],
+            "processingStages": [],
+            "atomicClaims": [_claim("CL1", "A1"), _claim("CL2", "A2")],
+            "candidates": [
+                _candidate("C1", "D3.4", "COMPLIANCE_RULE", ["CL1"], ["A1"]),
+                _candidate("C2", "D3.4", "COMPLIANCE_RULE", ["CL2"], ["A2"]),
+            ],
+            "rejectedCandidates": [],
+            "weakSignals": [],
+            "unresolvedItems": [],
+            "coverageByModule": {},
+            "callCount": 0,
+            "promptTokens": 0,
+            "completionTokens": 0,
+        }
+    )
+
+    report = evaluate_against_gold(result, gold_path)
+
+    assert report.groups[0].status == "met"
+    assert report.groups[0].minimum_expected_count == 1
+    assert report.groups[0].maximum_expected_count == 2
+
+
+def test_legacy_quality_report_defaults_new_trace_metrics() -> None:
+    result = IdentificationResult.model_validate(
+        {
+            "documentPackageId": "DP-LEGACY",
+            "provider": "test",
+            "model": "test",
+            "promptVersion": "old",
+            "schemaVersion": "old",
+            "catalogVersion": "old",
+            "catalogFingerprint": "old",
+            "rawModelOutput": "{}",
+            "modelCalls": [],
+            "processingStages": [],
+            "candidates": [],
+            "rejectedCandidates": [],
+            "weakSignals": [],
+            "unresolvedItems": [],
+            "coverageByModule": {},
+            "callCount": 0,
+            "promptTokens": 0,
+            "completionTokens": 0,
+            "qualityReport": {
+                "goldVersion": "gold-v0.json",
+                "goldStatus": "proxy_draft",
+                "overallStatus": "fail",
+                "expectedObjectCount": 0,
+                "matchedExpectedCount": 0,
+                "objectRecallProxy": 0,
+                "groupsMet": 0,
+                "groupCount": 0,
+                "summaryOnlyCount": 0,
+                "evidenceBackedRate": 0,
+                "claimConsumptionRate": 0,
+                "medianContentChars": 0,
+                "groups": [],
+                "findings": [],
+            },
+        }
+    )
+
+    assert result.quality_report is not None
+    assert result.quality_report.claim_accounting_rate == 0
+    assert result.quality_report.content_attribution_rate == 0
 
 
 def _claim(claim_id: str, anchor: str) -> dict[str, object]:

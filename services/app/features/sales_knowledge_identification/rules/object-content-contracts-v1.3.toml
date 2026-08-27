@@ -1,4 +1,4 @@
-version = "object-content-contracts-v1.2"
+version = "object-content-contracts-v1.3"
 
 [[contracts]]
 module = "D1.1"
@@ -138,7 +138,7 @@ negative_example = "强调产品性价比。"
 module = "D3.4"
 object_types = ["COMPLIANCE_RULE", "PROHIBITED_EXPRESSION", "RISK_PATTERN", "COMPLIANT_REWRITE_GUIDE"]
 required_fields = ["ruleName", "prohibitedOrRequiredBehavior", "legalOrPolicyBasis", "applicability", "compliantAction"]
-minimum_content_chars = 240
+minimum_content_chars = 180
 granularity = "同一合规检查点、依据、适用范围和正确做法形成对象；运行行为限制与监管处罚因消费方不同应拆分。"
 inclusion = "有监管/制度依据的禁止、披露义务、行为要求、风险模式、处罚后果及合规处理，即使内容带有执行时机或动作。"
 exclusion = "无依据经验、一次投诉结果、只写禁止但没有适用范围或正确做法。"
@@ -175,7 +175,7 @@ object_types = ["QA_PAIR", "TERM", "STANDARD_EXPLANATION"]
 required_fields = ["items", "factReferences", "applicability"]
 required_fields_by_type = { QA_PAIR = ["items", "factReferences", "applicability"], TERM = ["terms", "applicability"], STANDARD_EXPLANATION = ["subject", "standardExplanation", "factReferences", "applicability"] }
 item_fields_by_type = { QA_PAIR = ["question", "answer", "claimRef"], TERM = ["termText", "standardExplanation", "sourceStance", "usageBoundary"] }
-minimum_content_chars = 150
+minimum_content_chars = 120
 granularity = "同一主题和事实依据下可一起更新、检索的一组问答或术语形成对象；跨主题应拆分。"
 inclusion = "具体问题、销售术语或谚语，以及对应标准答案/解释、事实引用和适用范围。"
 exclusion = "只列问题主题摘要、答案无事实依据、跨多个独立主题的大杂烩。"

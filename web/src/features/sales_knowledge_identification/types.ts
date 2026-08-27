@@ -134,7 +134,7 @@ export type RejectedCandidate = {
 
 export type CandidateNormalization = {
   candidateId: string
-  field: 'domain' | 'entity_mentions' | 'relations' | 'content.expressions' | 'content.items' | 'content.resolutionElements' | 'content.attributionPruning'
+  field: 'domain' | 'entity_mentions' | 'relations' | 'content.expressions' | 'content.items' | 'content.resolutionElements' | 'content.attributionPruning' | 'claimUsage'
   originalValue: unknown
   normalizedValue: unknown
   reason: string
@@ -207,6 +207,8 @@ export type ModelConfigurationSnapshot = {
 export type GoldGroupEvaluation = {
   key: string
   expectedCount: number
+  minimumExpectedCount: number
+  maximumExpectedCount: number | null
   predictedCount: number
   matchedCount: number
   status: 'met' | 'missed' | 'under_split_or_recall' | 'over_split' | 'contract_failed'

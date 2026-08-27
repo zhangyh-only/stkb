@@ -106,7 +106,9 @@ def find_gold_path(
         sample_candidates = sorted(
             (samples_root / document_package_id).glob("gold-v*.json")
         )
-    for candidates in (workspace_candidates, sample_candidates):
+    # Committed samples are the reviewable regression truth.  A stale local
+    # workspace draft must not silently shadow the project baseline.
+    for candidates in (sample_candidates, workspace_candidates):
         for candidate in reversed(candidates):
             try:
                 payload = json.loads(candidate.read_text(encoding="utf-8"))
@@ -140,6 +142,13 @@ def _evaluate_group(
         sorted(expected_evidence - predicted_evidence) if require_all_evidence else []
     )
     expected_count = int(group["expectedCount"])
+    minimum_expected_count = int(group.get("minimumExpectedCount", expected_count))
+    raw_maximum_expected_count = group.get("maximumExpectedCount", expected_count)
+    maximum_expected_count = (
+        int(raw_maximum_expected_count)
+        if raw_maximum_expected_count is not None
+        else None
+    )
     required_item_count = group.get("requiredItemCount")
     required_item_field = group.get("requiredItemField", "items")
     required_item_fields = group.get("requiredItemFields", [])
@@ -184,7 +193,11 @@ def _evaluate_group(
             if isinstance(candidate.content.get(required_item_field, []), list)
         )
     if (
-        predicted_count == expected_count
+        minimum_expected_count <= predicted_count
+        and (
+            maximum_expected_count is None
+            or predicted_count <= maximum_expected_count
+        )
         and (required_item_count is None or predicted_item_count == required_item_count)
         and not missing_content_fields
         and not missing_item_fields
@@ -194,7 +207,10 @@ def _evaluate_group(
         status = "met"
     elif predicted_count == 0:
         status = "missed"
-    elif predicted_count > expected_count:
+    elif (
+        maximum_expected_count is not None
+        and predicted_count > maximum_expected_count
+    ):
         status = "over_split"
     elif (
         missing_content_fields
@@ -203,13 +219,17 @@ def _evaluate_group(
         or missing_expected_evidence
     ):
         status = "contract_failed"
-    else:
+    elif predicted_count < minimum_expected_count:
         status = "under_split_or_recall"
+    else:
+        status = "contract_failed"
     return GoldGroupEvaluation(
         key=group["key"],
         expected_count=expected_count,
+        minimum_expected_count=minimum_expected_count,
+        maximum_expected_count=maximum_expected_count,
         predicted_count=predicted_count,
-        matched_count=min(expected_count, predicted_count),
+        matched_count=min(minimum_expected_count, predicted_count),
         status=status,
         predicted_candidate_ids=[
             candidate.candidate_id for candidate in matched_candidates

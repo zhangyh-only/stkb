@@ -7,7 +7,7 @@ from app.features.sales_knowledge_identification.content_contracts import (
 
 
 def test_content_contracts_cover_every_module_and_object_type() -> None:
-    assert CONTENT_CONTRACT_VERSION == "object-content-contracts-v1.2"
+    assert CONTENT_CONTRACT_VERSION == "object-content-contracts-v1.3"
     assert set(CONTENT_CONTRACT_BY_MODULE) == {
         module.code for module in KNOWLEDGE_MODULES
     }

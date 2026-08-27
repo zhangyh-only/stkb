@@ -6,8 +6,10 @@
     {
       "key": "compliance-rule-themes",
       "expectedCount": 13,
+      "minimumExpectedCount": 13,
+      "maximumExpectedCount": null,
       "module": "D3.4",
-      "objectTypes": ["COMPLIANCE_RULE"],
+      "objectTypes": ["COMPLIANCE_RULE", "PROHIBITED_EXPRESSION"],
       "evidence": [
         "DP-COMPLIANCE-20260826#rule-1",
         "DP-COMPLIANCE-20260826#rule-2",
@@ -22,7 +24,7 @@
         "DP-COMPLIANCE-20260826#rule-12"
       ],
       "requireAllEvidence": true,
-      "splitRule": "规则1包含资金利益输送与条款费率变更两个独立主题；其余合规主题按依据、渠道和检查点独立更新，地域准入规则11由业务规则与条件策略承载"
+      "splitRule": "规则1包含资金利益输送与条款费率变更两个独立主题；呼叫限制与监管处罚、沟通行为与明确投诉上报分别是不同检查点；地域准入规则11由业务规则与条件策略承载"
     },
     {
       "key": "compliance-business-processes",

@@ -5,6 +5,7 @@ import pytest
 
 from app.features.sales_knowledge_identification.claims import (
     resolve_verbatim_claim_references,
+    supplement_explicit_internal_term_claims,
     supplement_structured_table_claims,
     validate_atomic_claims,
 )
@@ -19,6 +20,7 @@ from app.features.sales_knowledge_identification.models import (
     AtomicClaim,
     CandidateObjectPlan,
     ClaimEvidence,
+    ContentClaimUsage,
     DocumentPackage,
     ModelCompletion,
     ModelRequest,
@@ -34,13 +36,19 @@ from app.features.sales_knowledge_identification.service import (
     _claim_explicitly_all_versions,
     _constrain_plan_source_claim_scope,
     _enforce_plan_granularity,
+    _ensure_enumeration_dimension_plans,
     _ensure_explicit_script_plans,
+    _ensure_explicit_term_plans,
+    _ensure_rule_policy_plans,
     _expand_compact_object_plan,
     _expand_content_path_to_leaf_paths,
     _group_claims_for_planning,
     _merge_repair_plans,
     _normalize_content_shape,
     _plan_satisfies_primary_claim_role,
+    _prune_unattributed_d33_inferences,
+    _supplement_exact_match_claim_usage,
+    _unclaimed_source_anchor_inputs,
     _validate_object_plans,
 )
 
@@ -552,6 +560,46 @@ def test_script_plan_drops_supporting_claims_from_unrelated_source_rows() -> Non
     assert constrained.source_claim_ids == ["CL1", "CL2"]
 
 
+def test_strategy_plan_keeps_same_anchor_script_as_supporting_evidence() -> None:
+    strategy_claim = AtomicClaim.model_validate(
+        _claim("DP-STRATEGY#row-1", "产品引入策略", kind="strategy", claim_id="CL1")
+    )
+    script_claim = AtomicClaim.model_validate(
+        _claim("DP-STRATEGY#row-1", "面向优质客户", kind="script", claim_id="CL2")
+    )
+    results = [
+        (
+            "planning-1",
+            [strategy_claim, script_claim],
+            {
+                "objectPlans": [
+                    [
+                        "P1",
+                        "产品引入策略",
+                        "D3.3",
+                        "SALES_STRATEGY",
+                        {
+                            "strategyGoal": "产品引入",
+                            "triggerContext": "面向优质客户",
+                            "applicability": "测试产品",
+                        },
+                        ["CL1"],
+                    ]
+                ]
+            },
+            None,
+            [],
+        )
+    ]
+
+    plans, rejected, _weak, _unresolved = _validate_object_plans(
+        results, [strategy_claim, script_claim]
+    )
+
+    assert rejected == []
+    assert plans[0].source_claim_ids == ["CL1", "CL2"]
+
+
 def test_verified_script_claim_gets_independent_d41_plan_when_planner_only_uses_strategy() -> None:
     script_payload = _claim(
         "DP-SCRIPT-GUARD#row-1",
@@ -592,7 +640,7 @@ def test_verified_script_claim_gets_independent_d41_plan_when_planner_only_uses_
         [strategy_plan], [script_claim, strategy_claim]
     )
 
-    assert plans[0].source_claim_ids == ["CL-STRATEGY"]
+    assert plans[0].source_claim_ids == ["CL-SCRIPT", "CL-STRATEGY"]
     assert plans[1].module == "D4.1"
     assert plans[1].object_type == "STANDARD_SCRIPT"
     assert plans[1].source_claim_ids == ["CL-SCRIPT"]
@@ -603,9 +651,130 @@ def test_verified_script_claim_gets_independent_d41_plan_when_planner_only_uses_
     }
 
 
+def test_template_reference_does_not_become_standard_script_plan() -> None:
+    payload = _claim(
+        "DP-TEMPLATE#row-1",
+        "客户询问信息来源时，必须按照范本说",
+        kind="script",
+        claim_id="CL-TEMPLATE",
+    )
+    claim = AtomicClaim.model_validate(payload)
+
+    assert _ensure_explicit_script_plans([], [claim]) == []
+
+
+def test_explicit_internal_identifier_definition_gets_term_duty() -> None:
+    package = _package(
+        "DP-TERM",
+        "<!-- source-anchor: DP-TERM#rule-1 -->\n1010的电话是质检的，内部使用。",
+        [SourceAnchor(anchor_id="DP-TERM#rule-1", kind="section")],
+    )
+
+    claims = supplement_explicit_internal_term_claims(package, [])
+    plans = _ensure_explicit_term_plans([], claims)
+
+    assert len(claims) == 1
+    assert claims[0].subject == "1010电话"
+    assert claims[0].evidence[0].exact_quote == "1010的电话是质检的"
+    assert len(plans) == 1
+    assert plans[0].module == "D4.3"
+    assert plans[0].object_type == "TERM"
+
+
+def test_rule_and_strategy_section_keeps_independent_policy_duty() -> None:
+    anchor = "DP-REGION#rule-1"
+    rule_one = AtomicClaim.model_validate(
+        {
+            **_claim(anchor, "上海身份证可以投保", kind="rule", claim_id="CL1"),
+            "attributes": {"condition": "上海身份证", "action": "可以投保"},
+        }
+    )
+    rule_two = AtomicClaim.model_validate(
+        {
+            **_claim(anchor, "双非客户大概率不通过", kind="rule", claim_id="CL2"),
+            "attributes": {"condition": "双非客户", "outcome": "大概率不通过"},
+        }
+    )
+    strategy = AtomicClaim.model_validate(
+        _claim(anchor, "不通过时只推荐健康险", kind="strategy", claim_id="CL3")
+    )
+    plan = CandidateObjectPlan(
+        plan_id="P1",
+        title="异地客户产品选择策略",
+        domain="D3",
+        module="D3.3",
+        object_type="SALES_STRATEGY",
+        identity_hints={
+            "strategyGoal": "受限客户产品选择",
+            "triggerContext": "异地客户",
+            "applicability": "上海分公司",
+        },
+        source_claim_ids=["CL1", "CL2", "CL3"],
+    )
+
+    guarded = _ensure_rule_policy_plans(
+        [plan], [rule_one, rule_two, strategy]
+    )
+
+    policy = next(item for item in guarded if item.module == "D1.3")
+    assert policy.object_type == "POLICY_RULE_SET"
+    assert policy.source_claim_ids == ["CL1", "CL2"]
+
+
 def test_malformed_auxiliary_item_has_no_claim_id_before_validation() -> None:
     assert _auxiliary_claim_id(("模型错误输出", {"DP#row-1"})) is None
     assert _auxiliary_claim_id(({"claimId": "CL1"}, {"DP#row-1"})) == "CL1"
+
+
+def test_exact_source_text_can_recover_missing_critical_attribution() -> None:
+    claim = AtomicClaim.model_validate(
+        _claim(
+            "DP-ATTR#row-1",
+            "根据客户特点定制",
+            kind="strategy",
+            claim_id="CL1",
+        )
+    )
+    content = {
+        "strategyName": "全能版引入策略",
+        "triggerConditions": ["根据客户特点定制"],
+        "decisionLogic": "强调产品特点",
+        "actions": ["说明产品范围"],
+        "applicability": {"products": ["全能版"], "scenarios": ["产品引入"]},
+    }
+
+    usage = _supplement_exact_match_claim_usage(
+        module="D3.3",
+        object_type="SALES_STRATEGY",
+        content=content,
+        source_claims=[claim],
+        existing_usage=[],
+    )
+
+    assert [(item.claim_id, item.content_paths) for item in usage] == [
+        ("CL1", ["$.triggerConditions[0]"])
+    ]
+
+
+def test_d33_prunes_only_unattributed_extra_actions() -> None:
+    content = {
+        "strategyName": "回访引入策略",
+        "triggerConditions": ["续保客户回访"],
+        "decisionLogic": "以调研降低防备",
+        "actions": ["以回访调研发起对话", "建立信任后自然转向推销"],
+        "applicability": {"products": ["药享保"], "scenarios": ["客户回访"]},
+    }
+
+    normalized, _usage = _prune_unattributed_d33_inferences(
+        content,
+        {
+            "$.triggerConditions[0]",
+            "$.decisionLogic",
+            "$.actions[0]",
+        },
+    )
+
+    assert normalized["actions"] == ["以回访调研发起对话"]
 
 
 def _candidate(
@@ -1199,6 +1368,142 @@ def test_planning_rejects_single_compliance_action_as_business_process() -> None
     assert result.rejected_object_plans[0].reasons == [
         "business process requires a source-backed multi-step sequence"
     ]
+
+
+def test_planning_rejects_sales_conversation_branch_as_business_process() -> None:
+    claim = _claim(
+        "DP-BRANCH#page-1",
+        "客户允许授权则继续销售，不允许则礼貌挂机",
+        kind="process",
+    )
+    claim["attributes"] = {
+        "trigger": "客户询问授权",
+        "branch_yes": "继续销售",
+        "branch_no": "礼貌挂机",
+    }
+    gateway = TwoStageGateway(
+        [claim],
+        {
+            "candidates": [_candidate("D1.3", "BUSINESS_PROCESS", ["CL1"])],
+            "weakSignals": [],
+            "unresolvedItems": [],
+        },
+    )
+
+    result = SalesKnowledgeIdentificationService(gateway=gateway).identify(
+        _package(
+            "DP-BRANCH",
+            "# 示例\n\n客户允许授权则继续销售，不允许则礼貌挂机。",
+        )
+    )
+
+    assert result.candidates == []
+    assert any(
+        "sales-conversation conditional branches belong to D3.3" in reason
+        for reason in result.rejected_object_plans[0].reasons
+    )
+
+
+def test_unclaimed_source_anchor_is_exposed_for_review() -> None:
+    package = _package(
+        "DP-ANCHOR",
+        "<!-- source-anchor: DP-ANCHOR#section-1 -->\n有知识。\n"
+        "<!-- source-anchor: DP-ANCHOR#section-2 -->\n只有客户原话。",
+        [
+            SourceAnchor(anchor_id="DP-ANCHOR#section-1", kind="section"),
+            SourceAnchor(anchor_id="DP-ANCHOR#section-2", kind="section"),
+        ],
+    )
+    claim = AtomicClaim.model_validate(
+        _claim("DP-ANCHOR#section-1", "有知识")
+    )
+
+    unresolved = _unclaimed_source_anchor_inputs(package, [claim], [])
+
+    assert len(unresolved) == 1
+    assert unresolved[0][0]["evidence"] == ["DP-ANCHOR#section-2"]
+    assert "未形成原子主张" in unresolved[0][0]["description"]
+
+
+def test_enumeration_terms_used_by_rule_also_form_profile_dimension() -> None:
+    source_text = "### 知识点 3：系统名单 ABC 分类定义\nA类、B类、C类。"
+    claims = [
+        AtomicClaim(
+            claim_id=f"CL{index}",
+            claim_kind="term",
+            statement=f"{label}名单定义",
+            subject=f"{label}名单定义",
+            attributes={"condition": condition},
+            module_hints=["D2.1"],
+            evidence=[
+                ClaimEvidence(
+                    anchor_id="DP-LIST#section-3",
+                    exact_quote=f"{label}类：{condition}",
+                    source_text=source_text,
+                )
+            ],
+        )
+        for index, (label, condition) in enumerate(
+            (("A", "已报价"), ("B", "未报价"), ("C", "未接触")), start=1
+        )
+    ]
+    plans = [
+        CandidateObjectPlan(
+            plan_id="P1",
+            title="系统名单分类规则",
+            domain="D3",
+            module="D3.3",
+            object_type="DECISION_RULE",
+            identity_hints={
+                "strategyGoal": "名单分类",
+                "triggerContext": "通话结束",
+                "applicability": "外呼",
+            },
+            source_claim_ids=[claim.claim_id for claim in claims],
+        )
+    ]
+
+    guarded = _ensure_enumeration_dimension_plans(plans, claims)
+
+    dimension = next(plan for plan in guarded if plan.module == "D2.1")
+    assert dimension.object_type == "PROFILE_DIMENSION"
+    assert dimension.source_claim_ids == ["CL1", "CL2", "CL3"]
+    assert dimension.identity_hints["dimensionName"] == "系统名单 ABC 分类"
+
+
+def test_coded_term_set_forms_dimension_even_when_planner_only_creates_glossary() -> None:
+    claims = [
+        AtomicClaim(
+            claim_id=f"CL{index}",
+            claim_kind="term",
+            statement=f"{code}类定义为{meaning}",
+            subject=f"{code}类名单定义",
+            attributes={"code": code, "meaning": meaning},
+            evidence=[
+                ClaimEvidence(
+                    anchor_id="DP-LIST#section-3",
+                    exact_quote=f"{code}类：{meaning}",
+                    source_text="### 系统名单 ABC 分类定义\nA类、B类、C类。",
+                )
+            ],
+        )
+        for index, (code, meaning) in enumerate(
+            (("A", "已报价"), ("B", "未报价"), ("C", "未接触")), start=1
+        )
+    ]
+    glossary = CandidateObjectPlan(
+        plan_id="P1",
+        title="ABC术语",
+        domain="D4",
+        module="D4.3",
+        object_type="TERM",
+        identity_hints={"subject": "ABC分类", "applicability": "名单管理"},
+        source_claim_ids=[claim.claim_id for claim in claims],
+    )
+
+    guarded = _ensure_enumeration_dimension_plans([glossary], claims)
+
+    assert [plan.module for plan in guarded] == ["D4.3", "D2.1"]
 
 
 def test_identification_drops_relation_to_rejected_candidate_but_keeps_object() -> None:
@@ -2319,6 +2624,40 @@ def test_coverage_repair_augments_existing_plan_and_merges_new_identity() -> Non
     assert [plan.plan_id for plan in merged] == ["P1", "R1"]
 
 
+def test_coverage_repair_cannot_attach_conversation_branch_to_business_process() -> None:
+    existing = CandidateObjectPlan(
+        plan_id="P1",
+        title="禁呼屏蔽流程",
+        domain="D1",
+        module="D1.3",
+        object_type="BUSINESS_PROCESS",
+        identity_hints={
+            "purpose": "执行禁呼屏蔽",
+            "subject": "电销坐席",
+            "scope": "明确拒绝客户",
+        },
+        source_claim_ids=["CL1"],
+    )
+    branch_payload = _claim(
+        "DP-BRANCH#rule-1",
+        "客户拒绝授权则礼貌挂机",
+        kind="process",
+        claim_id="CL2",
+    )
+    branch_payload["attributes"] = {
+        "condition": "客户拒绝授权",
+        "action": "礼貌挂机",
+    }
+    branch = AtomicClaim.model_validate(branch_payload)
+
+    augmented, rejected = _apply_plan_augmentations(
+        [existing], [{"planId": "P1", "sourceClaimIds": ["CL2"]}], [branch]
+    )
+
+    assert augmented[0].source_claim_ids == ["CL1"]
+    assert "cannot augment a D1.3" in rejected[0].reasons[0]
+
+
 def test_coverage_repair_only_retries_automatic_planning_omissions() -> None:
     automatic = {
         "claimId": "CL1",
@@ -2417,3 +2756,90 @@ def test_compact_object_plan_expands_to_validation_shape() -> None:
 
     assert expanded["planId"] == "P1"
     assert expanded["sourceClaimIds"] == ["CL1"]
+
+
+def test_d33_pruning_rebuilds_unattributed_summary_from_verified_claims() -> None:
+    source_text = "### 复播名单状态迁移规则\nA类不能降级。"
+    claim = AtomicClaim(
+        claim_id="CL1",
+        claim_kind="rule",
+        statement="复播时A类名单不得降级",
+        subject="A类迁移规则",
+        attributes={"constraint": "A类不得降级"},
+        module_hints=["D3.3"],
+        evidence=[
+            ClaimEvidence(
+                anchor_id="DP-D33#section-1",
+                exact_quote="A类不能降级",
+                source_text=source_text,
+            )
+        ],
+    )
+    content = {
+        "strategyName": "复播规则",
+        "triggerConditions": ["客户再次触达"],
+        "decisionLogic": "保护高意向客户，避免资源错配",
+        "actions": [
+            {
+                "condition": "A类",
+                "actionType": "TRANSITION_RULE",
+                "targetValue": "维持A类",
+            }
+        ],
+        "applicability": {"products": [], "scenarios": ["复播"]},
+    }
+    usage = [
+        ContentClaimUsage(
+            claim_id="CL1",
+            role="primary",
+            content_paths=["$.actions[0].condition", "$.actions[0].targetValue"],
+            explanation="来源规则",
+        )
+    ]
+
+    normalized, normalized_usage = _prune_unattributed_d33_inferences(
+        content,
+        {path for item in usage for path in item.content_paths},
+        [claim],
+        usage,
+    )
+
+    assert normalized["decisionLogic"] == "复播时A类名单不得降级"
+    assert normalized["triggerConditions"] == ["复播名单状态迁移规则"]
+    assert "actionType" not in normalized["actions"][0]
+    assert {path for item in normalized_usage for path in item.content_paths} >= {
+        "$.decisionLogic",
+        "$.triggerConditions[0]",
+    }
+
+
+def test_d33_pruning_rebuilds_fully_unattributed_actions_from_rule_claims() -> None:
+    claim = AtomicClaim.model_validate(
+        {
+            **_claim(
+                "DP-D33#section-1",
+                "成功报价后标识为A类",
+                kind="rule",
+                claim_id="CL1",
+            ),
+            "statement": "成功报价后应将客户标识为A类",
+            "attributes": {"condition": "成功报价", "result": "A类"},
+        }
+    )
+    content = {
+        "strategyName": "名单判定",
+        "triggerConditions": ["成功报价"],
+        "decisionLogic": "成功报价判定A类",
+        "actions": ["记录渠道", "发送通知"],
+        "applicability": {"products": [], "scenarios": []},
+    }
+
+    normalized, usage = _prune_unattributed_d33_inferences(
+        content,
+        {"$.triggerConditions[0]", "$.decisionLogic"},
+        [claim],
+        [],
+    )
+
+    assert normalized["actions"] == ["成功报价后应将客户标识为A类"]
+    assert any(item.content_paths == ["$.actions[0]"] for item in usage)

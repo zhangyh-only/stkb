@@ -18,6 +18,7 @@ from .catalog import (
 )
 from .claims import (
     resolve_verbatim_claim_references,
+    supplement_explicit_internal_term_claims,
     supplement_structured_table_claims,
     validate_atomic_claims,
 )
@@ -159,6 +160,9 @@ class SalesKnowledgeIdentificationService:
         atomic_claims = supplement_structured_table_claims(
             document_package, atomic_claims
         )
+        atomic_claims = supplement_explicit_internal_term_claims(
+            document_package, atomic_claims
+        )
 
         planning_result, planning_failures = self._plan_candidate_objects(
             document_package.document_package_id, atomic_claims
@@ -182,6 +186,13 @@ class SalesKnowledgeIdentificationService:
             planning_weak_inputs,
             planning_unresolved_inputs,
         ) = _validate_object_plans(planning_result, atomic_claims)
+        planning_unresolved_inputs.extend(
+            _unclaimed_source_anchor_inputs(
+                document_package,
+                atomic_claims,
+                rejected_atomic_claims,
+            )
+        )
         for _repair_pass in range(2):
             uncovered_claim_ids = _automatic_uncovered_claim_ids(
                 planning_unresolved_inputs
@@ -249,6 +260,31 @@ class SalesKnowledgeIdentificationService:
         remaining_uncovered_ids = _automatic_uncovered_claim_ids(
             planning_unresolved_inputs
         )
+        conversation_branch_claims = [
+            claim
+            for claim in atomic_claims
+            if claim.claim_id in remaining_uncovered_ids
+            and _is_sales_conversation_branch_claim(claim)
+        ]
+        if conversation_branch_claims:
+            conversation_plans = _build_conversation_branch_plans(
+                object_plans, conversation_branch_claims
+            )
+            object_plans, conversation_duplicate_rejections = _merge_repair_plans(
+                object_plans, conversation_plans
+            )
+            rejected_object_plans.extend(conversation_duplicate_rejections)
+            guarded_claim_ids = {
+                claim_id
+                for plan in conversation_plans
+                for claim_id in plan.source_claim_ids
+            }
+            planning_unresolved_inputs = [
+                item
+                for item in planning_unresolved_inputs
+                if _auxiliary_claim_id(item) not in guarded_claim_ids
+            ]
+            remaining_uncovered_ids -= guarded_claim_ids
         structured_objections = [
             claim
             for claim in atomic_claims
@@ -308,6 +344,11 @@ class SalesKnowledgeIdentificationService:
             ]
             planning_unresolved_inputs.extend(guard_unresolved_inputs)
         object_plans = _ensure_explicit_script_plans(object_plans, atomic_claims)
+        object_plans = _ensure_enumeration_dimension_plans(
+            object_plans, atomic_claims
+        )
+        object_plans = _ensure_explicit_term_plans(object_plans, atomic_claims)
+        object_plans = _ensure_rule_policy_plans(object_plans, atomic_claims)
         object_plans = _enforce_plan_granularity(object_plans, atomic_claims)
         planning_validation_duration_ms = round(
             (perf_counter() - planning_validation_started) * 1000
@@ -938,6 +979,33 @@ class SalesKnowledgeIdentificationService:
                 claim_by_id,
                 candidate_id,
             )
+            original_claim_usage = list(valid_claim_usage)
+            valid_claim_usage = _supplement_exact_match_claim_usage(
+                module=str(candidate_payload.get("module", "")),
+                object_type=str(candidate_payload.get("objectType", "")),
+                content=candidate_payload["content"],
+                source_claims=source_claims,
+                existing_usage=valid_claim_usage,
+            )
+            if valid_claim_usage != original_claim_usage:
+                normalizations.append(
+                    CandidateNormalization(
+                        candidate_id=candidate_id,
+                        field="claimUsage",
+                        original_value=[
+                            item.model_dump(by_alias=True)
+                            for item in original_claim_usage
+                        ],
+                        normalized_value=[
+                            item.model_dump(by_alias=True)
+                            for item in valid_claim_usage
+                        ],
+                        reason=(
+                            "正文关键字段与已核验主张文本逐字或包含匹配，"
+                            "补齐模型遗漏的可复现归因路径"
+                        ),
+                    )
+                )
             if (
                 candidate_payload.get("module") == "D1.3"
                 and "claimUsage" in raw_candidate
@@ -966,6 +1034,40 @@ class SalesKnowledgeIdentificationService:
                             ),
                         )
                     )
+            if (
+                candidate_payload.get("module") == "D3.3"
+                and "claimUsage" in raw_candidate
+            ):
+                original_content = candidate_payload["content"]
+                attributed_paths = {
+                    path
+                    for usage in valid_claim_usage
+                    for path in usage.content_paths
+                }
+                pruned_content, valid_claim_usage = _prune_unattributed_d33_inferences(
+                    original_content,
+                    attributed_paths,
+                    source_claims,
+                    valid_claim_usage,
+                )
+                if pruned_content != original_content:
+                    candidate_payload["content"] = pruned_content
+                    normalizations.append(
+                        CandidateNormalization(
+                            candidate_id=candidate_id,
+                            field="content.attributionPruning",
+                            original_value=original_content,
+                            normalized_value=pruned_content,
+                            reason=(
+                                "D3.3 触发条件或行动缺少正文级来源归因，"
+                                "保留已证明条目并移除模型扩写"
+                            ),
+                        )
+                    )
+            valid_claim_usage = _filter_claim_usage_for_content(
+                valid_claim_usage,
+                candidate_payload["content"],
+            )
             candidate_payload["claimUsage"] = [
                 item.model_dump(by_alias=True) for item in valid_claim_usage
             ]
@@ -1524,6 +1626,33 @@ def _validate_object_plans(
                     )
                 }
             )
+        if plan.module == "D3.3" and plan.object_type in {
+            "SALES_STRATEGY",
+            "DECISION_RULE",
+        }:
+            strategy_anchors = {
+                evidence.anchor_id
+                for claim_id in plan.source_claim_ids
+                if claim_id in claim_by_id
+                and claim_by_id[claim_id].claim_kind == "strategy"
+                for evidence in claim_by_id[claim_id].evidence
+            }
+            same_anchor_script_ids = [
+                claim.claim_id
+                for claim in claims
+                if claim.claim_kind == "script"
+                and strategy_anchors
+                & {evidence.anchor_id for evidence in claim.evidence}
+            ]
+            plan = plan.model_copy(
+                update={
+                    "source_claim_ids": list(
+                        dict.fromkeys(
+                            [*plan.source_claim_ids, *same_anchor_script_ids]
+                        )
+                    )
+                }
+            )
         if plan.module == "D4.3" and plan.object_type == "QA_PAIR":
             qa_claim_ids = [
                 claim.claim_id for claim in claims if claim.claim_kind == "qa"
@@ -1614,10 +1743,8 @@ def _validate_object_plans(
                     "customer objection lacks source-backed root concern or response"
                 )
         if plan.module == "D4.1" and plan.object_type == "STANDARD_SCRIPT":
-            script_keys = {"script", "wording", "response", "verbatim"}
             has_source_script = any(
-                claim.claim_kind == "script"
-                or script_keys.intersection(claim.attributes)
+                _claim_has_reusable_script(claim)
                 for claim in plan_claims
             )
             if not has_source_script:
@@ -1645,6 +1772,15 @@ def _validate_object_plans(
                 "unknown version must remain unresolved"
             )
         if plan.module == "D1.3" and plan.object_type == "BUSINESS_PROCESS":
+            is_conversation_branch = any(
+                _is_sales_conversation_branch_claim(claim)
+                for claim in plan_claims
+            )
+            if is_conversation_branch:
+                reasons.append(
+                    "sales-conversation conditional branches belong to D3.3, "
+                    "not a D1.3 business process"
+                )
             has_embedded_sequence = any(
                 isinstance(claim.attributes.get(field), list)
                 and len(claim.attributes[field]) >= 2
@@ -1836,6 +1972,8 @@ def _group_claims_for_planning(
 def _plan_satisfies_primary_claim_role(
     plan: CandidateObjectPlan, claim: AtomicClaim
 ) -> bool:
+    if plan.module == "D3.3" and _is_sales_conversation_branch_claim(claim):
+        return True
     if (
         claim.claim_kind == "fact"
         and {"scope", "applicability", "applicableVersions"}
@@ -1899,33 +2037,13 @@ def _ensure_explicit_script_plans(
         if claim_by_id.get(claim_id)
         and claim_by_id[claim_id].claim_kind == "script"
     }
-    normalized_plans: list[CandidateObjectPlan] = []
-    for plan in plans:
-        plan_claims = [
-            claim_by_id[claim_id]
-            for claim_id in plan.source_claim_ids
-            if claim_id in claim_by_id
-        ]
-        if (
-            plan.module == "D3.3"
-            and any(claim.claim_kind == "strategy" for claim in plan_claims)
-        ):
-            plan = plan.model_copy(
-                update={
-                    "source_claim_ids": [
-                        claim.claim_id
-                        for claim in plan_claims
-                        if claim.claim_kind != "script"
-                    ]
-                }
-            )
-        normalized_plans.append(plan)
+    normalized_plans = list(plans)
 
     identity_contract = IDENTITY_CONTRACT_BY_MODULE["D4.1"]
     content_contract = CONTENT_CONTRACT_BY_MODULE["D4.1"]
     for claim in claims:
         if (
-            claim.claim_kind != "script"
+            not _claim_has_reusable_script(claim)
             or claim.claim_id in explicit_script_claim_ids
         ):
             continue
@@ -1964,6 +2082,381 @@ def _ensure_explicit_script_plans(
             )
         )
     return normalized_plans
+
+
+def _claim_has_reusable_script(claim: AtomicClaim) -> bool:
+    script_keys = {"script", "wording", "response", "verbatim"}
+    if claim.claim_kind != "script" and not script_keys.intersection(claim.attributes):
+        return False
+    quotes = " ".join(evidence.exact_quote.strip() for evidence in claim.evidence)
+    template_reference_markers = (
+        "按照范本",
+        "按范本",
+        "按照标准话术",
+        "按标准话术",
+        "使用标准话术",
+    )
+    return not (
+        any(marker in quotes for marker in template_reference_markers)
+        and len(quotes) < 80
+    )
+
+
+def _ensure_enumeration_dimension_plans(
+    plans: list[CandidateObjectPlan], claims: list[AtomicClaim]
+) -> list[CandidateObjectPlan]:
+    """Preserve a stable multi-value vocabulary even when it also drives rules.
+
+    A decision rule explains how a value is assigned or changed; it does not own
+    the value domain itself.  Planning models sometimes consume all enumeration
+    terms into D3.3 and silently omit the reusable D2.1 dimension.  This guard is
+    deliberately structural: it only acts on at least two verified term claims
+    from the same source anchor that are already used together by a D3.3 plan.
+    """
+    claims_by_id = {claim.claim_id: claim for claim in claims}
+    existing_dimension_claim_ids = {
+        claim_id
+        for plan in plans
+        if plan.module == "D2.1" and plan.object_type == "PROFILE_DIMENSION"
+        for claim_id in plan.source_claim_ids
+    }
+    guarded = list(plans)
+    used_plan_ids = {plan.plan_id for plan in plans}
+    for plan in plans:
+        if plan.module != "D3.3":
+            continue
+        term_claims = [
+            claims_by_id[claim_id]
+            for claim_id in plan.source_claim_ids
+            if claim_id in claims_by_id
+            and claims_by_id[claim_id].claim_kind == "term"
+        ]
+        if len(term_claims) < 2:
+            continue
+        anchor_ids = {
+            evidence.anchor_id for claim in term_claims for evidence in claim.evidence
+        }
+        if len(anchor_ids) != 1 or all(
+            claim.claim_id in existing_dimension_claim_ids for claim in term_claims
+        ):
+            continue
+        source_heading = _source_heading(term_claims[0])
+        dimension_name = re.sub(
+            r"^(?:知识点\s*\d+[:：]\s*)|(?:定义)$", "", source_heading
+        ).strip()
+        if not dimension_name:
+            dimension_name = f"{term_claims[0].subject}等值域"
+        plan_id = f"guard-D21-{term_claims[0].claim_id}"
+        if plan_id in used_plan_ids:
+            continue
+        identity_contract = IDENTITY_CONTRACT_BY_MODULE["D2.1"]
+        content_contract = CONTENT_CONTRACT_BY_MODULE["D2.1"]
+        guarded.append(
+            CandidateObjectPlan(
+                plan_id=plan_id,
+                title=f"{dimension_name}维度",
+                domain="D2",
+                module="D2.1",
+                object_type="PROFILE_DIMENSION",
+                object_boundary=(
+                    f"同一对象：{identity_contract.same_object_when} "
+                    f"必须拆分：{identity_contract.different_object_when}"
+                ),
+                classification_basis=(
+                    f"纳入：{content_contract.inclusion} "
+                    f"排除：{content_contract.exclusion}"
+                ),
+                identity_hints={
+                    "dimensionName": dimension_name,
+                    "businessScope": "来源资料明确的稳定分类值域",
+                },
+                source_claim_ids=[claim.claim_id for claim in term_claims],
+            )
+        )
+        used_plan_ids.add(plan_id)
+        existing_dimension_claim_ids.update(
+            claim.claim_id for claim in term_claims
+        )
+    terms_by_anchor: dict[str, list[AtomicClaim]] = {}
+    for claim in claims:
+        if (
+            claim.claim_kind == "term"
+            and {"code", "meaning"}.issubset(claim.attributes)
+            and claim.evidence
+        ):
+            terms_by_anchor.setdefault(claim.evidence[0].anchor_id, []).append(claim)
+    for term_claims in terms_by_anchor.values():
+        if len(term_claims) < 2 or all(
+            claim.claim_id in existing_dimension_claim_ids for claim in term_claims
+        ):
+            continue
+        source_heading = _source_heading(term_claims[0])
+        dimension_name = re.sub(
+            r"^(?:知识点\s*\d+[:：]\s*)|(?:定义)$", "", source_heading
+        ).strip() or f"{term_claims[0].subject}等值域"
+        plan_id = f"guard-D21-{term_claims[0].claim_id}"
+        if plan_id in used_plan_ids:
+            continue
+        identity_contract = IDENTITY_CONTRACT_BY_MODULE["D2.1"]
+        content_contract = CONTENT_CONTRACT_BY_MODULE["D2.1"]
+        guarded.append(
+            CandidateObjectPlan(
+                plan_id=plan_id,
+                title=f"{dimension_name}维度",
+                domain="D2",
+                module="D2.1",
+                object_type="PROFILE_DIMENSION",
+                object_boundary=(
+                    f"同一对象：{identity_contract.same_object_when} "
+                    f"必须拆分：{identity_contract.different_object_when}"
+                ),
+                classification_basis=(
+                    f"纳入：{content_contract.inclusion} "
+                    f"排除：{content_contract.exclusion}"
+                ),
+                identity_hints={
+                    "dimensionName": dimension_name,
+                    "businessScope": "来源资料明确的稳定分类值域",
+                },
+                source_claim_ids=[claim.claim_id for claim in term_claims],
+            )
+        )
+        used_plan_ids.add(plan_id)
+        existing_dimension_claim_ids.update(claim.claim_id for claim in term_claims)
+    return guarded
+
+
+def _ensure_explicit_term_plans(
+    plans: list[CandidateObjectPlan], claims: list[AtomicClaim]
+) -> list[CandidateObjectPlan]:
+    """Keep explicit reusable terms independent from rules that mention them."""
+    covered_term_claim_ids = {
+        claim_id
+        for plan in plans
+        if plan.module in {"D2.1", "D4.3"}
+        for claim_id in plan.source_claim_ids
+    }
+    terms_by_anchor: dict[str, list[AtomicClaim]] = {}
+    for claim in claims:
+        if (
+            claim.claim_kind != "term"
+            or claim.claim_id in covered_term_claim_ids
+            or not claim.evidence
+        ):
+            continue
+        terms_by_anchor.setdefault(claim.evidence[0].anchor_id, []).append(claim)
+    guarded = list(plans)
+    identity_contract = IDENTITY_CONTRACT_BY_MODULE["D4.3"]
+    content_contract = CONTENT_CONTRACT_BY_MODULE["D4.3"]
+    for index, anchor_claims in enumerate(terms_by_anchor.values(), start=1):
+        subject = "、".join(claim.subject for claim in anchor_claims)
+        guarded.append(
+            CandidateObjectPlan(
+                plan_id=f"guard-D43-TERM-{index}-{anchor_claims[0].claim_id}",
+                title=f"{subject}术语说明",
+                domain="D4",
+                module="D4.3",
+                object_type="TERM",
+                object_boundary=(
+                    f"同一对象：{identity_contract.same_object_when} "
+                    f"必须拆分：{identity_contract.different_object_when}"
+                ),
+                classification_basis=(
+                    f"纳入：{content_contract.inclusion} "
+                    f"排除：{content_contract.exclusion}"
+                ),
+                identity_hints={
+                    "subject": subject,
+                    "applicability": "来源资料明确的内部业务语境",
+                },
+                source_claim_ids=[claim.claim_id for claim in anchor_claims],
+            )
+        )
+    return guarded
+
+
+def _ensure_rule_policy_plans(
+    plans: list[CandidateObjectPlan], claims: list[AtomicClaim]
+) -> list[CandidateObjectPlan]:
+    """Keep source business constraints independent from downstream strategy.
+
+    When one source section contains eligibility/operation rules plus a sales
+    strategy, D3.3 owns the customer-facing decision while D1.3 owns the stable
+    rule set.  The same verified claims may support both downstream duties.
+    """
+    claim_by_id = {claim.claim_id: claim for claim in claims}
+    existing_policy_claim_ids = {
+        claim_id
+        for plan in plans
+        if plan.module == "D1.3"
+        and plan.object_type in {"POLICY_RULE_SET", "BUSINESS_PROCESS"}
+        for claim_id in plan.source_claim_ids
+    }
+    guarded = list(plans)
+    used_plan_ids = {plan.plan_id for plan in plans}
+    policy_attribute_keys = {
+        "restrictionScope",
+        "condition",
+        "action",
+        "outcome",
+        "allowed",
+        "prohibited",
+        "requirement",
+    }
+    for plan in plans:
+        if plan.module != "D3.3":
+            continue
+        plan_claims = [
+            claim_by_id[claim_id]
+            for claim_id in plan.source_claim_ids
+            if claim_id in claim_by_id
+        ]
+        if not any(claim.claim_kind == "strategy" for claim in plan_claims):
+            continue
+        rule_claims = [
+            claim
+            for claim in plan_claims
+            if claim.claim_kind == "rule"
+            and policy_attribute_keys.intersection(claim.attributes)
+            and claim.claim_id not in existing_policy_claim_ids
+        ]
+        if len(rule_claims) < 2:
+            continue
+        heading = _source_heading(rule_claims[0])
+        subject = re.sub(r"^\d+[、.]\s*", "", heading).strip() or rule_claims[0].subject
+        plan_id = f"guard-D13-{rule_claims[0].claim_id}"
+        if plan_id in used_plan_ids:
+            continue
+        identity_contract = IDENTITY_CONTRACT_BY_MODULE["D1.3"]
+        content_contract = CONTENT_CONTRACT_BY_MODULE["D1.3"]
+        guarded.append(
+            CandidateObjectPlan(
+                plan_id=plan_id,
+                title=f"{subject}规则集",
+                domain="D1",
+                module="D1.3",
+                object_type="POLICY_RULE_SET",
+                object_boundary=(
+                    f"同一对象：{identity_contract.same_object_when} "
+                    f"必须拆分：{identity_contract.different_object_when}"
+                ),
+                classification_basis=(
+                    f"纳入：{content_contract.inclusion} "
+                    f"排除：{content_contract.exclusion}"
+                ),
+                identity_hints={
+                    "purpose": f"规范{subject}",
+                    "subject": subject,
+                    "scope": "来源资料明确的业务约束范围",
+                },
+                source_claim_ids=[claim.claim_id for claim in rule_claims],
+            )
+        )
+        used_plan_ids.add(plan_id)
+        existing_policy_claim_ids.update(claim.claim_id for claim in rule_claims)
+    return guarded
+
+
+def _build_conversation_branch_plans(
+    existing_plans: list[CandidateObjectPlan],
+    claims: list[AtomicClaim],
+) -> list[CandidateObjectPlan]:
+    """Restore sales decision duties that repair models keep misrouting to D1.3."""
+    already_covered = {
+        claim_id
+        for plan in existing_plans
+        if plan.module == "D3.3"
+        for claim_id in plan.source_claim_ids
+    }
+    by_anchor: dict[str, list[AtomicClaim]] = {}
+    for claim in claims:
+        if claim.claim_id in already_covered or not claim.evidence:
+            continue
+        by_anchor.setdefault(claim.evidence[0].anchor_id, []).append(claim)
+    identity_contract = IDENTITY_CONTRACT_BY_MODULE["D3.3"]
+    content_contract = CONTENT_CONTRACT_BY_MODULE["D3.3"]
+    plans: list[CandidateObjectPlan] = []
+    for index, anchor_claims in enumerate(by_anchor.values(), start=1):
+        heading = _source_heading(anchor_claims[0])
+        goal = "；".join(claim.subject for claim in anchor_claims)
+        plans.append(
+            CandidateObjectPlan(
+                plan_id=f"guard-D33-CONVERSATION-{index}-{anchor_claims[0].claim_id}",
+                title=f"{heading}销售应对规则",
+                domain="D3",
+                module="D3.3",
+                object_type="DECISION_RULE",
+                object_boundary=(
+                    f"同一对象：{identity_contract.same_object_when} "
+                    f"必须拆分：{identity_contract.different_object_when}"
+                ),
+                classification_basis=(
+                    f"纳入：{content_contract.inclusion} "
+                    f"排除：{content_contract.exclusion}"
+                ),
+                identity_hints={
+                    "strategyGoal": goal,
+                    "triggerContext": heading,
+                    "applicability": "来源资料适用销售沟通场景",
+                },
+                source_claim_ids=[claim.claim_id for claim in anchor_claims],
+            )
+        )
+    return plans
+
+
+def _is_sales_conversation_branch_claim(claim: AtomicClaim) -> bool:
+    if {"branch_yes", "branch_no"}.intersection(claim.attributes):
+        return True
+    return {"condition", "action"}.issubset(claim.attributes) and any(
+        marker in claim.statement for marker in ("客户", "异议", "授权", "沟通")
+    )
+
+
+def _source_heading(claim: AtomicClaim) -> str:
+    for evidence in claim.evidence:
+        for line in evidence.source_text.splitlines():
+            heading = line.lstrip("#").strip()
+            if line.lstrip().startswith("#") and heading:
+                return heading
+    return claim.subject
+
+
+def _unclaimed_source_anchor_inputs(
+    document_package: DocumentPackage,
+    claims: list[AtomicClaim],
+    rejected_claims: list[RejectedAtomicClaim],
+) -> list[tuple[Any, set[str]]]:
+    """Expose source sections that claim discovery otherwise drops silently."""
+    all_anchor_ids = {anchor.anchor_id for anchor in document_package.anchors}
+    accounted_anchor_ids = {
+        evidence.anchor_id for claim in claims for evidence in claim.evidence
+    }
+    for rejected in rejected_claims:
+        raw_evidence = rejected.raw_claim.get("evidence", [])
+        if not isinstance(raw_evidence, list):
+            continue
+        accounted_anchor_ids.update(
+            item.get("anchorId")
+            for item in raw_evidence
+            if isinstance(item, dict) and item.get("anchorId") in all_anchor_ids
+        )
+    return [
+        (
+            {
+                "claimId": None,
+                "description": f"来源片段 {anchor_id} 未形成原子主张",
+                "reason": (
+                    "发现阶段未提取到可独立核验的知识主张；需审阅该片段是"
+                    "非知识内容、证据不足，还是模型遗漏"
+                ),
+                "evidence": [anchor_id],
+                "module": None,
+            },
+            all_anchor_ids,
+        )
+        for anchor_id in sorted(all_anchor_ids - accounted_anchor_ids)
+    ]
 
 
 def _is_all_versions_scope(value: Any) -> bool:
@@ -2145,6 +2638,25 @@ def _validate_content_claim_usage(
     return accepted, unresolved
 
 
+def _filter_claim_usage_for_content(
+    usage_items: list[ContentClaimUsage], content: dict[str, Any]
+) -> list[ContentClaimUsage]:
+    """Drop trace paths invalidated by deterministic content pruning."""
+    filtered: list[ContentClaimUsage] = []
+    for usage in usage_items:
+        valid_paths = [
+            path
+            for path in usage.content_paths
+            if _expand_content_path_to_leaf_paths(content, path)
+        ]
+        if not valid_paths:
+            continue
+        filtered.append(
+            usage.model_copy(update={"content_paths": list(dict.fromkeys(valid_paths))})
+        )
+    return filtered
+
+
 def _expand_content_path_to_leaf_paths(
     content: dict[str, Any], path: str
 ) -> list[str]:
@@ -2185,6 +2697,25 @@ def _prune_unattributed_d13_inferences(
     independently useful; its unsupported handling is removed instead of invented.
     """
     normalized = dict(content)
+    rules_or_steps = content.get("rulesOrSteps")
+    if isinstance(rules_or_steps, list):
+        normalized_steps: list[Any] = []
+        for index, item in enumerate(rules_or_steps):
+            if not isinstance(item, dict):
+                normalized_steps.append(item)
+                continue
+            normalized_item = dict(item)
+            for field in list(normalized_item):
+                if field == "stepOrder":
+                    continue
+                field_path = f"$.rulesOrSteps[{index}].{field}"
+                if not any(
+                    path == field_path or path.startswith(field_path + ".")
+                    for path in attributed_paths
+                ):
+                    normalized_item.pop(field, None)
+            normalized_steps.append(normalized_item)
+        normalized["rulesOrSteps"] = normalized_steps
     preconditions = content.get("preconditions")
     if (
         isinstance(preconditions, list)
@@ -2211,6 +2742,205 @@ def _prune_unattributed_d13_inferences(
             normalized_exceptions.append(normalized_item)
         normalized["exceptions"] = normalized_exceptions
     return normalized
+
+
+def _prune_unattributed_d33_inferences(
+    content: dict[str, Any],
+    attributed_paths: set[str],
+    source_claims: list[AtomicClaim] | None = None,
+    existing_usage: list[ContentClaimUsage] | None = None,
+) -> tuple[dict[str, Any], list[ContentClaimUsage]]:
+    normalized = dict(content)
+    normalized_usage = list(existing_usage or [])
+    claims = source_claims or []
+    for field in ("actions",):
+        items = content.get(field)
+        if not isinstance(items, list) or not items:
+            continue
+        retained = [
+            item
+            for index, item in enumerate(items)
+            if any(
+                path == f"$.{field}[{index}]"
+                or path.startswith(f"$.{field}[{index}].")
+                for path in attributed_paths
+            )
+        ]
+        if retained and len(retained) != len(items):
+            normalized[field] = retained
+        elif field == "actions" and not retained:
+            action_claims = [
+                claim
+                for claim in claims
+                if claim.claim_kind in {"rule", "strategy"}
+                or _is_sales_conversation_branch_claim(claim)
+            ]
+            if action_claims:
+                normalized[field] = [claim.statement for claim in action_claims]
+                normalized_usage.extend(
+                    ContentClaimUsage(
+                        claim_id=claim.claim_id,
+                        role="primary",
+                        content_paths=[f"$.actions[{index}]"],
+                        explanation="行动项直接使用已核验主张，不保留模型扩写",
+                    )
+                    for index, claim in enumerate(action_claims)
+                )
+    actions = normalized.get("actions")
+    if isinstance(actions, list):
+        normalized_actions: list[Any] = []
+        for index, item in enumerate(actions):
+            if not isinstance(item, dict):
+                normalized_actions.append(item)
+                continue
+            normalized_item = dict(item)
+            for field in list(normalized_item):
+                field_path = f"$.actions[{index}].{field}"
+                if not any(
+                    path == field_path or path.startswith(field_path + ".")
+                    for path in attributed_paths
+                ):
+                    normalized_item.pop(field, None)
+            normalized_actions.append(normalized_item)
+        normalized["actions"] = normalized_actions
+
+    trigger_conditions = normalized.get("triggerConditions")
+    attributed_trigger_paths = {
+        path
+        for path in attributed_paths
+        if path.startswith("$.triggerConditions[")
+    }
+    if (
+        claims
+        and isinstance(trigger_conditions, list)
+        and len(attributed_trigger_paths) < len(trigger_conditions)
+    ):
+        headings: list[tuple[str, AtomicClaim]] = []
+        for claim in claims:
+            heading = _source_heading(claim)
+            if heading and heading not in {item[0] for item in headings}:
+                headings.append((heading, claim))
+        if headings:
+            normalized["triggerConditions"] = [heading for heading, _claim in headings]
+            normalized_usage.extend(
+                ContentClaimUsage(
+                    claim_id=claim.claim_id,
+                    role="supporting",
+                    content_paths=[f"$.triggerConditions[{index}]"],
+                    explanation="触发语境直接取自该主张所在的来源标题",
+                )
+                for index, (_heading, claim) in enumerate(headings)
+            )
+    if claims and "$.decisionLogic" not in attributed_paths:
+        normalized["decisionLogic"] = "；".join(
+            claim.statement.rstrip("。；") for claim in claims
+        )
+        normalized_usage.extend(
+            ContentClaimUsage(
+                claim_id=claim.claim_id,
+                role="supporting",
+                content_paths=["$.decisionLogic"],
+                explanation="判断逻辑由对象内已核验主张逐条合并，不补写推断",
+            )
+            for claim in claims
+        )
+    return normalized, normalized_usage
+
+
+def _supplement_exact_match_claim_usage(
+    *,
+    module: str,
+    object_type: str,
+    content: dict[str, Any],
+    source_claims: list[AtomicClaim],
+    existing_usage: list[ContentClaimUsage],
+) -> list[ContentClaimUsage]:
+    attributed_paths = {
+        path for usage in existing_usage for path in usage.content_paths
+    }
+    missing_paths = sorted(
+        _critical_attribution_paths(module, object_type, content) - attributed_paths
+    )
+    if not missing_paths:
+        return existing_usage
+    searchable_claims = [
+        (claim, _claim_searchable_text(claim)) for claim in source_claims
+    ]
+    supplemented = list(existing_usage)
+    for path in missing_paths:
+        value = _content_value_at_path(content, path)
+        if not isinstance(value, str):
+            continue
+        normalized_value = _normalize_match_text(value)
+        if len(normalized_value) < 4:
+            continue
+        matched_claim = next(
+            (
+                claim
+                for claim, searchable_text in searchable_claims
+                if normalized_value in searchable_text
+                or any(
+                    len(explicit_value) >= 4
+                    and explicit_value in normalized_value
+                    for explicit_value in _claim_explicit_values(claim)
+                )
+            ),
+            None,
+        )
+        if matched_claim is None:
+            continue
+        supplemented.append(
+            ContentClaimUsage(
+                claim_id=matched_claim.claim_id,
+                role="supporting",
+                content_paths=[path],
+                explanation="正文值可在该已核验主张文本中逐字定位",
+            )
+        )
+    return supplemented
+
+
+def _claim_searchable_text(claim: AtomicClaim) -> str:
+    values = [
+        claim.statement,
+        claim.subject,
+        json.dumps(claim.attributes, ensure_ascii=False, sort_keys=True),
+        *(evidence.source_text for evidence in claim.evidence),
+        *(evidence.exact_quote for evidence in claim.evidence),
+    ]
+    return _normalize_match_text(" ".join(values))
+
+
+def _claim_explicit_values(claim: AtomicClaim) -> list[str]:
+    return [
+        normalized
+        for value in claim.attributes.values()
+        if isinstance(value, str)
+        and (normalized := _normalize_match_text(value))
+    ]
+
+
+def _normalize_match_text(value: str) -> str:
+    return re.sub(r"[\s，。；：、,.!?！？'\"“”‘’（）()]", "", value.casefold())
+
+
+def _content_value_at_path(content: dict[str, Any], path: str) -> Any:
+    if not _CONTENT_PATH_PATTERN.fullmatch(path):
+        return None
+    current: Any = content
+    for field, index_text in re.findall(
+        r"\.([A-Za-z_][A-Za-z0-9_-]*)|\[([0-9]+)\]", path
+    ):
+        if field:
+            if not isinstance(current, dict) or field not in current:
+                return None
+            current = current[field]
+        else:
+            index = int(index_text)
+            if not isinstance(current, list) or index >= len(current):
+                return None
+            current = current[index]
+    return current
 
 
 def _critical_attribution_paths(
@@ -2380,6 +3110,25 @@ def _apply_plan_augmentations(
             )
             continue
         plan = plan_by_id[plan_id]
+        incompatible_claim_ids = sorted(
+            claim.claim_id
+            for claim in repair_claims
+            if claim.claim_id in claim_ids
+            and plan.module == "D1.3"
+            and _is_sales_conversation_branch_claim(claim)
+        )
+        if incompatible_claim_ids:
+            rejected.append(
+                RejectedObjectPlan(
+                    plan_id=str(plan_id),
+                    reasons=[
+                        "sales-conversation claims cannot augment a D1.3 business "
+                        "process: " + ", ".join(incompatible_claim_ids)
+                    ],
+                    raw_plan=augmentation,
+                )
+            )
+            continue
         plan_by_id[plan_id] = plan.model_copy(
             update={
                 "source_claim_ids": list(

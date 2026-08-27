@@ -25,7 +25,6 @@
       "module": "D3.3",
       "objectTypes": ["DECISION_RULE", "SALES_STRATEGY"],
       "evidence": ["DP-OBJECTION-COURSE-20260826#section-4"],
-      "requiredUnresolvedEvidence": ["DP-OBJECTION-COURSE-20260826#section-4"],
       "splitRule": "单一课程中的经验性‘往往’不足以发布为稳定客户意图判断或行动规则"
     }
   ],

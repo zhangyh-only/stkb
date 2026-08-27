@@ -10,6 +10,10 @@ from .catalog import MODULE_BY_CODE
 from .models import AtomicClaim, ClaimEvidence, DocumentPackage, RejectedAtomicClaim
 
 SOURCE_ANCHOR = re.compile(r"<!--\s*source-anchor:\s*([^\s>]+)\s*-->")
+INTERNAL_TERM_DEFINITION = re.compile(
+    r"(?P<term>[A-Za-z0-9][A-Za-z0-9_-]{1,19})的"
+    r"(?P<kind>电话|热线|代码|编号|标识)是(?P<definition>[^，。；\n]{2,40})"
+)
 
 
 def extract_anchor_sections(document_package: DocumentPackage) -> dict[str, str]:
@@ -300,6 +304,50 @@ def supplement_structured_table_claims(
                     attributes=structured_attributes,
                     module_hints=[module_hint],
                     evidence=structured_evidence,
+                )
+            )
+    return supplemented
+
+
+def supplement_explicit_internal_term_claims(
+    document_package: DocumentPackage,
+    claims: list[AtomicClaim],
+) -> list[AtomicClaim]:
+    """Recover exact internal identifier definitions missed by discovery."""
+    sections = extract_anchor_sections(document_package)
+    supplemented = list(claims)
+    sequence = 0
+    for anchor in document_package.anchors:
+        section = sections.get(anchor.anchor_id, "")
+        if not section or any(
+            claim.claim_kind == "term"
+            and any(evidence.anchor_id == anchor.anchor_id for evidence in claim.evidence)
+            for claim in supplemented
+        ):
+            continue
+        for match in INTERNAL_TERM_DEFINITION.finditer(section):
+            sequence += 1
+            term_text = f"{match.group('term')}{match.group('kind')}"
+            definition = match.group("definition").rstrip("的").strip()
+            supplemented.append(
+                AtomicClaim(
+                    claim_id=f"STRUCTURED-INTERNAL-TERM-{sequence}",
+                    claim_kind="term",
+                    statement=f"{term_text}指{definition}",
+                    subject=term_text,
+                    attributes={
+                        "termText": term_text,
+                        "standardDefinition": definition,
+                        "sourceStance": "来源资料明确的内部定义",
+                    },
+                    module_hints=["D4.3"],
+                    evidence=[
+                        ClaimEvidence(
+                            anchor_id=anchor.anchor_id,
+                            exact_quote=match.group(0),
+                            source_text=section,
+                        )
+                    ],
                 )
             )
     return supplemented

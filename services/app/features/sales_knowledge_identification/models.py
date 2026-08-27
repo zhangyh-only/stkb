@@ -207,6 +207,7 @@ class CandidateNormalization(ApiModel):
         "content.items",
         "content.resolutionElements",
         "content.attributionPruning",
+        "claimUsage",
     ]
     original_value: Any
     normalized_value: Any
@@ -285,6 +286,8 @@ class ModelConfigurationSnapshot(ApiModel):
 class GoldGroupEvaluation(ApiModel):
     key: str
     expected_count: int
+    minimum_expected_count: int = 0
+    maximum_expected_count: int | None = None
     predicted_count: int
     matched_count: int
     status: Literal[
@@ -315,8 +318,8 @@ class IdentificationQualityReport(ApiModel):
     summary_only_count: int
     evidence_backed_rate: float
     claim_consumption_rate: float
-    claim_accounting_rate: float
-    content_attribution_rate: float
+    claim_accounting_rate: float = 0.0
+    content_attribution_rate: float = 0.0
     median_content_chars: int
     groups: list[GoldGroupEvaluation]
     findings: list[str]
