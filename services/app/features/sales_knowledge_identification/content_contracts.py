@@ -273,6 +273,18 @@ def validate_candidate_content(module: str, object_type: str, content: dict[str,
                     f"{collection_field} item {index} has unsupported fields: "
                     + ", ".join(unexpected_nested_fields)
                 )
+    if object_type == "CUSTOMER_OBJECTION":
+        expressions = {
+            expression.strip()
+            for expression in content.get("expressions", [])
+            if isinstance(expression, str) and expression.strip()
+        }
+        for index, item in enumerate(content.get("resolutionElements", []), start=1):
+            if isinstance(item, dict) and item.get("detail") in expressions:
+                errors.append(
+                    f"resolutionElements item {index} repeats the customer expression "
+                    "instead of a source-backed resolution detail"
+                )
     serialized = json.dumps(content, ensure_ascii=False, sort_keys=True)
     if len(serialized) < contract.minimum_content_chars:
         errors.append(

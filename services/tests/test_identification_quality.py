@@ -175,6 +175,65 @@ def test_quality_report_detects_missing_required_nested_item_fields(tmp_path) ->
     assert report.groups[0].missing_expected_evidence == ["A2"]
 
 
+def test_quality_gold_can_require_a_field_while_allowing_explicit_empty_value(
+    tmp_path,
+) -> None:
+    gold_path = tmp_path / "gold-v0.1.json"
+    gold_path.write_text(
+        json.dumps(
+            {
+                "status": "approved",
+                "expectedObjectGroups": [
+                    {
+                        "key": "process",
+                        "expectedCount": 1,
+                        "module": "D1.3",
+                        "objectTypes": ["BUSINESS_PROCESS"],
+                        "requiredContentFields": ["purpose", "preconditions"],
+                        "allowEmptyContentFields": ["preconditions"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    candidate = _candidate("C1", "D1.3", "BUSINESS_PROCESS", ["CL1"], ["A1"])
+    candidate["content"] = {
+        "purpose": "完成线上问诊",
+        "preconditions": [],
+        "rulesOrSteps": ["进入问诊", "医生开方"],
+        "exceptions": [],
+    }
+    result = IdentificationResult.model_validate(
+        {
+            "documentPackageId": "DP-QUALITY",
+            "provider": "test",
+            "model": "test",
+            "promptVersion": "test",
+            "schemaVersion": "test",
+            "catalogVersion": "test",
+            "catalogFingerprint": "test",
+            "rawModelOutput": "{}",
+            "modelCalls": [],
+            "processingStages": [],
+            "atomicClaims": [_claim("CL1", "A1")],
+            "candidates": [candidate],
+            "rejectedCandidates": [],
+            "weakSignals": [],
+            "unresolvedItems": [],
+            "coverageByModule": {},
+            "callCount": 0,
+            "promptTokens": 0,
+            "completionTokens": 0,
+        }
+    )
+
+    report = evaluate_against_gold(result, gold_path)
+
+    assert report.overall_status == "pass"
+    assert report.groups[0].status == "met"
+
+
 def _claim(claim_id: str, anchor: str) -> dict[str, object]:
     return {
         "claimId": claim_id,

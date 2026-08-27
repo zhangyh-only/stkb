@@ -30,9 +30,11 @@ from app.features.sales_knowledge_identification.service import (
     SalesKnowledgeIdentificationService,
     _apply_plan_augmentations,
     _automatic_uncovered_claim_ids,
+    _auxiliary_claim_id,
     _claim_explicitly_all_versions,
     _constrain_plan_source_claim_scope,
     _enforce_plan_granularity,
+    _ensure_explicit_script_plans,
     _expand_compact_object_plan,
     _expand_content_path_to_leaf_paths,
     _group_claims_for_planning,
@@ -550,6 +552,62 @@ def test_script_plan_drops_supporting_claims_from_unrelated_source_rows() -> Non
     assert constrained.source_claim_ids == ["CL1", "CL2"]
 
 
+def test_verified_script_claim_gets_independent_d41_plan_when_planner_only_uses_strategy() -> None:
+    script_payload = _claim(
+        "DP-SCRIPT-GUARD#row-1",
+        "完整异议处理话术",
+        kind="script",
+        claim_id="CL-SCRIPT",
+    )
+    script_payload["attributes"] = {
+        "communicationGoal": "异议化解与促成",
+        "audience": "犹豫客户",
+    }
+    script_claim = AtomicClaim.model_validate(script_payload)
+    strategy_claim = AtomicClaim.model_validate(
+        _claim(
+            "DP-SCRIPT-GUARD#row-1",
+            "探询顾虑后强化价值",
+            kind="strategy",
+            claim_id="CL-STRATEGY",
+        )
+    )
+    strategy_plan = CandidateObjectPlan(
+        plan_id="P1",
+        title="异议处理策略",
+        domain="D3",
+        module="D3.3",
+        object_type="SALES_STRATEGY",
+        object_boundary="同一策略目标与适用范围",
+        classification_basis="来源提供策略主张",
+        identity_hints={
+            "strategyGoal": "异议化解",
+            "triggerContext": "客户犹豫",
+            "applicability": "药享保",
+        },
+        source_claim_ids=["CL-SCRIPT", "CL-STRATEGY"],
+    )
+
+    plans = _ensure_explicit_script_plans(
+        [strategy_plan], [script_claim, strategy_claim]
+    )
+
+    assert plans[0].source_claim_ids == ["CL-STRATEGY"]
+    assert plans[1].module == "D4.1"
+    assert plans[1].object_type == "STANDARD_SCRIPT"
+    assert plans[1].source_claim_ids == ["CL-SCRIPT"]
+    assert plans[1].identity_hints == {
+        "communicationGoal": "异议化解与促成",
+        "method": "完整原文复用",
+        "applicability": "犹豫客户",
+    }
+
+
+def test_malformed_auxiliary_item_has_no_claim_id_before_validation() -> None:
+    assert _auxiliary_claim_id(("模型错误输出", {"DP#row-1"})) is None
+    assert _auxiliary_claim_id(({"claimId": "CL1"}, {"DP#row-1"})) == "CL1"
+
+
 def _candidate(
     module: str,
     object_type: str,
@@ -679,6 +737,65 @@ def test_missing_critical_claim_attribution_blocks_formalization_quality() -> No
     ]
 
 
+def test_d13_prunes_unattributed_inferred_preconditions_and_exception_handling() -> None:
+    package_id = "DP-D13-ATTRIBUTION"
+    anchor = f"{package_id}#page-1"
+    candidate = _candidate("D1.3", "BUSINESS_PROCESS", ["CL1", "CL2"])
+    candidate["content"] = {
+        "purpose": "完成线上问诊购药",
+        "preconditions": ["用户必须已持有有效权益"],
+        "rulesOrSteps": [
+            {"stepOrder": 1, "description": "进入在线问诊并填写病情。"},
+            {"stepOrder": 2, "description": "医生问诊后开具处方。"},
+        ],
+        "exceptions": [
+            {
+                "condition": "医生可能基于用药安全调整药品和剂量。",
+                "handling": "用户应无条件接受调整。",
+            }
+        ],
+        "contractDetail": "用于验证没有来源归因的推演字段会被清理。" * 20,
+    }
+    candidate["claimUsage"] = [
+        {
+            "claimId": "CL1",
+            "role": "primary",
+            "contentPaths": [
+                "$.rulesOrSteps[0].description",
+                "$.rulesOrSteps[1].description",
+            ],
+            "explanation": "来源明确给出两个流程步骤",
+        },
+        {
+            "claimId": "CL2",
+            "role": "supporting",
+            "contentPaths": ["$.exceptions[0].condition"],
+            "explanation": "来源只给出异常条件，没有给出处置动作",
+        },
+    ]
+    gateway = TwoStageGateway(
+        [
+            _claim(anchor, "进入在线问诊并由医生开具处方", kind="process", claim_id="CL1"),
+            _claim(anchor, "医生可能调整药品和剂量", kind="rule", claim_id="CL2"),
+        ],
+        {"candidates": [candidate], "weakSignals": [], "unresolvedItems": []},
+    )
+
+    result = SalesKnowledgeIdentificationService(gateway).identify(
+        _package(package_id, "进入在线问诊并由医生开具处方；医生可能调整药品和剂量。")
+    )
+
+    assert result.candidates[0].content["preconditions"] == []
+    assert result.candidates[0].content["exceptions"] == [
+        {"condition": "医生可能基于用药安全调整药品和剂量。"}
+    ]
+    assert result.candidates[0].quality_issues == []
+    assert any(
+        item.field == "content.attributionPruning"
+        for item in result.normalizations
+    )
+
+
 def test_objection_expression_is_normalized_to_customer_source_field() -> None:
     package_id = "DP-OBJECTION-EXPRESSION"
     anchor = f"{package_id}#page-1"
@@ -726,6 +843,96 @@ def test_objection_expression_is_normalized_to_customer_source_field() -> None:
     assert any(
         item.field == "content.expressions" for item in result.normalizations
     )
+
+
+def test_objection_resolution_repeating_expression_uses_verified_response() -> None:
+    package_id = "DP-OBJECTION-RESPONSE"
+    anchor = f"{package_id}#page-1"
+    claim = _claim(
+        anchor,
+        "可以一次性买几年的吗",
+        kind="objection",
+        claim_id="CL1",
+    )
+    claim["attributes"] = {
+        "expression": "可以一次性买几年的吗",
+        "responseContext": "产品按年续交，次年可根据实际情况决定是否续保。",
+    }
+    candidate = _candidate("D4.2", "CUSTOMER_OBJECTION", ["CL1"])
+    candidate["content"] = {
+        "objectionTheme": "缴费周期咨询",
+        "expressions": ["可以一次性买几年的吗"],
+        "context": "客户询问缴费周期",
+        "rootConcernHypotheses": [],
+        "resolutionElements": [
+            {
+                "element": "说明按年续交",
+                "detail": "可以一次性买几年的吗",
+            }
+        ],
+        "contractDetail": "用于验证客户原话不能冒充销售回复。" * 20,
+    }
+    gateway = TwoStageGateway(
+        [claim],
+        {"candidates": [candidate], "weakSignals": [], "unresolvedItems": []},
+    )
+
+    result = SalesKnowledgeIdentificationService(gateway).identify(
+        _package(
+            package_id,
+            "可以一次性买几年的吗\n产品按年续交，次年可根据实际情况决定是否续保。",
+        )
+    )
+
+    assert result.candidates[0].content["resolutionElements"][0]["detail"] == (
+        "产品按年续交，次年可根据实际情况决定是否续保。"
+    )
+    assert any(
+        item.field == "content.resolutionElements"
+        for item in result.normalizations
+    )
+
+
+def test_qa_candidate_recovers_missing_structured_question_answer() -> None:
+    package_id = "DP-QA-RECOVERY"
+    anchor = f"{package_id}#page-1"
+    first = _claim(anchor, "问题一", kind="qa", claim_id="CL1")
+    first["attributes"] = {"question": "问题一", "answer": "答案一"}
+    second = _claim(anchor, "问题二", kind="qa", claim_id="CL2")
+    second["attributes"] = {"question": "问题二", "answer": "答案二"}
+    candidate = _candidate("D4.3", "QA_PAIR", ["CL1"])
+    candidate["content"] = {
+        "items": [{"question": "问题一", "answer": "答案一", "claimRef": "CL1"}],
+        "factReferences": ["CL1"],
+        "applicability": "测试产品",
+        "contractDetail": "用于验证结构化问答遗漏时能够从核验字段补回。" * 20,
+    }
+    candidate["claimUsage"] = [
+        {
+            "claimId": "CL1",
+            "role": "primary",
+            "contentPaths": ["$.items[0].question", "$.items[0].answer"],
+            "explanation": "第一组问答已写入正文",
+        }
+    ]
+    gateway = TwoStageGateway(
+        [first, second],
+        {"candidates": [candidate], "weakSignals": [], "unresolvedItems": []},
+    )
+
+    result = SalesKnowledgeIdentificationService(gateway).identify(
+        _package(package_id, "问题一 答案一 问题二 答案二")
+    )
+
+    assert [item["claimRef"] for item in result.candidates[0].content["items"]] == [
+        "CL1",
+        "CL2",
+    ]
+    assert {usage.claim_id for usage in result.candidates[0].claim_usage} == {
+        "CL1",
+        "CL2",
+    }
+    assert any(item.field == "content.items" for item in result.normalizations)
 
 
 def test_invalid_claim_usage_path_cannot_count_as_written_content() -> None:
@@ -1134,6 +1341,42 @@ def test_identification_uses_an_explicit_repair_call_for_invalid_json() -> None:
         "repair",
         "object_planning",
         "content_realization",
+    ]
+    assert result.candidates[0].candidate_id == "C1"
+
+
+def test_identification_repairs_valid_json_with_wrong_top_level_shape() -> None:
+    claim_payload = {"claims": [_claim("DP-SHAPE#page-1", "药享保提供在线问诊")]}
+    object_payload = {
+        "candidates": [_candidate("D1.1", "PRODUCT_FACT", ["CL1"])],
+        "weakSignals": [],
+        "unresolvedItems": [],
+    }
+    realization = {
+        "planId": "C1",
+        "content": object_payload["candidates"][0]["content"],
+        "entityMentions": [],
+        "relations": [],
+    }
+    gateway = SequencedModelGateway(
+        [
+            json.dumps(claim_payload, ensure_ascii=False),
+            json.dumps(object_payload, ensure_ascii=False),
+            json.dumps([realization], ensure_ascii=False),
+            json.dumps({"realizations": [realization]}, ensure_ascii=False),
+        ]
+    )
+
+    result = SalesKnowledgeIdentificationService(gateway=gateway).identify(
+        _package("DP-SHAPE", "# 示例\n\n药享保提供在线问诊。")
+    )
+
+    assert result.status == "completed"
+    assert [trace.purpose for trace in result.model_calls] == [
+        "claim_discovery",
+        "object_planning",
+        "content_realization",
+        "repair",
     ]
     assert result.candidates[0].candidate_id == "C1"
 
@@ -1649,6 +1892,40 @@ def test_structured_table_completeness_adds_explicit_strategy_column() -> None:
     )
 
 
+def test_structured_objection_removes_model_invented_root_cause() -> None:
+    package = _package(
+        "DP-ROOT-CAUSE",
+        (
+            "### 第 1 行\n\n<!-- source-anchor: DP-ROOT-CAUSE#row-1 -->\n\n"
+            "- **A列**：异议处理\n- **B列**：可以一次性买几年的吗\n"
+            "- **D列**：产品按年续交。"
+        ),
+        [SourceAnchor(anchor_id="DP-ROOT-CAUSE#row-1", kind="table")],
+    )
+    model_claim = AtomicClaim(
+        claim_id="CL1",
+        claim_kind="objection",
+        statement="客户询问缴费周期",
+        subject="客户希望长期锁定权益",
+        attributes={"rootCause": "担心涨价或续费麻烦"},
+        evidence=[
+            ClaimEvidence(
+                anchor_id="DP-ROOT-CAUSE#row-1",
+                exact_quote="可以一次性买几年的吗",
+                source_text="可以一次性买几年的吗",
+            )
+        ],
+    )
+
+    supplemented = supplement_structured_table_claims(package, [model_claim])
+
+    assert supplemented[0].subject == "客户希望长期锁定权益"
+    assert supplemented[0].attributes == {
+        "expression": "可以一次性买几年的吗",
+        "responseContext": "产品按年续交。",
+    }
+
+
 def test_content_path_container_and_content_prefix_expand_to_leaf_paths() -> None:
     content = {"applicability": {"products": ["车险", "药享保"]}}
 
@@ -1849,6 +2126,52 @@ def test_granularity_gate_merges_same_product_version_fact_fragments() -> None:
         "subject": "药享保",
         "versionScope": "尊享版",
         "factTheme": "产品版本综合事实",
+    }
+    assert merged[0].source_claim_ids == ["CL1", "CL2"]
+
+
+def test_granularity_gate_merges_policy_rules_for_same_business_subject() -> None:
+    claims = [
+        AtomicClaim.model_validate(
+            _claim("DP-POLICY#row-1", "处方不超过5种药品", kind="rule", claim_id="CL1")
+        ),
+        AtomicClaim.model_validate(
+            _claim("DP-POLICY#row-2", "同功效药品不能同时开具", kind="rule", claim_id="CL2")
+        ),
+    ]
+    plans = [
+        CandidateObjectPlan(
+            plan_id=f"P{index}",
+            title=title,
+            domain="D1",
+            module="D1.3",
+            object_type="POLICY_RULE_SET",
+            object_boundary="同一处方规则主题共同维护",
+            classification_basis="属于处方约束",
+            identity_hints={
+                "purpose": purpose,
+                "subject": "线上问诊处方",
+                "scope": scope,
+            },
+            source_claim_ids=[f"CL{index}"],
+        )
+        for index, (title, purpose, scope) in enumerate(
+            [
+                ("处方数量规则", "限制药品数量", "西药与中成药"),
+                ("同功效药规则", "保障用药安全", "同功效药品"),
+            ],
+            start=1,
+        )
+    ]
+
+    merged = _enforce_plan_granularity(plans, claims)
+
+    assert len(merged) == 1
+    assert merged[0].title == "线上问诊处方规则集"
+    assert merged[0].identity_hints == {
+        "purpose": "规范线上问诊处方",
+        "subject": "线上问诊处方",
+        "scope": "来源资料明确的规则范围",
     }
     assert merged[0].source_claim_ids == ["CL1", "CL2"]
 

@@ -69,6 +69,20 @@ def test_explicitly_allowed_empty_fields_do_not_force_model_invention() -> None:
     assert validate_candidate_content("D4.1", "STANDARD_SCRIPT", content) == []
 
 
+def test_d13_allows_empty_preconditions_when_source_does_not_define_them() -> None:
+    content = {
+        "purpose": "规范互联网医院医生的在线处方开具规则",
+        "preconditions": [],
+        "rulesOrSteps": [
+            {"stepId": "R1", "description": "每张处方不超过5种药品且不超过7日用量。"}
+        ],
+        "exceptions": [],
+        "contractDetail": "规则来自原始资料，资料未定义额外进入条件。" * 20,
+    }
+
+    assert validate_candidate_content("D1.3", "POLICY_RULE_SET", content) == []
+
+
 def test_validates_stable_field_shapes_for_formal_content() -> None:
     errors = validate_candidate_content(
         "D1.1",
@@ -205,3 +219,23 @@ def test_objection_rejects_unstable_resolution_element_shape() -> None:
         "resolutionElements item 1 missing string fields: element, detail"
         in errors
     )
+
+
+def test_objection_resolution_detail_cannot_repeat_customer_expression() -> None:
+    content = {
+        "objectionTheme": "缴费周期咨询",
+        "expressions": ["可以一次性买几年的吗"],
+        "context": "客户在产品咨询中询问缴费周期。",
+        "rootConcernHypotheses": [],
+        "resolutionElements": [
+            {
+                "element": "说明按年续交",
+                "detail": "可以一次性买几年的吗",
+            }
+        ],
+        "sourceDetail": "用于确认客户原话不能被当作化解要素正文重复写入。" * 8,
+    }
+
+    errors = validate_candidate_content("D4.2", "CUSTOMER_OBJECTION", content)
+
+    assert any("repeats the customer expression" in error for error in errors)

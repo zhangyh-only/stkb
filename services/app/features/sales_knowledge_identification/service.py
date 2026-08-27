@@ -238,12 +238,12 @@ class SalesKnowledgeIdentificationService:
             planning_unresolved_inputs = [
                 item
                 for item in planning_unresolved_inputs
-                if item[0].get("claimId") not in uncovered_claim_ids
+                if _auxiliary_claim_id(item) not in uncovered_claim_ids
             ]
             planning_unresolved_inputs.extend(
                 item
                 for item in repair_unresolved_inputs
-                if item[0].get("claimId") not in covered_claim_ids
+                if _auxiliary_claim_id(item) not in covered_claim_ids
             )
             planning_weak_inputs.extend(repair_weak_inputs)
         remaining_uncovered_ids = _automatic_uncovered_claim_ids(
@@ -304,9 +304,10 @@ class SalesKnowledgeIdentificationService:
             planning_unresolved_inputs = [
                 item
                 for item in planning_unresolved_inputs
-                if item[0].get("claimId") not in guarded_claim_ids
+                if _auxiliary_claim_id(item) not in guarded_claim_ids
             ]
             planning_unresolved_inputs.extend(guard_unresolved_inputs)
+        object_plans = _ensure_explicit_script_plans(object_plans, atomic_claims)
         object_plans = _enforce_plan_granularity(object_plans, atomic_claims)
         planning_validation_duration_ms = round(
             (perf_counter() - planning_validation_started) * 1000
@@ -603,9 +604,30 @@ class SalesKnowledgeIdentificationService:
                     "model output is not valid JSON after repair", model_calls
                 ) from final_error
         if not isinstance(payload, dict):
-            raise SegmentIdentificationFailure(
-                "model output top level must be a JSON object", model_calls
+            repair_request = build_repair_request(
+                request.document_package_id,
+                completion.content,
+                "model output top level must be a JSON object matching the requested shape",
             )
+            repaired, repair_calls = self._complete_with_retries(
+                repair_request,
+                purpose="repair",
+                first_attempt=len(model_calls) + 1,
+            )
+            model_calls.extend(repair_calls)
+            completion = repaired
+            try:
+                payload = json.loads(completion.content)
+            except json.JSONDecodeError as final_error:
+                raise SegmentIdentificationFailure(
+                    "model output is not valid JSON after structural repair",
+                    model_calls,
+                ) from final_error
+            if not isinstance(payload, dict):
+                raise SegmentIdentificationFailure(
+                    "model output top level is not an object after structural repair",
+                    model_calls,
+                )
         return payload, completion, model_calls
 
     def _complete_with_retries(
@@ -792,6 +814,120 @@ class SalesKnowledgeIdentificationService:
                             ),
                         )
                     )
+                response_contexts = list(
+                    dict.fromkeys(
+                        response.strip()
+                        for claim in source_claims
+                        if claim.claim_kind == "objection"
+                        for response in [claim.attributes.get("responseContext")]
+                        if isinstance(response, str) and response.strip()
+                    )
+                )
+                resolution_elements = candidate_payload["content"].get(
+                    "resolutionElements", []
+                )
+                corrected_resolution_elements = [
+                    {
+                        **item,
+                        "detail": response_contexts[0],
+                    }
+                    if isinstance(item, dict)
+                    and item.get("detail") in set(verified_expressions)
+                    and len(response_contexts) == 1
+                    else item
+                    for item in resolution_elements
+                ]
+                if corrected_resolution_elements != resolution_elements:
+                    candidate_payload["content"] = {
+                        **candidate_payload["content"],
+                        "resolutionElements": corrected_resolution_elements,
+                    }
+                    normalizations.append(
+                        CandidateNormalization(
+                            candidate_id=candidate_id,
+                            field="content.resolutionElements",
+                            original_value=resolution_elements,
+                            normalized_value=corrected_resolution_elements,
+                            reason=(
+                                "客户原话不能作为化解详情，按结构化 responseContext 校准"
+                            ),
+                        )
+                    )
+            if (
+                candidate_payload.get("module") == "D4.3"
+                and candidate_payload.get("objectType") == "QA_PAIR"
+            ):
+                current_items = list(candidate_payload["content"].get("items", []))
+                existing_claim_refs = {
+                    item.get("claimRef")
+                    for item in current_items
+                    if isinstance(item, dict)
+                }
+                added_usage: list[dict[str, Any]] = []
+                for claim in source_claims:
+                    question = claim.attributes.get("question")
+                    answer = claim.attributes.get("answer")
+                    if (
+                        claim.claim_kind != "qa"
+                        or claim.claim_id in existing_claim_refs
+                        or not isinstance(question, str)
+                        or not question.strip()
+                        or not isinstance(answer, str)
+                        or not answer.strip()
+                    ):
+                        continue
+                    item_index = len(current_items)
+                    current_items.append(
+                        {
+                            "question": question.strip(),
+                            "answer": answer.strip(),
+                            "claimRef": claim.claim_id,
+                        }
+                    )
+                    added_usage.append(
+                        {
+                            "claimId": claim.claim_id,
+                            "role": "primary",
+                            "contentPaths": [
+                                f"$.items[{item_index}].question",
+                                f"$.items[{item_index}].answer",
+                            ],
+                            "explanation": (
+                                "模型遗漏结构化问答条目，按已核验 question/answer 字段补回"
+                            ),
+                        }
+                    )
+                if added_usage:
+                    original_items = candidate_payload["content"].get("items", [])
+                    fact_references = list(
+                        dict.fromkeys(
+                            [
+                                *candidate_payload["content"].get(
+                                    "factReferences", []
+                                ),
+                                *(item["claimId"] for item in added_usage),
+                            ]
+                        )
+                    )
+                    candidate_payload["content"] = {
+                        **candidate_payload["content"],
+                        "items": current_items,
+                        "factReferences": fact_references,
+                    }
+                    candidate_payload["claimUsage"] = [
+                        *candidate_payload.get("claimUsage", []),
+                        *added_usage,
+                    ]
+                    raw_candidate["claimUsage"] = candidate_payload["claimUsage"]
+                    normalizations.append(
+                        CandidateNormalization(
+                            candidate_id=candidate_id,
+                            field="content.items",
+                            original_value=original_items,
+                            normalized_value=current_items,
+                            reason="按结构化来源补回模型遗漏的问答条目",
+                        )
+                    )
             reasons.extend(macro_reasons)
             raw_claim_usage = candidate_payload.get("claimUsage", [])
             if "claimUsage" in raw_candidate:
@@ -802,6 +938,34 @@ class SalesKnowledgeIdentificationService:
                 claim_by_id,
                 candidate_id,
             )
+            if (
+                candidate_payload.get("module") == "D1.3"
+                and "claimUsage" in raw_candidate
+            ):
+                original_content = candidate_payload["content"]
+                attributed_paths = {
+                    path
+                    for usage in valid_claim_usage
+                    for path in usage.content_paths
+                }
+                pruned_content = _prune_unattributed_d13_inferences(
+                    original_content,
+                    attributed_paths,
+                )
+                if pruned_content != original_content:
+                    candidate_payload["content"] = pruned_content
+                    normalizations.append(
+                        CandidateNormalization(
+                            candidate_id=candidate_id,
+                            field="content.attributionPruning",
+                            original_value=original_content,
+                            normalized_value=pruned_content,
+                            reason=(
+                                "D1.3 前置条件或异常处理缺少正文级来源归因，"
+                                "按事实源优先原则移除模型推演内容"
+                            ),
+                        )
+                    )
             candidate_payload["claimUsage"] = [
                 item.model_dump(by_alias=True) for item in valid_claim_usage
             ]
@@ -1022,6 +1186,24 @@ class SalesKnowledgeIdentificationService:
                 reasons.append("duplicate candidate content in the same document")
             seen_fingerprints.add(fingerprint)
             if reasons:
+                for claim in source_claims:
+                    content_unresolved_inputs.append(
+                        (
+                            {
+                                "claimId": claim.claim_id,
+                                "description": (
+                                    f"{claim.claim_id}：所属候选 {candidate_id} "
+                                    "未通过正式内容合同"
+                                ),
+                                "reason": "候选被拒绝：" + "；".join(reasons),
+                                "evidence": sorted(
+                                    {item.anchor_id for item in claim.evidence}
+                                ),
+                                "module": candidate.module,
+                            },
+                            {item.anchor_id for item in claim.evidence},
+                        )
+                    )
                 rejected.append(
                     RejectedCandidate(
                         candidate_id=candidate.candidate_id,
@@ -1036,13 +1218,24 @@ class SalesKnowledgeIdentificationService:
         used_content_claim_ids = {
             usage.claim_id for candidate in accepted for usage in candidate.claim_usage
         }
+        content_unresolved_inputs = [
+            item
+            for item in content_unresolved_inputs
+            if not (
+                isinstance(item[0], dict)
+                and item[0].get("claimId") in used_content_claim_ids
+            )
+        ]
         accepted_by_id = {candidate.candidate_id: candidate for candidate in accepted}
         for candidate_id in usage_contract_candidate_ids:
             candidate = accepted_by_id.get(candidate_id)
             if candidate is None:
                 continue
+            candidate_used_claim_ids = {
+                usage.claim_id for usage in candidate.claim_usage
+            }
             for claim_id in candidate.planned_source_claim_ids:
-                if claim_id in used_content_claim_ids:
+                if claim_id in candidate_used_claim_ids:
                     continue
                 claim = candidate_claim_scopes.get(candidate_id, {}).get(claim_id)
                 if claim is None:
@@ -1377,11 +1570,17 @@ def _validate_object_plans(
                 if claim.claim_kind == "objection"
             ]
             if len(objection_claims) == 1:
+                source_expression = objection_claims[0].attributes.get("expression")
                 plan = plan.model_copy(
                     update={
                         "identity_hints": {
                             **plan.identity_hints,
-                            "objectionIntent": objection_claims[0].subject.strip(),
+                            "objectionIntent": (
+                                source_expression.strip()
+                                if isinstance(source_expression, str)
+                                and source_expression.strip()
+                                else objection_claims[0].subject.strip()
+                            ),
                         }
                     }
                 )
@@ -1681,6 +1880,92 @@ def _constrain_plan_source_claim_scope(
     return plan.model_copy(update={"source_claim_ids": retained_ids})
 
 
+def _ensure_explicit_script_plans(
+    plans: list[CandidateObjectPlan], claims: list[AtomicClaim]
+) -> list[CandidateObjectPlan]:
+    """Guarantee that every verified full script remains a D4.1 object duty.
+
+    A planning model may use a script as evidence for D3.3 and then omit the
+    independently reusable verbatim asset.  The claim kind already expresses a
+    verified structural fact, so this guard restores the missing duty without
+    inventing content.
+    """
+    claim_by_id = {claim.claim_id: claim for claim in claims}
+    explicit_script_claim_ids = {
+        claim_id
+        for plan in plans
+        if plan.module == "D4.1" and plan.object_type == "STANDARD_SCRIPT"
+        for claim_id in plan.source_claim_ids
+        if claim_by_id.get(claim_id)
+        and claim_by_id[claim_id].claim_kind == "script"
+    }
+    normalized_plans: list[CandidateObjectPlan] = []
+    for plan in plans:
+        plan_claims = [
+            claim_by_id[claim_id]
+            for claim_id in plan.source_claim_ids
+            if claim_id in claim_by_id
+        ]
+        if (
+            plan.module == "D3.3"
+            and any(claim.claim_kind == "strategy" for claim in plan_claims)
+        ):
+            plan = plan.model_copy(
+                update={
+                    "source_claim_ids": [
+                        claim.claim_id
+                        for claim in plan_claims
+                        if claim.claim_kind != "script"
+                    ]
+                }
+            )
+        normalized_plans.append(plan)
+
+    identity_contract = IDENTITY_CONTRACT_BY_MODULE["D4.1"]
+    content_contract = CONTENT_CONTRACT_BY_MODULE["D4.1"]
+    for claim in claims:
+        if (
+            claim.claim_kind != "script"
+            or claim.claim_id in explicit_script_claim_ids
+        ):
+            continue
+        communication_goal = claim.attributes.get("communicationGoal")
+        audience = claim.attributes.get("audience")
+        normalized_plans.append(
+            CandidateObjectPlan(
+                plan_id=f"guard-D41-{claim.claim_id}",
+                title=claim.subject,
+                domain="D4",
+                module="D4.1",
+                object_type="STANDARD_SCRIPT",
+                object_boundary=(
+                    f"同一对象：{identity_contract.same_object_when} "
+                    f"必须拆分：{identity_contract.different_object_when}"
+                ),
+                classification_basis=(
+                    f"纳入：{content_contract.inclusion} "
+                    f"排除：{content_contract.exclusion}"
+                ),
+                identity_hints={
+                    "communicationGoal": (
+                        communication_goal.strip()
+                        if isinstance(communication_goal, str)
+                        and communication_goal.strip()
+                        else claim.subject
+                    ),
+                    "method": "完整原文复用",
+                    "applicability": (
+                        audience.strip()
+                        if isinstance(audience, str) and audience.strip()
+                        else "来源资料适用场景"
+                    ),
+                },
+                source_claim_ids=[claim.claim_id],
+            )
+        )
+    return normalized_plans
+
+
 def _is_all_versions_scope(value: Any) -> bool:
     if not isinstance(value, str):
         return False
@@ -1890,6 +2175,44 @@ def _business_content_leaf_paths(content: dict[str, Any]) -> list[str]:
     return sorted(leaf_paths)
 
 
+def _prune_unattributed_d13_inferences(
+    content: dict[str, Any], attributed_paths: set[str]
+) -> dict[str, Any]:
+    """Remove D1.3 fields that the model filled without a verified claim path.
+
+    Preconditions are safe to remove only when none of them is attributed, avoiding
+    index shifts for partially attributed arrays.  An exception condition may remain
+    independently useful; its unsupported handling is removed instead of invented.
+    """
+    normalized = dict(content)
+    preconditions = content.get("preconditions")
+    if (
+        isinstance(preconditions, list)
+        and preconditions
+        and not any(path.startswith("$.preconditions[") for path in attributed_paths)
+    ):
+        normalized["preconditions"] = []
+
+    exceptions = content.get("exceptions")
+    if isinstance(exceptions, list):
+        normalized_exceptions: list[Any] = []
+        for index, item in enumerate(exceptions):
+            if not isinstance(item, dict):
+                normalized_exceptions.append(item)
+                continue
+            normalized_item = dict(item)
+            condition_path = f"$.exceptions[{index}].condition"
+            handling_path = f"$.exceptions[{index}].handling"
+            if (
+                condition_path in attributed_paths
+                and handling_path not in attributed_paths
+            ):
+                normalized_item.pop("handling", None)
+            normalized_exceptions.append(normalized_item)
+        normalized["exceptions"] = normalized_exceptions
+    return normalized
+
+
 def _critical_attribution_paths(
     module: str, object_type: str, content: dict[str, Any]
 ) -> set[str]:
@@ -1914,11 +2237,15 @@ def _critical_attribution_paths(
     elif module == "D4.1" and object_type == "STANDARD_SCRIPT":
         prefixes = ("$.script",)
     elif module == "D4.2":
-        prefixes = (
-            "$.expressions[",
-            "$.rootConcernHypotheses[",
-            "$.resolutionElements[",
-        )
+        return {
+            path
+            for path in all_paths
+            if path.startswith(("$.expressions[", "$.rootConcernHypotheses["))
+            or (
+                path.startswith("$.resolutionElements[")
+                and path.endswith(".detail")
+            )
+        }
     elif module == "D4.3" and object_type == "QA_PAIR":
         prefixes = ("$.items[",)
     else:
@@ -1992,6 +2319,14 @@ def _automatic_uncovered_claim_ids(
         == "模型未将该主张分配给任何对象计划，禁止静默丢失"
         and isinstance(item.get("claimId"), str)
     }
+
+
+def _auxiliary_claim_id(item: tuple[Any, set[str]]) -> str | None:
+    raw_item = item[0]
+    if not isinstance(raw_item, dict):
+        return None
+    claim_id = raw_item.get("claimId")
+    return claim_id if isinstance(claim_id, str) else None
 
 
 def _apply_plan_augmentations(
@@ -2138,6 +2473,41 @@ def _enforce_plan_granularity(
                     **primary.identity_hints,
                     "versionScope": version_scope,
                     "factTheme": "产品版本综合事实",
+                },
+                "source_claim_ids": list(
+                    dict.fromkeys(
+                        claim_id
+                        for item in group
+                        for claim_id in item.source_claim_ids
+                    )
+                ),
+            }
+        )
+        plans = [
+            merged if plan.plan_id == primary.plan_id else plan
+            for plan in plans
+            if plan not in group[1:]
+        ]
+    policy_groups: dict[str, list[CandidateObjectPlan]] = {}
+    for plan in plans:
+        if plan.module != "D1.3" or plan.object_type != "POLICY_RULE_SET":
+            continue
+        subject = plan.identity_hints.get("subject")
+        if isinstance(subject, str) and subject.strip():
+            policy_groups.setdefault(subject.strip().casefold(), []).append(plan)
+    for group in policy_groups.values():
+        if len(group) < 2:
+            continue
+        primary = group[0]
+        subject = str(primary.identity_hints["subject"]).strip()
+        merged = primary.model_copy(
+            update={
+                "title": f"{subject}规则集",
+                "identity_hints": {
+                    **primary.identity_hints,
+                    "purpose": f"规范{subject}",
+                    "subject": subject,
+                    "scope": "来源资料明确的规则范围",
                 },
                 "source_claim_ids": list(
                     dict.fromkeys(

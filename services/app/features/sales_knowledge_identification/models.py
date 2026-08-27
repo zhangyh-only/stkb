@@ -200,7 +200,13 @@ class RejectedAuxiliaryItem(ApiModel):
 class CandidateNormalization(ApiModel):
     candidate_id: str
     field: Literal[
-        "domain", "entity_mentions", "relations", "content.expressions"
+        "domain",
+        "entity_mentions",
+        "relations",
+        "content.expressions",
+        "content.items",
+        "content.resolutionElements",
+        "content.attributionPruning",
     ]
     original_value: Any
     normalized_value: Any

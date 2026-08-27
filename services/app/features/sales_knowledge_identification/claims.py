@@ -260,10 +260,23 @@ def supplement_structured_table_claims(
             if matching_indexes:
                 primary_index = matching_indexes[0]
                 current = supplemented[primary_index]
+                retained_attributes = current.attributes
+                if claim_kind == "objection":
+                    retained_attributes = {
+                        key: value
+                        for key, value in current.attributes.items()
+                        if key
+                        not in {
+                            "rootCause",
+                            "rootConcern",
+                            "psychology",
+                            "customerPsychology",
+                        }
+                    }
                 supplemented[primary_index] = current.model_copy(
                     update={
                         "attributes": {
-                            **current.attributes,
+                            **retained_attributes,
                             **structured_attributes,
                         },
                         "module_hints": list(

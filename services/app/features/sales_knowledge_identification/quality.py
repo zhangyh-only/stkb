@@ -153,12 +153,17 @@ def _evaluate_group(
         set(required_unresolved_evidence) - unresolved_evidence
     )
     required_content_fields = group.get("requiredContentFields", [])
+    allow_empty_content_fields = set(group.get("allowEmptyContentFields", []))
     missing_content_fields = sorted(
         {
             field
             for candidate in matched_candidates
             for field in required_content_fields
-            if candidate.content.get(field) in (None, "", [], {})
+            if field not in candidate.content
+            or (
+                field not in allow_empty_content_fields
+                and candidate.content.get(field) in (None, "", [], {})
+            )
         }
     )
     missing_item_fields = sorted(

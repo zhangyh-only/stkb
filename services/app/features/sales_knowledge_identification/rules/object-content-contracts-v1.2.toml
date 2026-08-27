@@ -27,11 +27,11 @@ negative_example = "因为出现‘名单’二字就把销售线索分类规则
 module = "D1.3"
 object_types = ["POLICY_RULE_SET", "BUSINESS_PROCESS", "PROCESS_STEP"]
 required_fields = ["purpose", "preconditions", "rulesOrSteps", "exceptions"]
-allow_empty_fields = ["exceptions"]
+allow_empty_fields = ["preconditions", "exceptions"]
 minimum_content_chars = 160
 granularity = "同一业务办理目的、参与角色、进入条件和完成边界下的完整步骤序列形成对象；单个步骤默认归入流程内部。"
 inclusion = "投保、核保、理赔、退保、续保、禁呼执行或服务交付中可落到明确业务结果的多步流程。"
-exclusion = "销售会话条件分支、单条身份披露/投诉上报等合规义务、实时状态、只有一个动作而没有完整办理结果。"
+exclusion = "销售会话条件分支、单条身份披露/投诉上报等合规义务、实时状态、只有一个动作而没有完整办理结果；资料没有明确进入条件时不得补造前置条件。"
 positive_example = "在线问诊购药流程包含入口、信息确认、医生问诊、支付和配送。"
 negative_example = "只写‘线上问诊很方便’或把每一步拆成独立对象。"
 

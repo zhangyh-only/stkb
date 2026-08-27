@@ -134,7 +134,7 @@ export type RejectedCandidate = {
 
 export type CandidateNormalization = {
   candidateId: string
-  field: 'domain' | 'entity_mentions' | 'relations' | 'content.expressions'
+  field: 'domain' | 'entity_mentions' | 'relations' | 'content.expressions' | 'content.items' | 'content.resolutionElements' | 'content.attributionPruning'
   originalValue: unknown
   normalizedValue: unknown
   reason: string

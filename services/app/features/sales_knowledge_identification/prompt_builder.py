@@ -258,6 +258,9 @@ def build_content_realization_request(
    代替一个短语列表项。
 4. 不用常识补写来源未提供的事实。合同允许为空的字段可显式给空数组；其余缺失必须忠实说明
    unresolved，而不是编造。
+   D1.3 的 preconditions 只收录资料明确写出的进入条件；“用户需拥有权益”“患者有购药需求”
+   这类从流程目的推导的常识不是来源事实，必须删除并输出空数组。exceptions 只能保留资料明确给出的
+   condition 和 handling；不得把“接受医生调整”等自然反应补成处理动作。
 5. 资料中的培训谚语、讲师观点和经验性判断必须保留来源立场。TERM 的每个 terms 条目中，
    standardExplanation 可准确转述资料主张，sourceStance 必须说明它是何种来源观点，
    usageBoundary 必须写明不能由此推断什么；不得把“往往/可能”改写成客观必然规律。
