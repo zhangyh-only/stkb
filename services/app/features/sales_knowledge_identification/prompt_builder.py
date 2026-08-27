@@ -25,7 +25,7 @@ def build_claim_discovery_request(
 3. 完整话术与其体现的策略是两个消费职责：原文同时提供时，分别输出 script 和 strategy。
 4. 不同产品版本、客群、产品组合、根本异议、问答条目默认分别发现，不能用“若干”“常见”
    或一个汇总陈述代替。
-5. evidence.exactQuote 必须逐字复制自对应来源锚点，不能改写。引句应足以证明该主张，
+5. evidence.exactQuote 必须逐字复制自对应来源锚点，不能把多处原文拼接或改写。引句应足以证明该主张，
    但不必复制整段长话术；禁止用省略号替换原文、改换标点或拼接不连续句子。
 6. Excel 代理 Markdown 中如证据来自某列，selector 必须填写原列标签（如 B列、C列、D列）；
    普通段落不填 selector。系统会用 selector 回填并保存该字段完整原文。

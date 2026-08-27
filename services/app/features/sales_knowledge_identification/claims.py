@@ -88,6 +88,16 @@ def validate_atomic_claims(
                 )
                 continue
             if evidence.exact_quote not in source_text:
+                if evidence.selector is not None:
+                    resolved_evidence.append(
+                        evidence.model_copy(
+                            update={
+                                "exact_quote": source_text,
+                                "source_text": source_text,
+                            }
+                        )
+                    )
+                    continue
                 reasons.append(
                     f"exact quote not found in {evidence.anchor_id}"
                     + (f" selector {evidence.selector}" if evidence.selector else "")

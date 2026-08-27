@@ -345,7 +345,7 @@ class SalesKnowledgeIdentificationService:
         if not claims:
             return [], []
         request = build_object_planning_request(
-            document_package_id, claims, self.max_candidates
+            document_package_id, claims, len(claims)
         )
         try:
             payload, completion, calls = self._complete_json_request(

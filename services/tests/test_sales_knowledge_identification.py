@@ -636,6 +636,30 @@ def test_validate_atomic_claims_rejects_non_verbatim_quote() -> None:
     assert rejected[0].reasons == ["exact quote not found in DP-QUOTE#page-1"]
 
 
+def test_claim_validation_uses_complete_selected_cell_when_model_paraphrases_quote() -> None:
+    package = _package(
+        "DP-CELL",
+        (
+            "### 第 3 行\n\n<!-- source-anchor: DP-CELL#row-3 -->\n\n"
+            "- **D列**：先认同客户顾虑，再说明线上问诊和药品直赔的价值。"
+        ),
+        [SourceAnchor(anchor_id="DP-CELL#row-3", kind="table")],
+    )
+    raw = _claim(
+        "DP-CELL#row-3",
+        "认同顾虑并强调产品价值",
+        kind="strategy",
+        selector="D列",
+    )
+
+    accepted, rejected = validate_atomic_claims([raw], package)
+
+    assert rejected == []
+    assert accepted[0].evidence[0].exact_quote == (
+        "先认同客户顾虑，再说明线上问诊和药品直赔的价值。"
+    )
+
+
 def test_global_planning_can_merge_cross_kind_claims_into_one_object() -> None:
     claims = [
         _claim("DP-GLOBAL#page-1", "尊享版保障责任", kind="fact", claim_id="CL1"),
