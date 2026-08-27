@@ -971,7 +971,9 @@ def _validate_object_plans(
                     "evidence": sorted(
                         {evidence.anchor_id for evidence in claim.evidence}
                     ),
-                    "module": claim.module_hints[0] if claim.module_hints else None,
+                    # moduleHints 是发现阶段的模型提示，不是已完成的分类裁决。
+                    # 未形成对象时不能把它升级为未决项的正式模块归属。
+                    "module": None,
                 },
                 valid_anchors,
             )

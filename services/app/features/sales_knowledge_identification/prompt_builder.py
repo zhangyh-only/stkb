@@ -135,8 +135,17 @@ def build_object_planning_request(
     "identityHints": {{"subject": "业务主体", "scope": "适用范围"}},
     "sourceClaimIds": ["CL1"]
   }}],
-  "weakSignals": [],
-  "unresolvedItems": [{{"description":"CL9：无法确定对象边界", "reason":"具体原因", "evidence":[]}}]
+  "weakSignals": [{{
+    "module":"D2.4",
+    "reason":"CL9：仅为待验证信号的具体原因",
+    "evidence":["真实anchorId"]
+  }}],
+  "unresolvedItems": [{{
+    "description":"CL10：无法确定对象边界",
+    "reason":"具体原因",
+    "evidence":["真实anchorId"],
+    "module":null
+  }}]
 }}"""
     return ModelRequest(
         document_package_id=document_package_id,

@@ -350,6 +350,23 @@ def test_two_stage_identification_validates_catalog_and_source_claims() -> None:
     assert "内容编制器" in gateway.requests[2].system_prompt
 
 
+def test_uncovered_claim_does_not_promote_module_hint_to_classification() -> None:
+    claim = _claim("DP-HINT#page-1", "经验性客户判断", kind="customer_signal")
+    claim["moduleHints"] = ["D3.1"]
+    gateway = TwoStageGateway(
+        [claim],
+        {"candidates": [], "weakSignals": [], "unresolvedItems": []},
+    )
+
+    result = SalesKnowledgeIdentificationService(gateway=gateway).identify(
+        _package("DP-HINT", "# 示例\n\n经验性客户判断。")
+    )
+
+    assert len(result.unresolved_items) == 1
+    assert result.unresolved_items[0].module is None
+    assert "禁止静默丢失" in result.unresolved_items[0].reason
+
+
 def test_identification_rejects_relations_to_a_rejected_candidate() -> None:
     first = _candidate("D1.1", "PRODUCT_FACT", ["CL1"])
     first["relations"] = [
