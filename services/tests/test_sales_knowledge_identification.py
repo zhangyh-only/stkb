@@ -459,6 +459,26 @@ def test_planning_rejects_standard_script_when_source_only_mentions_template() -
     ]
 
 
+def test_planning_rejects_single_compliance_action_as_business_process() -> None:
+    gateway = TwoStageGateway(
+        [_claim("DP-REPORT#page-1", "及时上报投诉", kind="process")],
+        {
+            "candidates": [_candidate("D1.3", "BUSINESS_PROCESS", ["CL1"])],
+            "weakSignals": [],
+            "unresolvedItems": [],
+        },
+    )
+
+    result = SalesKnowledgeIdentificationService(gateway=gateway).identify(
+        _package("DP-REPORT", "# 示例\n\n及时上报投诉。")
+    )
+
+    assert result.candidates == []
+    assert result.rejected_object_plans[0].reasons == [
+        "business process requires a source-backed multi-step sequence"
+    ]
+
+
 def test_identification_rejects_relations_to_a_rejected_candidate() -> None:
     first = _candidate("D1.1", "PRODUCT_FACT", ["CL1"])
     first["relations"] = [

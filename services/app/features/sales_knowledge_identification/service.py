@@ -956,6 +956,21 @@ def _validate_object_plans(
             )
             if not has_source_script:
                 reasons.append("standard script source text is not provided")
+        if plan.module == "D1.3" and plan.object_type == "BUSINESS_PROCESS":
+            has_embedded_sequence = any(
+                isinstance(claim.attributes.get(field), list)
+                and len(claim.attributes[field]) >= 2
+                for claim in plan_claims
+                for field in ("steps", "actions", "rulesOrSteps")
+            )
+            has_sourced_sequence = (
+                len(plan_claims) >= 2
+                and any(claim.claim_kind == "process" for claim in plan_claims)
+            ) or has_embedded_sequence
+            if not has_sourced_sequence:
+                reasons.append(
+                    "business process requires a source-backed multi-step sequence"
+                )
         if (
             plan.module == "D3.3"
             and plan_claims

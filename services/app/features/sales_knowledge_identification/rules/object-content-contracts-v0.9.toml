@@ -1,4 +1,4 @@
-version = "object-content-contracts-v0.8"
+version = "object-content-contracts-v0.9"
 
 [[contracts]]
 module = "D1.1"
@@ -29,9 +29,9 @@ object_types = ["POLICY_RULE_SET", "BUSINESS_PROCESS", "PROCESS_STEP"]
 required_fields = ["purpose", "preconditions", "rulesOrSteps", "exceptions"]
 allow_empty_fields = ["exceptions"]
 minimum_content_chars = 160
-granularity = "同一业务目的、参与角色和完成边界下的规则/步骤形成一项对象；步骤默认保留在流程内部。"
-inclusion = "投保、核保、理赔、退保、续保或服务使用的条件、步骤、例外和完成结果。"
-exclusion = "销售阶段、实时会话状态、缺少业务办理目标的动作建议。"
+granularity = "同一业务办理目的、参与角色、进入条件和完成边界下的完整步骤序列形成对象；单个步骤默认归入流程内部。"
+inclusion = "投保、核保、理赔、退保、续保、禁呼执行或服务交付中可落到明确业务结果的多步流程。"
+exclusion = "销售会话条件分支、单条身份披露/投诉上报等合规义务、实时状态、只有一个动作而没有完整办理结果。"
 positive_example = "在线问诊购药流程包含入口、信息确认、医生问诊、支付和配送。"
 negative_example = "只写‘线上问诊很方便’或把每一步拆成独立对象。"
 
@@ -139,10 +139,10 @@ module = "D3.4"
 object_types = ["COMPLIANCE_RULE", "PROHIBITED_EXPRESSION", "RISK_PATTERN", "COMPLIANT_REWRITE_GUIDE"]
 required_fields = ["ruleName", "prohibitedOrRequiredBehavior", "legalOrPolicyBasis", "applicability", "compliantAction"]
 minimum_content_chars = 240
-granularity = "同一合规主题、依据、适用范围和正确做法形成对象。"
-inclusion = "有监管/制度依据的禁止、要求、风险模式及合规处理。"
+granularity = "同一合规检查点、依据、适用范围和正确做法形成对象；运行行为限制与监管处罚因消费方不同应拆分。"
+inclusion = "有监管/制度依据的禁止、披露义务、行为要求、风险模式、处罚后果及合规处理，即使内容带有执行时机或动作。"
 exclusion = "无依据经验、一次投诉结果、只写禁止但没有适用范围或正确做法。"
-positive_example = "返利合规规则包含禁止行为、监管依据、触发场景和正确应对。"
+positive_example = "返利禁令包含禁止行为、监管依据和正确应对；外呼次数限制与违规后的监管处罚分别形成检查规则。"
 negative_example = "不要乱说话。"
 
 [[contracts]]
