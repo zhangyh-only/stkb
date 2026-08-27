@@ -1,7 +1,22 @@
 import json
 
 from app.features.sales_knowledge_identification.models import IdentificationResult
-from app.features.sales_knowledge_identification.quality import evaluate_against_gold
+from app.features.sales_knowledge_identification.quality import (
+    evaluate_against_gold,
+    find_gold_path,
+)
+
+
+def test_find_gold_path_falls_back_to_reviewable_samples(tmp_path) -> None:
+    samples_root = tmp_path / "samples"
+    sample_dir = samples_root / "DP-SAMPLE"
+    sample_dir.mkdir(parents=True)
+    gold_path = sample_dir / "gold-v0.2.json"
+    gold_path.write_text("{}", encoding="utf-8")
+
+    found = find_gold_path(tmp_path / "workspace", "DP-SAMPLE", samples_root)
+
+    assert found == gold_path
 
 
 def test_quality_report_detects_group_recall_and_over_split(tmp_path) -> None:

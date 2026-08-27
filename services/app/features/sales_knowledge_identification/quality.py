@@ -65,9 +65,18 @@ def evaluate_against_gold(
     )
 
 
-def find_gold_path(workspace_root: Path, document_package_id: str) -> Path | None:
-    evaluation_root = workspace_root / "evaluations" / document_package_id
-    candidates = sorted(evaluation_root.glob("gold-v*.json"))
+def find_gold_path(
+    workspace_root: Path,
+    document_package_id: str,
+    samples_root: Path | None = None,
+) -> Path | None:
+    candidates = sorted(
+        (workspace_root / "evaluations" / document_package_id).glob("gold-v*.json")
+    )
+    if not candidates and samples_root is not None:
+        candidates = sorted(
+            (samples_root / document_package_id).glob("gold-v*.json")
+        )
     return candidates[-1] if candidates else None
 
 
@@ -86,12 +95,13 @@ def _evaluate_group(
     predicted_count = len(matched_candidates)
     expected_count = int(group["expectedCount"])
     required_item_count = group.get("requiredItemCount")
+    required_item_field = group.get("requiredItemField", "items")
     predicted_item_count = None
     if required_item_count is not None:
         predicted_item_count = sum(
-            len(candidate.content.get("items", []))
+            len(candidate.content.get(required_item_field, []))
             for candidate in matched_candidates
-            if isinstance(candidate.content.get("items", []), list)
+            if isinstance(candidate.content.get(required_item_field, []), list)
         )
     if predicted_count == expected_count and (
         required_item_count is None or predicted_item_count == required_item_count

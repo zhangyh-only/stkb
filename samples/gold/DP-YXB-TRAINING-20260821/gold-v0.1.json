@@ -1,0 +1,83 @@
+{
+  "status": "proxy_draft",
+  "documentPackageId": "DP-YXB-TRAINING-20260821",
+  "reviewFocus": "长培训资料应形成版本事实、清单、服务流程、规则、卖点、FAQ和组合策略，而非课程摘要",
+  "expectedObjectGroups": [
+    {
+      "key": "training-product-version-facts",
+      "expectedCount": 2,
+      "module": "D1.1",
+      "objectTypes": ["PRODUCT_VERSION_FACT"],
+      "evidence": ["DP-YXB-TRAINING-20260821#page-11"],
+      "splitRule": "尊享版和全能版的价格、责任、赔付与药品范围不同"
+    },
+    {
+      "key": "training-knowledge-lists",
+      "expectedCount": 2,
+      "module": "D1.2",
+      "objectTypes": ["LIST_FACT"],
+      "evidence": [
+        "DP-YXB-TRAINING-20260821#page-10",
+        "DP-YXB-TRAINING-20260821#page-13"
+      ],
+      "splitRule": "药品清单与疾病/科室覆盖清单用途、成员结构和更新来源不同"
+    },
+    {
+      "key": "training-service-processes",
+      "expectedCount": 3,
+      "module": "D1.3",
+      "objectTypes": ["BUSINESS_PROCESS"],
+      "evidence": [
+        "DP-YXB-TRAINING-20260821#page-18",
+        "DP-YXB-TRAINING-20260821#page-19",
+        "DP-YXB-TRAINING-20260821#page-20"
+      ],
+      "splitRule": "服务入口、在线问诊直赔购药、在线药房直赔购药具有独立用户目标与步骤"
+    },
+    {
+      "key": "training-service-rules",
+      "expectedCount": 2,
+      "module": "D1.3",
+      "objectTypes": ["POLICY_RULE_SET"],
+      "evidence": [
+        "DP-YXB-TRAINING-20260821#page-18",
+        "DP-YXB-TRAINING-20260821#page-24"
+      ],
+      "splitRule": "保单/退保使用条件与处方/订单风控限制依据和消费问题不同"
+    },
+    {
+      "key": "training-selling-points",
+      "expectedCount": 6,
+      "module": "D5.1",
+      "objectTypes": ["SELLING_POINT"],
+      "evidence": [
+        "DP-YXB-TRAINING-20260821#page-14",
+        "DP-YXB-TRAINING-20260821#page-15",
+        "DP-YXB-TRAINING-20260821#page-16"
+      ],
+      "splitRule": "六个亮点的客户价值、事实依据和检测条件可独立匹配与评价"
+    },
+    {
+      "key": "training-faq",
+      "expectedCount": 1,
+      "module": "D4.3",
+      "objectTypes": ["QA_PAIR"],
+      "requiredItemCount": 8,
+      "evidence": ["DP-YXB-TRAINING-20260821#page-25"]
+    },
+    {
+      "key": "training-bundle-strategies",
+      "expectedCount": 2,
+      "module": "D3.3",
+      "objectTypes": ["SALES_STRATEGY"],
+      "evidence": ["DP-YXB-TRAINING-20260821#page-26"],
+      "splitRule": "乐驾组合与免健告/全能保组合的产品范围和推荐逻辑不同"
+    }
+  ],
+  "prohibitedPatterns": [
+    "把26页培训压成一个课程摘要对象",
+    "把尊享版和全能版合成一个产品版本事实",
+    "把三个服务流程压成一个无顺序的服务说明",
+    "把六大亮点只保留为一句宣传口号"
+  ]
+}

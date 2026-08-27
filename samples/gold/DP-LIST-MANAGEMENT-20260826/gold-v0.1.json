@@ -1,0 +1,36 @@
+{
+  "status": "proxy_draft",
+  "documentPackageId": "DP-LIST-MANAGEMENT-20260826",
+  "reviewFocus": "名单管理资料不是D1清单事实；应形成客户状态维度和可执行分类/迁移规则",
+  "expectedObjectGroups": [
+    {
+      "key": "lead-status-dimension",
+      "expectedCount": 1,
+      "module": "D2.1",
+      "objectTypes": ["PROFILE_DIMENSION"],
+      "requiredItemCount": 3,
+      "requiredItemField": "allowedValues",
+      "evidence": [
+        "DP-LIST-MANAGEMENT-20260826#section-2",
+        "DP-LIST-MANAGEMENT-20260826#section-3"
+      ],
+      "splitRule": "A/B/C是同一客户跟进状态维度的受控值，不逐值建KnowledgeObject"
+    },
+    {
+      "key": "lead-classification-decisions",
+      "expectedCount": 2,
+      "module": "D3.3",
+      "objectTypes": ["DECISION_RULE", "SALES_STRATEGY"],
+      "evidence": [
+        "DP-LIST-MANAGEMENT-20260826#section-4",
+        "DP-LIST-MANAGEMENT-20260826#section-5"
+      ],
+      "splitRule": "初次分类判定与复播只升不降是两个独立触发上下文和更新规则"
+    }
+  ],
+  "prohibitedPatterns": [
+    "因为资料标题含名单就归入D1.2清单事实库",
+    "把忙碌、已买等客户原话直接当成完整标准话术",
+    "把A/B/C三个值拆成三个画像维度对象"
+  ]
+}

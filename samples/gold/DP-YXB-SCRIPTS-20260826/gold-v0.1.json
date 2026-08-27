@@ -1,0 +1,73 @@
+{
+  "status": "proxy_draft",
+  "documentPackageId": "DP-YXB-SCRIPTS-20260826",
+  "reviewFocus": "完整话术、策略、异议、问答和版本事实不能被压成少量摘要对象",
+  "expectedObjectGroups": [
+    {
+      "key": "product-version-facts",
+      "expectedCount": 2,
+      "module": "D1.1",
+      "objectTypes": ["PRODUCT_VERSION_FACT"],
+      "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-1-row-3", "DP-YXB-SCRIPTS-20260826#sheet-1-row-4"],
+      "splitRule": "两个版本具有独立保费、责任、药品范围和更新生命周期"
+    },
+    {
+      "key": "service-process",
+      "expectedCount": 1,
+      "module": "D1.3",
+      "objectTypes": ["BUSINESS_PROCESS"],
+      "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-2-row-3"]
+    },
+    {
+      "key": "prescription-rules",
+      "expectedCount": 1,
+      "module": "D1.3",
+      "objectTypes": ["POLICY_RULE_SET"],
+      "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-2-row-7", "DP-YXB-SCRIPTS-20260826#sheet-2-row-8", "DP-YXB-SCRIPTS-20260826#sheet-2-row-9"]
+    },
+    {
+      "key": "audience-strategies",
+      "expectedCount": 4,
+      "module": "D3.3",
+      "objectTypes": ["SALES_STRATEGY"],
+      "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-1-row-5", "DP-YXB-SCRIPTS-20260826#sheet-1-row-6", "DP-YXB-SCRIPTS-20260826#sheet-1-row-7", "DP-YXB-SCRIPTS-20260826#sheet-1-row-8"],
+      "splitRule": "客群、触发条件、产品版本和推荐逻辑不同"
+    },
+    {
+      "key": "bundle-strategies",
+      "expectedCount": 2,
+      "module": "D3.3",
+      "objectTypes": ["SALES_STRATEGY"],
+      "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-1-row-9", "DP-YXB-SCRIPTS-20260826#sheet-1-row-10"]
+    },
+    {
+      "key": "reusable-scripts",
+      "expectedCount": 8,
+      "module": "D4.1",
+      "objectTypes": ["STANDARD_SCRIPT"],
+      "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-1-row-3", "DP-YXB-SCRIPTS-20260826#sheet-1-row-4", "DP-YXB-SCRIPTS-20260826#sheet-1-row-5", "DP-YXB-SCRIPTS-20260826#sheet-1-row-6", "DP-YXB-SCRIPTS-20260826#sheet-1-row-7", "DP-YXB-SCRIPTS-20260826#sheet-1-row-8", "DP-YXB-SCRIPTS-20260826#sheet-1-row-9", "DP-YXB-SCRIPTS-20260826#sheet-1-row-10"]
+    },
+    {
+      "key": "customer-objections",
+      "expectedCount": 6,
+      "module": "D4.2",
+      "objectTypes": ["CUSTOMER_OBJECTION"],
+      "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-1-row-11", "DP-YXB-SCRIPTS-20260826#sheet-1-row-12", "DP-YXB-SCRIPTS-20260826#sheet-1-row-13", "DP-YXB-SCRIPTS-20260826#sheet-1-row-14", "DP-YXB-SCRIPTS-20260826#sheet-1-row-15", "DP-YXB-SCRIPTS-20260826#sheet-1-row-16"]
+    },
+    {
+      "key": "product-faq",
+      "expectedCount": 1,
+      "module": "D4.3",
+      "objectTypes": ["QA_PAIR"],
+      "requiredItemCount": 8,
+      "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-2-row-3", "DP-YXB-SCRIPTS-20260826#sheet-2-row-4", "DP-YXB-SCRIPTS-20260826#sheet-2-row-5", "DP-YXB-SCRIPTS-20260826#sheet-2-row-6", "DP-YXB-SCRIPTS-20260826#sheet-2-row-7", "DP-YXB-SCRIPTS-20260826#sheet-2-row-8", "DP-YXB-SCRIPTS-20260826#sheet-2-row-9", "DP-YXB-SCRIPTS-20260826#sheet-2-row-10"]
+    }
+  ],
+  "prohibitedPatterns": [
+    "把尊享版和全能版合并为一个版本事实对象",
+    "把多个不同客群或产品组合策略合并为一个对象",
+    "把六类不同异议压成一个常见异议摘要",
+    "只形成策略而漏掉原文完整话术",
+    "content只有summary字段"
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "status": "proxy_draft",
+  "documentPackageId": "DP-COMPLIANCE-20260826",
+  "reviewFocus": "每项合规主题保留禁止/要求行为、依据、适用范围和正确动作，不压成合规摘要",
+  "expectedObjectGroups": [
+    {
+      "key": "compliance-rule-themes",
+      "expectedCount": 12,
+      "module": "D3.4",
+      "objectTypes": ["COMPLIANCE_RULE"],
+      "evidence": [
+        "DP-COMPLIANCE-20260826#rule-1",
+        "DP-COMPLIANCE-20260826#rule-2",
+        "DP-COMPLIANCE-20260826#rule-3",
+        "DP-COMPLIANCE-20260826#rule-4",
+        "DP-COMPLIANCE-20260826#rule-5",
+        "DP-COMPLIANCE-20260826#rule-6",
+        "DP-COMPLIANCE-20260826#rule-7",
+        "DP-COMPLIANCE-20260826#rule-8",
+        "DP-COMPLIANCE-20260826#rule-9",
+        "DP-COMPLIANCE-20260826#rule-10",
+        "DP-COMPLIANCE-20260826#rule-11",
+        "DP-COMPLIANCE-20260826#rule-12"
+      ],
+      "splitRule": "资金往来、优惠沟通、误导骚扰、投保意愿、信息保护、呼叫频率等依据和消费检查点不同，独立更新"
+    }
+  ],
+  "prohibitedPatterns": [
+    "把12项规则压成一个只有禁止违规的summary",
+    "为没有法规依据的内部经验补造监管文号",
+    "把某次质检分数写入合规规则对象"
+  ]
+}

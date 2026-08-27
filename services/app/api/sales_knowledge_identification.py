@@ -245,7 +245,11 @@ def run_identification(
         raise HTTPException(
             status_code=409, detail="DocumentPackage is unavailable"
         ) from error
-    gold_path = find_gold_path(settings.workspace_root, package.document_package_id)
+    gold_path = find_gold_path(
+        settings.workspace_root,
+        package.document_package_id,
+        PROJECT_ROOT / "samples/gold",
+    )
     if gold_path is not None and result.status == "completed":
         result = result.model_copy(
             update={"quality_report": evaluate_against_gold(result, gold_path)}

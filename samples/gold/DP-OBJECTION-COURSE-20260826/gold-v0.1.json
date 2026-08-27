@@ -1,0 +1,25 @@
+{
+  "status": "proxy_draft",
+  "documentPackageId": "DP-OBJECTION-COURSE-20260826",
+  "reviewFocus": "区分术语解释、方法知识和未经充分证据支持的客户心理泛化",
+  "expectedObjectGroups": [
+    {
+      "key": "objection-terms",
+      "expectedCount": 1,
+      "module": "D4.3",
+      "objectTypes": ["TERM", "STANDARD_EXPLANATION"],
+      "requiredItemCount": 2,
+      "requiredItemField": "terms",
+      "evidence": [
+        "DP-OBJECTION-COURSE-20260826#section-1",
+        "DP-OBJECTION-COURSE-20260826#section-2",
+        "DP-OBJECTION-COURSE-20260826#section-3"
+      ],
+      "splitRule": "嫌货与买货人共同构成同一谚语解释维护单元，不逐句拆对象"
+    }
+  ],
+  "prohibitedPatterns": [
+    "把单一培训谚语直接发布为提出异议的客户必然有购买意愿的稳定触发规则",
+    "只保留嫌货才是买货人的一句 summary 而丢失两个术语的标准解释"
+  ]
+}
