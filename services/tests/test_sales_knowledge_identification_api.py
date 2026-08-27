@@ -212,7 +212,7 @@ def test_api_runs_identification_and_reads_the_saved_result(
     assert materials_response.json()[0]["documentPackageId"] == "DP-API"
     assert catalog_response.status_code == 200
     assert len(catalog_response.json()["modules"]) == 22
-    assert catalog_response.json()["version"] == "d1-d5-v0.6"
+    assert catalog_response.json()["version"] == "d1-d5-v0.7"
     assert catalog_response.json()["status"] == "sample_validation"
     assert len(catalog_response.json()["fingerprint"]) == 64
     assert catalog_response.json()["source"].endswith(

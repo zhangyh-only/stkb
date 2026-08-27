@@ -10,7 +10,7 @@ from .content_contracts import (
 from .identity_contracts import IDENTITY_CONTRACT_BY_MODULE
 from .models import AtomicClaim, CandidateObjectPlan, DocumentPackage, ModelRequest
 
-PROMPT_VERSION = "sales-identification-v0.7"
+PROMPT_VERSION = "sales-identification-v0.8"
 SCHEMA_VERSION = "candidate-knowledge-object-v0.6"
 
 
@@ -164,11 +164,14 @@ def build_object_planning_request(
      只能保留为流程要求或未决素材，禁止根据法规常识自行创作话术。
    - 单一培训材料中的谚语、经验性“往往/可能”或讲师判断，只能形成术语解释或待验证信号；
      没有跨样本证据、明确触发条件与可执行动作时，不得规划为 D2.4 客户反应规律或 D3.3 行动规则。
-7. 每条主张必须至少进入一个 plan，或在 unresolvedItems 中逐条列明 claimId 与原因；不得静默丢失。
+7. D1.1 的 versionScope 只有在每条来源主张都明确写出“全版本/两个版本通用/所有版本”时才能
+   使用全版本。未写版本的营销话术事实不得上推为全版本，也不能把全能版的180元、80%赔付或
+   慢病药目录套到尊享版；应补入明确版本对象或列为未决。
+8. 每条主张必须至少进入一个 plan，或在 unresolvedItems 中逐条列明 claimId 与原因；不得静默丢失。
    同一主张只有在确实支撑不同下游职责时才可进入多个计划。
-8. 一个计划只有一个主模块。identityHints 只写决定“是否同一对象”的稳定业务要素，不写摘要、
+9. 一个计划只有一个主模块。identityHints 只写决定“是否同一对象”的稳定业务要素，不写摘要、
    claimId、锚点、模块码或任意技术字段。
-9. 只返回输出形态列出的最小字段，不返回 domain、objectBoundary、classificationBasis、content、
+10. 只返回输出形态列出的最小字段，不返回 domain、objectBoundary、classificationBasis、content、
    entityMentions、relations 或解释文字；这些由程序根据已发布合同注入，避免重复规则和输出截断。
    只输出合法 JSON，不输出隐藏推理过程。
 

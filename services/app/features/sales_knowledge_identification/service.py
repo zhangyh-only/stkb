@@ -1328,6 +1328,15 @@ def _validate_object_plans(
                     "D3.2 requires an explicit source method with steps; "
                     "a product or audience strategy belongs to D3.3"
                 )
+        if (
+            plan.module == "D1.1"
+            and _is_all_versions_scope(plan.identity_hints.get("versionScope"))
+            and not all(_claim_explicitly_all_versions(claim) for claim in plan_claims)
+        ):
+            reasons.append(
+                "all-versions product fact requires explicit all-version scope "
+                "on every source claim"
+            )
         if plan.module == "D1.3" and plan.object_type == "BUSINESS_PROCESS":
             has_embedded_sequence = any(
                 isinstance(claim.attributes.get(field), list)
@@ -1483,6 +1492,27 @@ def _plan_satisfies_primary_claim_role(
         return True
     prefixes = PRIMARY_MODULE_PREFIXES_BY_CLAIM_KIND.get(claim.claim_kind, ())
     return any(plan.module == prefix or plan.module.startswith(prefix) for prefix in prefixes)
+
+
+def _is_all_versions_scope(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    normalized = value.replace(" ", "")
+    return any(
+        marker in normalized
+        for marker in ("全版本", "所有版本", "两个版本", "各版本", "通用")
+    )
+
+
+def _claim_explicitly_all_versions(claim: AtomicClaim) -> bool:
+    scope_evidence = " ".join(
+        [
+            claim.statement,
+            json.dumps(claim.attributes, ensure_ascii=False, sort_keys=True),
+            *(evidence.exact_quote for evidence in claim.evidence),
+        ]
+    )
+    return _is_all_versions_scope(scope_evidence)
 
 
 def _normalize_content_shape(

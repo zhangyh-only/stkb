@@ -29,6 +29,7 @@ from app.features.sales_knowledge_identification.service import (
     SalesKnowledgeIdentificationService,
     _apply_plan_augmentations,
     _automatic_uncovered_claim_ids,
+    _claim_explicitly_all_versions,
     _enforce_plan_granularity,
     _expand_compact_object_plan,
     _expand_content_path_to_leaf_paths,
@@ -1212,6 +1213,21 @@ def test_content_path_container_and_content_prefix_expand_to_leaf_paths() -> Non
     assert _expand_content_path_to_leaf_paths(
         content, "$.applicability.products"
     ) == ["$.applicability.products[0]", "$.applicability.products[1]"]
+
+
+def test_all_versions_scope_requires_explicit_source_scope() -> None:
+    unscoped = AtomicClaim.model_validate(
+        _claim("DP-SCOPE#row-1", "药享保保费180元", kind="fact")
+    )
+    scoped = unscoped.model_copy(
+        update={
+            "statement": "药享保两个版本通用按年续交",
+            "attributes": {"applicability": "全版本"},
+        }
+    )
+
+    assert _claim_explicitly_all_versions(unscoped) is False
+    assert _claim_explicitly_all_versions(scoped) is True
 
 
 def test_global_planning_can_merge_cross_kind_claims_into_one_object() -> None:

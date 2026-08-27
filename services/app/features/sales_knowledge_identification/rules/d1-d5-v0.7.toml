@@ -1,4 +1,4 @@
-version = "d1-d5-v0.6"
+version = "d1-d5-v0.7"
 status = "sample_validation"
 source = "docs/current/STKB-D1-D5知识对象与业务图模型映射矩阵.md"
 
@@ -49,7 +49,7 @@ scope = "core"
 meaning = "管理围绕同一产品或产品版本、共享适用范围和更新生命周期的参数、责任、限制、数值和服务权益。"
 object_types = ["PRODUCT_FACT", "PRODUCT_VERSION_FACT", "PRODUCT_COMPONENT_FACT"]
 core_objects = ["产品版本方案", "产品事实卡", "服务权益说明"]
-boundary = "对象内部可以包含多个类型化事实字段并为字段绑定证据；按事实主题、产品或版本范围、更新生命周期和消费边界归并，事实类型和值不自动决定对象数量。"
+boundary = "对象内部可以包含多个类型化事实字段并为字段绑定证据；按事实主题、产品或版本范围、更新生命周期和消费边界归并。未明确版本范围的主张不得上推为全版本，事实类型和值不自动决定对象数量。"
 sources = ["产品条款", "产品说明", "培训材料", "服务权益说明", "官方页面"]
 consumers = ["精确问答", "产品推荐", "话术生成与校验", "合规检查", "D5检测"]
 
