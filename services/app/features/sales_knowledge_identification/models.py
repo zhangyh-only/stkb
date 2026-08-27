@@ -272,6 +272,8 @@ class GoldGroupEvaluation(ApiModel):
     predicted_item_count: int | None = None
     required_content_fields: list[str] = Field(default_factory=list)
     missing_content_fields: list[str] = Field(default_factory=list)
+    required_item_fields: list[str] = Field(default_factory=list)
+    missing_item_fields: list[str] = Field(default_factory=list)
 
 
 class IdentificationQualityReport(ApiModel):

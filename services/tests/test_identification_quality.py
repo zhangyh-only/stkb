@@ -96,7 +96,7 @@ def test_quality_report_detects_group_recall_and_over_split(tmp_path) -> None:
     assert report.groups[1].predicted_item_count == 2
 
 
-def test_quality_report_detects_missing_required_content_fields(tmp_path) -> None:
+def test_quality_report_detects_missing_required_nested_item_fields(tmp_path) -> None:
     gold_path = tmp_path / "gold-v0.1.json"
     gold_path.write_text(
         json.dumps(
@@ -108,7 +108,9 @@ def test_quality_report_detects_missing_required_content_fields(tmp_path) -> Non
                         "expectedCount": 1,
                         "module": "D4.3",
                         "objectTypes": ["TERM"],
-                        "requiredContentFields": ["sourceStance", "usageBoundary"],
+                        "requiredItemCount": 1,
+                        "requiredItemField": "items",
+                        "requiredItemFields": ["sourceStance", "usageBoundary"],
                     }
                 ],
             },
@@ -130,7 +132,7 @@ def test_quality_report_detects_missing_required_content_fields(tmp_path) -> Non
             "processingStages": [],
             "atomicClaims": [_claim("CL1", "A1")],
             "candidates": [
-                _candidate("C1", "D4.3", "TERM", ["CL1"], ["A1"])
+                _candidate("C1", "D4.3", "TERM", ["CL1"], ["A1"], 1)
             ],
             "rejectedCandidates": [],
             "weakSignals": [],
@@ -146,7 +148,7 @@ def test_quality_report_detects_missing_required_content_fields(tmp_path) -> Non
 
     assert report.overall_status == "fail"
     assert report.groups[0].status == "contract_failed"
-    assert report.groups[0].missing_content_fields == [
+    assert report.groups[0].missing_item_fields == [
         "sourceStance",
         "usageBoundary",
     ]

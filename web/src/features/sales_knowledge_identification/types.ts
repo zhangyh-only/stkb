@@ -202,6 +202,8 @@ export type GoldGroupEvaluation = {
   predictedItemCount: number | null
   requiredContentFields: string[]
   missingContentFields: string[]
+  requiredItemFields: string[]
+  missingItemFields: string[]
 }
 
 export type IdentificationQualityReport = {

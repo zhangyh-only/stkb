@@ -168,9 +168,9 @@ def build_content_realization_request(
    sourceText 替换。不得把长话术压缩成几十字摘要。
 4. 不用常识补写来源未提供的事实。合同允许为空的字段可显式给空数组；其余缺失必须忠实说明
    unresolved，而不是编造。
-5. 资料中的培训谚语、讲师观点和经验性判断必须保留来源立场。standardExplanation 可准确转述
-   资料主张，但 sourceStance 必须说明它是何种来源观点，usageBoundary 必须写明不能由此推断什么；
-   不得把“往往/可能”改写成客观必然规律。
+5. 资料中的培训谚语、讲师观点和经验性判断必须保留来源立场。TERM 的每个 terms 条目中，
+   standardExplanation 可准确转述资料主张，sourceStance 必须说明它是何种来源观点，
+   usageBoundary 必须写明不能由此推断什么；不得把“往往/可能”改写成客观必然规律。
 6. entityMentions 只记录会参与对象身份、过滤或关系查询的稳定业务实体；不得只输出字符串。每项必须
    严格为 {{"mentionId":"P1-M1","text":"原文实体名","proposedType":"PRODUCT",
    "referenceRole":"ABOUT_PRODUCT","sourceRef":"主张中的真实anchorId"}}。不确定类型时不输出。

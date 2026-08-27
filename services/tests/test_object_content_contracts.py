@@ -7,7 +7,7 @@ from app.features.sales_knowledge_identification.content_contracts import (
 
 
 def test_content_contracts_cover_every_module_and_object_type() -> None:
-    assert CONTENT_CONTRACT_VERSION == "object-content-contracts-v0.6"
+    assert CONTENT_CONTRACT_VERSION == "object-content-contracts-v0.7"
     assert set(CONTENT_CONTRACT_BY_MODULE) == {
         module.code for module in KNOWLEDGE_MODULES
     }
@@ -91,13 +91,14 @@ def test_term_requires_explanation_for_each_term_item() -> None:
         {
             "terms": [{"termText": "嫌货才是买货人"}],
             "applicability": "用于销售基础培训中的异议识别，不能直接推断购买意愿。",
-            "sourceStance": "销售课程中的经验性表述。",
-            "usageBoundary": "只用于培训解释，不能替代购买意愿证据。",
             "detail": "这个扩展说明只用于满足对象总体内容量，不应替代术语条目中的标准解释。" * 10,
         },
     )
 
-    assert "content item 1 missing fields: standardExplanation" in errors
+    assert any(
+        error.startswith("content item 1 missing fields: standardExplanation")
+        for error in errors
+    )
 
 
 def test_term_accepts_complete_nested_items() -> None:
@@ -109,15 +110,15 @@ def test_term_accepts_complete_nested_items() -> None:
                     "这是销售培训中的经验表达，指异议可能代表客户正在评估价值，"
                     "但不能据此断定客户一定有购买意愿。"
                 ),
+                "sourceStance": "销售课程将其作为理解异议的经验性表述。",
+                "usageBoundary": (
+                    "只作为理解异议的启发式术语，不生成客户心理规则，也不生成自动行动决策。"
+                ),
             }
         ],
         "applicability": (
             "用于销售基础培训中的异议识别。实际应用时仍需通过追问确认异议原因，"
             "不得替代客户需求与购买意愿证据。"
-        ),
-        "sourceStance": "销售课程将其作为理解异议的经验性表述。",
-        "usageBoundary": (
-            "只作为理解异议的启发式术语，不生成客户心理规则，也不生成自动行动决策。"
         ),
     }
 

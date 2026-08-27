@@ -105,6 +105,7 @@ def _evaluate_group(
     expected_count = int(group["expectedCount"])
     required_item_count = group.get("requiredItemCount")
     required_item_field = group.get("requiredItemField", "items")
+    required_item_fields = group.get("requiredItemFields", [])
     required_content_fields = group.get("requiredContentFields", [])
     missing_content_fields = sorted(
         {
@@ -112,6 +113,16 @@ def _evaluate_group(
             for candidate in matched_candidates
             for field in required_content_fields
             if candidate.content.get(field) in (None, "", [], {})
+        }
+    )
+    missing_item_fields = sorted(
+        {
+            field
+            for candidate in matched_candidates
+            for item in candidate.content.get(required_item_field, [])
+            if isinstance(item, dict)
+            for field in required_item_fields
+            if item.get(field) in (None, "", [], {})
         }
     )
     predicted_item_count = None
@@ -125,13 +136,14 @@ def _evaluate_group(
         predicted_count == expected_count
         and (required_item_count is None or predicted_item_count == required_item_count)
         and not missing_content_fields
+        and not missing_item_fields
     ):
         status = "met"
     elif predicted_count == 0:
         status = "missed"
     elif predicted_count > expected_count:
         status = "over_split"
-    elif missing_content_fields:
+    elif missing_content_fields or missing_item_fields:
         status = "contract_failed"
     else:
         status = "under_split_or_recall"
@@ -148,6 +160,8 @@ def _evaluate_group(
         predicted_item_count=predicted_item_count,
         required_content_fields=required_content_fields,
         missing_content_fields=missing_content_fields,
+        required_item_fields=required_item_fields,
+        missing_item_fields=missing_item_fields,
     )
 
 

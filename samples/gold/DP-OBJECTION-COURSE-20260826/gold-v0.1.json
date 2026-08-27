@@ -10,7 +10,8 @@
       "objectTypes": ["TERM", "STANDARD_EXPLANATION"],
       "requiredItemCount": 1,
       "requiredItemField": "terms",
-      "requiredContentFields": ["terms", "applicability", "sourceStance", "usageBoundary"],
+      "requiredContentFields": ["terms", "applicability"],
+      "requiredItemFields": ["termText", "standardExplanation", "sourceStance", "usageBoundary"],
       "evidence": [
         "DP-OBJECTION-COURSE-20260826#section-1",
         "DP-OBJECTION-COURSE-20260826#section-2",
