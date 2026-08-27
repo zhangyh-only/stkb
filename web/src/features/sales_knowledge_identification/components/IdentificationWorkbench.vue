@@ -13,10 +13,12 @@ import { computed, onMounted, ref, type Component } from 'vue'
 
 import {
   formKnowledgeObjects,
+  getKnowledgeFormation,
   getDocumentPackage,
   getIdentificationCatalog,
   IdentificationApiError,
   listSourceMaterials,
+  listIdentificationRuns,
   runIdentification,
 } from '../api'
 import {
@@ -33,7 +35,7 @@ import {
 } from '../types'
 
 type MainView = 'build' | 'knowledge' | 'rules' | 'evidence'
-type BuildPhase = 'idle' | 'ready' | 'recognizing' | 'forming' | 'completed' | 'failed'
+type BuildPhase = 'idle' | 'ready' | 'recognizing' | 'forming' | 'review' | 'completed' | 'failed'
 
 const viewItems: { key: MainView; label: string; icon: Component }[] = [
   { key: 'build', label: '构建流程', icon: IconPlayerPlay },
@@ -55,6 +57,7 @@ const selectedDomainCode = ref('D1')
 const selectedModuleCode = ref('D1.1')
 const selectedCallIndex = ref(0)
 const error = ref('')
+const isLoadingPrevious = ref(false)
 
 const selectedMaterial = computed(() =>
   sourceMaterials.value.find((item) => item.documentPackageId === selectedMaterialId.value) ?? null,
@@ -95,7 +98,7 @@ const buildSteps = computed(() => {
     { key: 'recognize', label: '识别知识', detail: '发现并组织知识内容', done: hasIdentification },
     { key: 'validate', label: '校验结果', detail: '对象边界、分类与证据', done: hasIdentification },
     { key: 'merge', label: '归一与归并', detail: '实体身份与知识身份', done: hasFormation },
-    { key: 'write', label: '形成知识对象', detail: '登记并写入正式Markdown', done: hasFormation },
+    { key: 'write', label: '形成知识对象', detail: '评审后登记正式版本', done: formation.value?.status === 'completed' },
   ]
 })
 
@@ -106,6 +109,7 @@ const currentStepKey = computed(() => {
   if (!catalog.value) return 'rules'
   if (!identification.value) return 'recognize'
   if (!formation.value) return 'merge'
+  if (formation.value.status === 'review_required') return 'write'
   return ''
 })
 
@@ -115,6 +119,7 @@ const phaseLabel = computed(() => {
     ready: '资料和规则已就绪',
     recognizing: '正在识别并校验销售知识',
     forming: '正在归一实体并形成知识对象',
+    review: '发现版本差异，等待质量评审',
     completed: '本次知识构建已完成',
     failed: '本次构建未完成',
   }
@@ -183,11 +188,31 @@ async function buildKnowledge(): Promise<void> {
     formation.value = nextFormation
     selectedObjectId.value = nextFormation.knowledgeObjects[0]?.knowledgeObjectId ?? ''
     selectedCallIndex.value = 0
-    buildPhase.value = 'completed'
+    buildPhase.value = nextFormation.status === 'review_required' ? 'review' : 'completed'
     activeView.value = 'knowledge'
   } catch (reason) {
     error.value = errorMessage(reason)
     buildPhase.value = 'failed'
+  }
+}
+
+async function loadLatestResult(): Promise<void> {
+  if (!documentPackage.value) return
+  error.value = ''
+  isLoadingPrevious.value = true
+  try {
+    const runs = await listIdentificationRuns(documentPackage.value.documentPackageId, 1)
+    const latest = runs.at(-1)
+    if (!latest) throw new Error('这份资料还没有可载入的历史运行。')
+    identification.value = latest
+    formation.value = await getKnowledgeFormation(latest.runId)
+    selectedObjectId.value = formation.value.knowledgeObjects[0]?.knowledgeObjectId ?? ''
+    buildPhase.value = formation.value.status === 'review_required' ? 'review' : 'completed'
+    activeView.value = 'knowledge'
+  } catch (reason) {
+    error.value = errorMessage(reason)
+  } finally {
+    isLoadingPrevious.value = false
   }
 }
 
@@ -199,7 +224,7 @@ function selectDomain(domainCode: string): void {
 }
 
 function objectActionLabel(action: FormalKnowledgeObject['action']): string {
-  return { created: '新增', updated: '更新', reused: '复用' }[action]
+  return { created: '待新增', updated: '更新', reused: '复用', review_required: '待评审' }[action]
 }
 
 function callPurposeLabel(purpose: ModelCallTrace['purpose']): string {
@@ -244,7 +269,7 @@ onMounted(() => {
         <div class="build-command">
           <label><span>选择测试资料</span><select v-model="selectedMaterialId" :disabled="isBuilding" @change="selectMaterial"><option value="">请选择资料</option><option v-for="item in sourceMaterials" :key="item.documentPackageId" :value="item.documentPackageId" :disabled="item.status !== 'available'">{{ item.sourceFileName }}</option></select></label>
           <div v-if="documentPackage" class="source-inline"><IconFileDescription size="18" /><div><strong>{{ documentPackage.sourceFileName }}</strong><span>{{ documentPackage.anchors.length }}个来源位置 · {{ documentPackage.processingMethod === 'agent_assisted' ? '已完成代理解析' : '已完成解析' }}</span></div></div>
-          <button class="build-primary" type="button" :disabled="!canBuild || isBuilding" @click="buildKnowledge"><IconPlayerPlay v-if="!isBuilding" size="17" fill="currentColor" /><span v-else class="build-pulse"></span>{{ isBuilding ? phaseLabel : formation ? '重新构建' : '开始构建知识' }}</button>
+          <div class="build-actions"><button class="build-secondary" type="button" :disabled="!canBuild || isBuilding || isLoadingPrevious" @click="loadLatestResult"><IconRefresh size="15" />{{ isLoadingPrevious ? '载入中' : '载入最近结果' }}</button><button class="build-primary" type="button" :disabled="!canBuild || isBuilding" @click="buildKnowledge"><IconPlayerPlay v-if="!isBuilding" size="17" fill="currentColor" /><span v-else class="build-pulse"></span>{{ isBuilding ? phaseLabel : formation ? '重新构建' : '开始构建知识' }}</button></div>
         </div>
 
         <div class="flow-board">
@@ -254,10 +279,10 @@ onMounted(() => {
           </ol>
         </div>
 
-        <div v-if="formation" class="build-outcome">
-          <div><span>本次形成</span><strong>{{ formation.knowledgeObjects.length }}</strong><em>个正式知识对象</em></div>
-          <dl><div><dt>新增</dt><dd>{{ formation.createdCount }}</dd></div><div><dt>更新</dt><dd>{{ formation.updatedCount }}</dd></div><div><dt>复用</dt><dd>{{ formation.reusedCount }}</dd></div><div><dt>业务实体</dt><dd>{{ formation.entities.length }}</dd></div><div><dt>正式文件</dt><dd>{{ formation.formalKnowledgeFiles }}</dd></div></dl>
-          <button type="button" @click="activeView = 'knowledge'">查看知识结果</button>
+        <div v-if="formation" class="build-outcome" :class="{ review: formation.status === 'review_required' }">
+          <div><span>{{ formation.status === 'review_required' ? '本次待审' : '本次形成' }}</span><strong>{{ formation.knowledgeObjects.length }}</strong><em>个知识对象</em></div>
+          <dl><div><dt>待新增</dt><dd>{{ formation.createdCount }}</dd></div><div><dt>待评审</dt><dd>{{ formation.reviewRequiredCount }}</dd></div><div><dt>质量阻断</dt><dd>{{ formation.qualityBlockedCount }}</dd></div><div><dt>直接复用</dt><dd>{{ formation.reusedCount }}</dd></div><div><dt>正式文件</dt><dd>{{ formation.formalKnowledgeFiles }}</dd></div></dl>
+          <button type="button" @click="activeView = 'knowledge'">{{ formation.status === 'review_required' ? '审阅版本差异' : '查看知识结果' }}</button>
         </div>
 
         <div v-else class="build-guidance"><div><span>验证目标</span><h2>检查规则能否把一份资料稳定转换为正式知识对象</h2><p>一次执行会完成知识识别、分类与证据校验、业务实体归一、同身份知识归并、PostgreSQL登记和正式Markdown写入。</p></div><div class="build-boundary"><strong>本轮暂不执行</strong><span>pgvector索引</span><span>Neo4j图投影</span></div></div>
@@ -265,8 +290,16 @@ onMounted(() => {
 
       <section v-else-if="activeView === 'knowledge'" class="knowledge-result-view">
         <div v-if="formation" class="knowledge-result-grid">
-          <aside class="knowledge-object-list"><div class="result-pane-title"><div><p>KNOWLEDGE OBJECTS</p><h2>正式知识对象</h2></div><span>{{ formation.knowledgeObjects.length }}</span></div><div class="object-list-scroll"><button v-for="item in formation.knowledgeObjects" :key="item.knowledgeObjectId" type="button" :class="{ active: selectedKnowledgeObject?.knowledgeObjectId === item.knowledgeObjectId }" @click="selectedObjectId = item.knowledgeObjectId"><span>{{ objectActionLabel(item.action) }}</span><div><strong>{{ item.title }}</strong><small>{{ item.domain }} / {{ item.module }} · {{ item.objectType }}</small></div></button></div></aside>
-          <article v-if="selectedKnowledgeObject" class="formal-object-detail"><header><div><p>{{ selectedKnowledgeObject.knowledgeObjectId }} · revision {{ selectedKnowledgeObject.revision }}</p><h2>{{ selectedKnowledgeObject.title }}</h2><span>{{ selectedKnowledgeObject.domain }} / {{ selectedKnowledgeObject.module }} · {{ selectedKnowledgeObject.objectType }}</span></div><em>{{ objectActionLabel(selectedKnowledgeObject.action) }}</em></header><div class="formal-object-scroll"><section><h3>规范内容</h3><pre>{{ prettyJson(selectedKnowledgeObject.content) }}</pre></section><section><h3>业务实体引用</h3><div v-if="selectedKnowledgeObject.entityReferences.length" class="formal-refs"><div v-for="item in selectedKnowledgeObject.entityReferences" :key="`${item.entityId}-${item.referenceRole}`"><code>{{ item.entityId }}</code><strong>{{ item.referenceRole }}</strong><span>{{ item.evidence.join('、') }}</span></div></div><p v-else>该对象暂未形成业务实体引用。</p></section><section><h3>来源证据</h3><div class="formal-evidence"><code v-for="item in selectedKnowledgeObject.evidence" :key="item">{{ item }}</code></div></section><section class="formal-file"><h3>正式知识文件</h3><code>{{ selectedKnowledgeObject.filePath }}</code><span>SHA-256 {{ selectedKnowledgeObject.fileSha256 }}</span></section></div></article>
+          <aside class="knowledge-object-list"><div class="result-pane-title"><div><p>KNOWLEDGE OBJECTS</p><h2>{{ formation.status === 'review_required' ? '知识对象审阅' : '正式知识对象' }}</h2></div><span>{{ formation.knowledgeObjects.length }}</span></div><div class="object-list-scroll"><button v-for="item in formation.knowledgeObjects" :key="item.knowledgeObjectId" type="button" :class="{ active: selectedKnowledgeObject?.knowledgeObjectId === item.knowledgeObjectId }" @click="selectedObjectId = item.knowledgeObjectId"><span>{{ objectActionLabel(item.action) }}</span><div><strong>{{ item.title }}</strong><small>{{ item.domain }} / {{ item.module }} · {{ item.objectType }}</small></div></button></div></aside>
+          <article v-if="selectedKnowledgeObject" class="formal-object-detail"><header><div><p>{{ selectedKnowledgeObject.knowledgeObjectId }} · revision {{ selectedKnowledgeObject.revision }}</p><h2>{{ selectedKnowledgeObject.title }}</h2><span>{{ selectedKnowledgeObject.domain }} / {{ selectedKnowledgeObject.module }} · {{ selectedKnowledgeObject.objectType }}</span></div><em>{{ objectActionLabel(selectedKnowledgeObject.action) }}</em></header><div class="formal-object-scroll">
+            <section v-if="selectedKnowledgeObject.revisionProposal" class="revision-review">
+              <div class="revision-review-intro"><div><span>版本差异</span><strong>正式版本尚未改写</strong><p>本次模型结果命中了同一来源维护单元，但正文有 {{ selectedKnowledgeObject.revisionProposal.changedPaths.length }} 处差异，需要判断是有效补充、事实冲突，还是单纯措辞漂移。</p></div><b>{{ selectedKnowledgeObject.revisionProposal.changedPaths.length }}</b></div>
+              <div class="revision-columns"><article><header><span>当前正式版</span><strong>revision {{ selectedKnowledgeObject.revision }}</strong></header><pre>{{ prettyJson(selectedKnowledgeObject.content) }}</pre></article><article><header><span>本次建议</span><strong>尚未生效</strong></header><pre>{{ prettyJson(selectedKnowledgeObject.revisionProposal.content) }}</pre></article></div>
+              <div class="changed-paths"><h3>发生变化的正文路径</h3><code v-for="path in selectedKnowledgeObject.revisionProposal.changedPaths" :key="path">{{ path }}</code></div>
+            </section>
+            <section v-else><div v-if="selectedKnowledgeObject.equivalenceReason" class="equivalence-note"><strong>沿用正式版本</strong><span>{{ selectedKnowledgeObject.equivalenceReason }}</span></div><h3>规范内容</h3><pre>{{ prettyJson(selectedKnowledgeObject.content) }}</pre></section>
+            <section><h3>本次正文主张追溯</h3><div class="source-trace-list"><article v-for="trace in selectedKnowledgeObject.sourceTraces" :key="trace.candidateId"><header><strong>{{ trace.candidateId }}</strong><span>{{ trace.attributedContentLeafCount }}/{{ trace.contentLeafCount }} 个正文叶子已归因</span></header><div><code v-for="usage in trace.claimUsage" :key="`${trace.candidateId}-${usage.claimId}`">{{ usage.claimId }} → {{ usage.contentPaths.join('、') }}</code></div></article></div></section>
+            <section><h3>业务实体引用</h3><div v-if="selectedKnowledgeObject.entityReferences.length" class="formal-refs"><div v-for="item in selectedKnowledgeObject.entityReferences" :key="`${item.entityId}-${item.referenceRole}`"><code>{{ item.entityId }}</code><strong>{{ item.referenceRole }}</strong><span>{{ item.evidence.join('、') }}</span></div></div><p v-else>该对象暂未形成业务实体引用。</p></section><section><h3>当前正式版来源证据</h3><div class="formal-evidence"><code v-for="item in selectedKnowledgeObject.evidence" :key="item">{{ item }}</code></div></section><section class="formal-file"><h3>正式知识文件</h3><code>{{ selectedKnowledgeObject.filePath }}</code><span>SHA-256 {{ selectedKnowledgeObject.fileSha256 }}</span></section></div></article>
         </div>
         <div v-else class="build-empty"><IconStack2 size="30" /><h2>还没有形成正式知识对象</h2><p>返回构建流程，选择资料并完成一次知识构建。</p><button type="button" @click="activeView = 'build'">返回构建流程</button></div>
       </section>
@@ -275,7 +308,7 @@ onMounted(() => {
         <div v-if="catalog" class="rules-library-grid">
           <nav class="rules-domain-list"><div><p>SALES DOMAINS</p><h2>销售域</h2></div><button v-for="domain in catalog.domains" :key="domain.code" type="button" :class="{ active: selectedDomainCode === domain.code }" @click="selectDomain(domain.code)"><span>{{ domain.code }}</span><div><strong>{{ domain.name }}</strong><small>{{ domain.question }}</small></div></button></nav>
           <div class="rules-module-list"><div><p>{{ selectedDomain?.code }}</p><h2>{{ selectedDomain?.name }}</h2><span>{{ domainModules.length }}个模块</span></div><button v-for="module in domainModules" :key="module.code" type="button" :class="{ active: selectedModule?.code === module.code }" @click="selectedModuleCode = module.code"><code>{{ module.code }}</code><div><strong>{{ module.name }}</strong><small>{{ module.scope === 'core' ? '核心范围' : '可选范围' }}</small></div></button></div>
-          <article v-if="selectedDomain && selectedModule" class="rules-detail"><header><div><p>{{ selectedModule.code }}</p><h2>{{ selectedModule.name }}</h2></div><span>{{ catalog.version }} / {{ catalog.contentContractVersion }} / {{ catalog.identityContractVersion }}</span></header><div class="rules-detail-scroll"><section class="domain-definition"><b>{{ selectedDomain.question }}</b><strong>{{ selectedDomain.meaning }}</strong><p>{{ selectedDomain.boundary }}</p></section><section><h3>模块定义</h3><p>{{ selectedModule.meaning }}</p></section><section class="rule-highlight"><h3>识别与对象边界</h3><p>{{ selectedModule.contentContract.granularity }}</p></section><section class="contract-decision-grid"><div><h3>纳入条件</h3><p>{{ selectedModule.contentContract.inclusion }}</p></div><div><h3>排除条件</h3><p>{{ selectedModule.contentContract.exclusion }}</p></div></section><section><h3>对象身份字段</h3><div class="rule-type-list"><code v-for="item in selectedModule.identityContract.identityFields" :key="item">{{ item }}</code></div><p class="contract-minimum">只有这些稳定业务字段参与对象身份；摘要、模块码、来源锚点不参与。</p></section><section class="contract-decision-grid"><div><h3>何时归为同一对象</h3><p>{{ selectedModule.identityContract.sameObjectWhen }}</p></div><div><h3>何时必须拆分</h3><p>{{ selectedModule.identityContract.differentObjectWhen }}</p></div></section><section class="contract-decision-grid"><div><h3>归并方式</h3><p>{{ selectedModule.identityContract.mergeStrategy }}</p></div><div><h3>冲突裁决</h3><p>{{ selectedModule.identityContract.conflictRule }}</p></div></section><section><h3>内容必填字段</h3><div v-if="Object.keys(selectedModule.contentContract.requiredFieldsByType).length" class="contract-decision-grid"><div v-for="(fields, objectType) in selectedModule.contentContract.requiredFieldsByType" :key="objectType"><h3>{{ objectType }}</h3><div class="rule-type-list"><code v-for="field in fields" :key="field">{{ field }}</code></div></div></div><div v-else class="rule-type-list"><code v-for="item in selectedModule.contentContract.requiredFields" :key="item">{{ item }}</code></div><div v-if="Object.keys(selectedModule.contentContract.itemFieldsByType).length" class="nested-contract"><h3>条目内部必填</h3><div class="contract-decision-grid"><div v-for="(fields, objectType) in selectedModule.contentContract.itemFieldsByType" :key="objectType"><h3>{{ objectType }}</h3><div class="rule-type-list"><code v-for="field in fields" :key="field">{{ field }}</code></div></div></div></div><p v-if="selectedModule.contentContract.allowEmptyFields.length" class="contract-minimum">资料未明确时允许显式为空：{{ selectedModule.contentContract.allowEmptyFields.join('、') }}；不允许模型补造。</p><p class="contract-minimum">最小有效内容量：{{ selectedModule.contentContract.minimumContentChars }}字符；仅有summary不通过质量校验。</p></section><section><h3>允许形成的对象类型</h3><div class="rule-type-list"><code v-for="item in selectedModule.objectTypes" :key="item">{{ item }}</code></div></section><section class="contract-example"><div><h3>正例</h3><p>{{ selectedModule.contentContract.positiveExample }}</p></div><div><h3>反例</h3><p>{{ selectedModule.contentContract.negativeExample }}</p></div></section><section><h3>适用资料与使用方</h3><p>{{ selectedModule.sources.join('、') }}</p><p class="contract-consumers">用于：{{ selectedModule.consumers.join('、') }}</p></section></div></article>
+          <article v-if="selectedDomain && selectedModule" class="rules-detail"><header><div><p>{{ selectedModule.code }}</p><h2>{{ selectedModule.name }}</h2></div><span>{{ catalog.version }} / {{ catalog.contentContractVersion }} / {{ catalog.identityContractVersion }}</span></header><div class="rules-detail-scroll"><section class="domain-definition"><b>{{ selectedDomain.question }}</b><strong>{{ selectedDomain.meaning }}</strong><p>{{ selectedDomain.boundary }}</p></section><section><h3>模块定义</h3><p>{{ selectedModule.meaning }}</p></section><section class="rule-highlight"><h3>识别与对象边界</h3><p>{{ selectedModule.contentContract.granularity }}</p></section><section class="contract-decision-grid"><div><h3>纳入条件</h3><p>{{ selectedModule.contentContract.inclusion }}</p></div><div><h3>排除条件</h3><p>{{ selectedModule.contentContract.exclusion }}</p></div></section><section><h3>对象身份字段</h3><div class="rule-type-list"><code v-for="item in selectedModule.identityContract.identityFields" :key="item">{{ item }}</code></div><p class="contract-minimum">只有这些稳定业务字段参与对象身份；摘要、模块码、来源锚点不参与。</p></section><section class="contract-decision-grid"><div><h3>何时归为同一对象</h3><p>{{ selectedModule.identityContract.sameObjectWhen }}</p></div><div><h3>何时必须拆分</h3><p>{{ selectedModule.identityContract.differentObjectWhen }}</p></div></section><section class="contract-decision-grid"><div><h3>归并方式</h3><p>{{ selectedModule.identityContract.mergeStrategy }}</p></div><div><h3>冲突裁决</h3><p>{{ selectedModule.identityContract.conflictRule }}</p></div></section><section><h3>内容必填字段</h3><div v-if="Object.keys(selectedModule.contentContract.requiredFieldsByType).length" class="contract-decision-grid"><div v-for="(fields, objectType) in selectedModule.contentContract.requiredFieldsByType" :key="objectType"><h3>{{ objectType }}</h3><div class="rule-type-list"><code v-for="field in fields" :key="field">{{ field }}</code></div></div></div><div v-else class="rule-type-list"><code v-for="item in selectedModule.contentContract.requiredFields" :key="item">{{ item }}</code></div><div v-if="Object.keys(selectedModule.contentContract.fieldShapesByType).length" class="content-shape-list"><div v-for="(shape, objectType) in selectedModule.contentContract.fieldShapesByType" :key="objectType"><strong>{{ objectType }}</strong><code>{{ shape }}</code></div></div><div v-if="Object.keys(selectedModule.contentContract.itemFieldsByType).length" class="nested-contract"><h3>条目内部必填</h3><div class="contract-decision-grid"><div v-for="(fields, objectType) in selectedModule.contentContract.itemFieldsByType" :key="objectType"><h3>{{ objectType }}</h3><div class="rule-type-list"><code v-for="field in fields" :key="field">{{ field }}</code></div></div></div></div><p v-if="selectedModule.contentContract.allowEmptyFields.length" class="contract-minimum">资料未明确时允许显式为空：{{ selectedModule.contentContract.allowEmptyFields.join('、') }}；不允许模型补造。</p><p class="contract-minimum">最小有效内容量：{{ selectedModule.contentContract.minimumContentChars }}字符；仅有summary不通过质量校验。</p></section><section><h3>允许形成的对象类型</h3><div class="rule-type-list"><code v-for="item in selectedModule.objectTypes" :key="item">{{ item }}</code></div></section><section class="contract-example"><div><h3>正例</h3><p>{{ selectedModule.contentContract.positiveExample }}</p></div><div><h3>反例</h3><p>{{ selectedModule.contentContract.negativeExample }}</p></div></section><section><h3>适用资料与使用方</h3><p>{{ selectedModule.sources.join('、') }}</p><p class="contract-consumers">用于：{{ selectedModule.consumers.join('、') }}</p></section></div></article>
         </div>
       </section>
 

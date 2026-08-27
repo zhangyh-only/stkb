@@ -79,6 +79,12 @@ export function formKnowledgeObjects(runId: string): Promise<KnowledgeFormationR
   )
 }
 
+export function getKnowledgeFormation(runId: string): Promise<KnowledgeFormationResult> {
+  return request<KnowledgeFormationResult>(
+    `/sales-knowledge-identification/runs/${encodeURIComponent(runId)}/knowledge-objects`,
+  )
+}
+
 export function listIdentificationRuns(
   documentPackageId: string,
   limit = 5,

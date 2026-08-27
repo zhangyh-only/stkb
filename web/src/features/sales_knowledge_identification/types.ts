@@ -119,6 +119,7 @@ export type CandidateKnowledgeObject = {
   contentLeafCount: number
   attributedContentLeafCount: number
   unattributedContentPaths: string[]
+  qualityIssues: string[]
   content: Record<string, unknown>
   entityMentions: EntityMention[]
   evidence: string[]
@@ -133,9 +134,9 @@ export type RejectedCandidate = {
 
 export type CandidateNormalization = {
   candidateId: string
-  field: 'domain' | 'entity_mentions' | 'relations'
-  originalValue: string
-  normalizedValue: string
+  field: 'domain' | 'entity_mentions' | 'relations' | 'content.expressions'
+  originalValue: unknown
+  normalizedValue: unknown
   reason: string
 }
 
@@ -293,7 +294,7 @@ export type KnowledgeObjectEntityReference = {
 export type FormalKnowledgeObject = {
   knowledgeObjectId: string
   revision: number
-  action: 'created' | 'updated' | 'reused'
+  action: 'created' | 'updated' | 'reused' | 'review_required'
   title: string
   domain: string
   module: string
@@ -313,6 +314,17 @@ export type FormalKnowledgeObject = {
     attributedContentLeafCount: number
     unattributedContentPaths: string[]
   }>
+  revisionProposal: null | {
+    title: string
+    identityKey: string
+    contentFingerprint: string
+    content: Record<string, unknown>
+    entityReferences: KnowledgeObjectEntityReference[]
+    evidence: string[]
+    sourceTraces: FormalKnowledgeObject['sourceTraces']
+    changedPaths: string[]
+  }
+  equivalenceReason: string | null
   filePath: string
   fileSha256: string
 }
@@ -320,7 +332,7 @@ export type FormalKnowledgeObject = {
 export type KnowledgeFormationStage = {
   key: 'entity_resolution' | 'knowledge_merge' | 'formal_write'
   name: string
-  status: 'completed' | 'failed'
+  status: 'completed' | 'pending' | 'failed'
   detail: string
 }
 
@@ -328,14 +340,17 @@ export type KnowledgeFormationResult = {
   buildId: string
   runId: string
   documentPackageId: string
-  status: 'completed' | 'failed'
+  status: 'completed' | 'review_required' | 'failed'
   entities: ResolvedBusinessEntity[]
   knowledgeObjects: FormalKnowledgeObject[]
   stages: KnowledgeFormationStage[]
   createdCount: number
   updatedCount: number
   reusedCount: number
+  reviewRequiredCount: number
   supersededCount: number
+  qualityBlockedCandidateIds: string[]
+  qualityBlockedCount: number
   formalKnowledgeFiles: number
 }
 
@@ -355,6 +370,7 @@ export type KnowledgeModule = {
     requiredFields: string[]
     requiredFieldsByType: Record<string, string[]>
     itemFieldsByType: Record<string, string[]>
+    fieldShapesByType: Record<string, string>
     allowEmptyFields: string[]
     minimumContentChars: number
     granularity: string
