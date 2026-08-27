@@ -9,7 +9,6 @@ from .catalog import MODULE_BY_CODE
 from .models import AtomicClaim, ClaimEvidence, DocumentPackage, RejectedAtomicClaim
 
 SOURCE_ANCHOR = re.compile(r"<!--\s*source-anchor:\s*([^\s>]+)\s*-->")
-MARKDOWN_HEADING = re.compile(r"(?m)^#{2,4}\s+[^\n]+$")
 
 
 def extract_anchor_sections(document_package: DocumentPackage) -> dict[str, str]:
@@ -21,16 +20,14 @@ def extract_anchor_sections(document_package: DocumentPackage) -> dict[str, str]
             return {document_package.anchors[0].anchor_id: markdown}
         return {}
 
-    heading_matches = list(MARKDOWN_HEADING.finditer(markdown))
     result: dict[str, str] = {}
     for index, anchor_match in enumerate(anchor_matches):
-        start = _nearest_heading_start(heading_matches, anchor_match.start())
-        if index + 1 < len(anchor_matches):
-            end = _nearest_heading_start(heading_matches, anchor_matches[index + 1].start())
-            if end <= start:
-                end = anchor_matches[index + 1].start()
-        else:
-            end = len(markdown)
+        start = anchor_match.start()
+        end = (
+            anchor_matches[index + 1].start()
+            if index + 1 < len(anchor_matches)
+            else len(markdown)
+        )
         result[anchor_match.group(1)] = markdown[start:end].strip()
     return result
 
@@ -235,17 +232,12 @@ def resolve_verbatim_claim_references(
     return value, []
 
 
-def _nearest_heading_start(matches: list[re.Match[str]], position: int) -> int:
-    starts = [match.start() for match in matches if match.start() < position]
-    return starts[-1] if starts else 0
-
-
 def _select_source_text(section: str, selector: str | None) -> str | None:
     if selector is None:
         return section
     escaped = re.escape(selector.strip())
     field = re.search(
-        rf"(?ms)^-\s+\*\*{escaped}\*\*[:：]\s*(.*?)(?=\n-\s+\*\*|\Z)",
+        rf"(?ms)^-\s+\*\*{escaped}\*\*[:：]\s*(.*?)(?=\n-\s+\*\*|\n#{{2,4}}\s|\Z)",
         section,
     )
     return field.group(1).strip() if field else None

@@ -643,6 +643,29 @@ def test_validate_atomic_claims_rejects_non_verbatim_quote() -> None:
     assert rejected[0].reasons == ["exact quote not found in DP-QUOTE#page-1"]
 
 
+def test_claim_validation_supports_anchor_before_its_markdown_heading() -> None:
+    package = _package(
+        "DP-BEFORE",
+        (
+            "<!-- source-anchor: DP-BEFORE#section-1 -->\n\n"
+            "### 知识点 1\n\n嫌货才是买货人\n\n"
+            "<!-- source-anchor: DP-BEFORE#section-2 -->\n\n"
+            "### 知识点 2\n\n第二条知识"
+        ),
+        [
+            SourceAnchor(anchor_id="DP-BEFORE#section-1", kind="section"),
+            SourceAnchor(anchor_id="DP-BEFORE#section-2", kind="section"),
+        ],
+    )
+
+    accepted, rejected = validate_atomic_claims(
+        [_claim("DP-BEFORE#section-1", "嫌货才是买货人")], package
+    )
+
+    assert rejected == []
+    assert "第二条知识" not in accepted[0].evidence[0].source_text
+
+
 def test_blank_selector_from_model_is_treated_as_plain_markdown_evidence() -> None:
     package = _package("DP-BLANK", "# 示例\n\n嫌货才是买货人。")
     raw = _claim("DP-BLANK#page-1", "嫌货才是买货人")
