@@ -44,6 +44,7 @@ def test_quality_report_detects_group_recall_and_over_split(tmp_path) -> None:
                         "module": "D4.3",
                         "objectTypes": ["QA_PAIR"],
                         "requiredItemCount": 2,
+                        "requiredContentFields": ["usageBoundary"],
                         "evidence": ["A3", "A4"],
                     },
                 ],
@@ -93,6 +94,62 @@ def test_quality_report_detects_group_recall_and_over_split(tmp_path) -> None:
     assert report.groups[0].status == "under_split_or_recall"
     assert report.groups[1].status == "over_split"
     assert report.groups[1].predicted_item_count == 2
+
+
+def test_quality_report_detects_missing_required_content_fields(tmp_path) -> None:
+    gold_path = tmp_path / "gold-v0.1.json"
+    gold_path.write_text(
+        json.dumps(
+            {
+                "status": "proxy_draft",
+                "expectedObjectGroups": [
+                    {
+                        "key": "term",
+                        "expectedCount": 1,
+                        "module": "D4.3",
+                        "objectTypes": ["TERM"],
+                        "requiredContentFields": ["sourceStance", "usageBoundary"],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    result = IdentificationResult.model_validate(
+        {
+            "documentPackageId": "DP-QUALITY",
+            "provider": "test",
+            "model": "test",
+            "promptVersion": "test",
+            "schemaVersion": "test",
+            "catalogVersion": "test",
+            "catalogFingerprint": "test",
+            "rawModelOutput": "{}",
+            "modelCalls": [],
+            "processingStages": [],
+            "atomicClaims": [_claim("CL1", "A1")],
+            "candidates": [
+                _candidate("C1", "D4.3", "TERM", ["CL1"], ["A1"])
+            ],
+            "rejectedCandidates": [],
+            "weakSignals": [],
+            "unresolvedItems": [],
+            "coverageByModule": {},
+            "callCount": 0,
+            "promptTokens": 0,
+            "completionTokens": 0,
+        }
+    )
+
+    report = evaluate_against_gold(result, gold_path)
+
+    assert report.overall_status == "fail"
+    assert report.groups[0].status == "contract_failed"
+    assert report.groups[0].missing_content_fields == [
+        "sourceStance",
+        "usageBoundary",
+    ]
 
 
 def _claim(claim_id: str, anchor: str) -> dict[str, object]:

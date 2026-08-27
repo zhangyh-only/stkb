@@ -224,7 +224,7 @@ def test_api_runs_identification_and_reads_the_saved_result(
     assert catalog_response.json()["domains"][0]["question"] == "卖什么"
     assert set(catalog_response.json()["scopeDefinitions"]) == {"core", "optional"}
     assert catalog_response.json()["contentContractVersion"] == (
-        "object-content-contracts-v0.5"
+        "object-content-contracts-v0.6"
     )
     assert catalog_response.json()["identityContractVersion"] == (
         "object-identity-contracts-v0.2"
@@ -240,6 +240,8 @@ def test_api_runs_identification_and_reads_the_saved_result(
     assert d43["contentContract"]["requiredFieldsByType"]["TERM"] == [
         "terms",
         "applicability",
+        "sourceStance",
+        "usageBoundary",
     ]
     assert d43["contentContract"]["itemFieldsByType"]["TERM"] == [
         "termText",

@@ -264,10 +264,14 @@ class GoldGroupEvaluation(ApiModel):
     expected_count: int
     predicted_count: int
     matched_count: int
-    status: Literal["met", "missed", "under_split_or_recall", "over_split"]
+    status: Literal[
+        "met", "missed", "under_split_or_recall", "over_split", "contract_failed"
+    ]
     predicted_candidate_ids: list[str]
     required_item_count: int | None = None
     predicted_item_count: int | None = None
+    required_content_fields: list[str] = Field(default_factory=list)
+    missing_content_fields: list[str] = Field(default_factory=list)
 
 
 class IdentificationQualityReport(ApiModel):

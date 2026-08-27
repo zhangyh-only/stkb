@@ -196,10 +196,12 @@ export type GoldGroupEvaluation = {
   expectedCount: number
   predictedCount: number
   matchedCount: number
-  status: 'met' | 'missed' | 'under_split_or_recall' | 'over_split'
+  status: 'met' | 'missed' | 'under_split_or_recall' | 'over_split' | 'contract_failed'
   predictedCandidateIds: string[]
   requiredItemCount: number | null
   predictedItemCount: number | null
+  requiredContentFields: string[]
+  missingContentFields: string[]
 }
 
 export type IdentificationQualityReport = {

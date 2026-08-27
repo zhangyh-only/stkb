@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 CONTRACTS_PATH = (
-    Path(__file__).with_name("rules") / "object-content-contracts-v0.5.toml"
+    Path(__file__).with_name("rules") / "object-content-contracts-v0.6.toml"
 )
 
 
