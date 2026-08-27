@@ -8,15 +8,20 @@
       "expectedCount": 2,
       "module": "D1.1",
       "objectTypes": ["PRODUCT_VERSION_FACT"],
+      "identities": ["药享保尊享版", "药享保全能版"],
       "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-1-row-3", "DP-YXB-SCRIPTS-20260826#sheet-1-row-4"],
-      "splitRule": "两个版本具有独立保费、责任、药品范围和更新生命周期"
+      "requireAllEvidence": true,
+      "requiredContentFields": ["subject", "facts", "applicability"],
+      "splitRule": "两个版本具有独立保费、责任、药品范围和更新生命周期，应分别形成对象"
     },
     {
       "key": "service-process",
-      "expectedCount": 2,
+      "expectedCount": 1,
       "module": "D1.3",
       "objectTypes": ["BUSINESS_PROCESS"],
-      "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-2-row-3"]
+      "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-2-row-3"],
+      "requireAllEvidence": true,
+      "requiredContentFields": ["purpose", "preconditions", "rulesOrSteps"]
     },
     {
       "key": "prescription-rules",
@@ -24,44 +29,81 @@
       "module": "D1.3",
       "objectTypes": ["POLICY_RULE_SET"],
       "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-2-row-7", "DP-YXB-SCRIPTS-20260826#sheet-2-row-8"],
-      "splitRule": "处方总量限制与同功效药品开具限制支持不同查询问题，应独立更新；药品目录范围由问答/清单职责承载"
+      "requireAllEvidence": true,
+      "requiredContentFields": ["purpose", "preconditions", "rulesOrSteps"]
+    },
+    {
+      "key": "product-introduction-strategies",
+      "expectedCount": 2,
+      "module": "D3.3",
+      "objectTypes": ["SALES_STRATEGY"],
+      "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-1-row-3", "DP-YXB-SCRIPTS-20260826#sheet-1-row-4"],
+      "requireAllEvidence": true,
+      "requiredContentFields": ["strategyName", "triggerConditions", "decisionLogic", "actions", "applicability"],
+      "splitRule": "两项方法分别绑定尊享版与全能版的产品范围和行动重点，属于两个产品策略，不提升为跨产品通用技巧"
     },
     {
       "key": "audience-strategies",
       "expectedCount": 4,
       "module": "D3.3",
       "objectTypes": ["SALES_STRATEGY"],
+      "identities": ["忙碌上班族", "异地父母家庭", "年幼孩子家庭", "回访老客户"],
       "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-1-row-5", "DP-YXB-SCRIPTS-20260826#sheet-1-row-6", "DP-YXB-SCRIPTS-20260826#sheet-1-row-7", "DP-YXB-SCRIPTS-20260826#sheet-1-row-8"],
-      "splitRule": "客群、触发条件、产品版本和推荐逻辑不同"
+      "requireAllEvidence": true,
+      "requiredContentFields": ["strategyName", "triggerConditions", "decisionLogic", "actions", "applicability"],
+      "splitRule": "客群、触发条件、产品版本和推荐逻辑不同，必须独立检索和更新"
     },
     {
       "key": "bundle-strategies",
       "expectedCount": 2,
       "module": "D3.3",
       "objectTypes": ["SALES_STRATEGY"],
-      "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-1-row-9", "DP-YXB-SCRIPTS-20260826#sheet-1-row-10"]
+      "identities": ["车险+乐驾+药享保", "车险+乐驾+全能保+药享保"],
+      "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-1-row-9", "DP-YXB-SCRIPTS-20260826#sheet-1-row-10"],
+      "requireAllEvidence": true,
+      "requiredContentFields": ["strategyName", "triggerConditions", "decisionLogic", "actions", "applicability"]
     },
     {
       "key": "reusable-scripts",
       "expectedCount": 8,
       "module": "D4.1",
       "objectTypes": ["STANDARD_SCRIPT"],
-      "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-1-row-3", "DP-YXB-SCRIPTS-20260826#sheet-1-row-4", "DP-YXB-SCRIPTS-20260826#sheet-1-row-5", "DP-YXB-SCRIPTS-20260826#sheet-1-row-6", "DP-YXB-SCRIPTS-20260826#sheet-1-row-7", "DP-YXB-SCRIPTS-20260826#sheet-1-row-8", "DP-YXB-SCRIPTS-20260826#sheet-1-row-9", "DP-YXB-SCRIPTS-20260826#sheet-1-row-10"]
+      "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-1-row-3", "DP-YXB-SCRIPTS-20260826#sheet-1-row-4", "DP-YXB-SCRIPTS-20260826#sheet-1-row-5", "DP-YXB-SCRIPTS-20260826#sheet-1-row-6", "DP-YXB-SCRIPTS-20260826#sheet-1-row-7", "DP-YXB-SCRIPTS-20260826#sheet-1-row-8", "DP-YXB-SCRIPTS-20260826#sheet-1-row-9", "DP-YXB-SCRIPTS-20260826#sheet-1-row-10"],
+      "requireAllEvidence": true,
+      "requiredContentFields": ["communicationGoal", "applicability", "script", "factReferences"],
+      "splitRule": "不同沟通目标、客群或产品组合的话术独立被检索，不能只保留策略摘要"
+    },
+    {
+      "key": "objection-response-scripts",
+      "expectedCount": 5,
+      "module": "D4.1",
+      "objectTypes": ["STANDARD_SCRIPT"],
+      "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-1-row-11", "DP-YXB-SCRIPTS-20260826#sheet-1-row-12", "DP-YXB-SCRIPTS-20260826#sheet-1-row-13", "DP-YXB-SCRIPTS-20260826#sheet-1-row-14", "DP-YXB-SCRIPTS-20260826#sheet-1-row-15"],
+      "requireAllEvidence": true,
+      "requiredContentFields": ["communicationGoal", "applicability", "script", "factReferences"],
+      "splitRule": "原资料提供了五段可直接复用的异议应对话术，不能只保留异议结构或处理策略"
     },
     {
       "key": "customer-objections",
       "expectedCount": 6,
       "module": "D4.2",
       "objectTypes": ["CUSTOMER_OBJECTION"],
+      "identities": ["已有医保", "价格贵", "暂时不需要", "考虑一下", "没用到白费", "一次买多年"],
       "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-1-row-11", "DP-YXB-SCRIPTS-20260826#sheet-1-row-12", "DP-YXB-SCRIPTS-20260826#sheet-1-row-13", "DP-YXB-SCRIPTS-20260826#sheet-1-row-14", "DP-YXB-SCRIPTS-20260826#sheet-1-row-15", "DP-YXB-SCRIPTS-20260826#sheet-1-row-16"]
+      ,"requireAllEvidence": true,
+      "requiredContentFields": ["objectionTheme", "expressions", "context", "rootConcernHypotheses", "resolutionElements"],
+      "splitRule": "根本关切和处理方向不同，每类异议必须形成独立对象"
     },
     {
       "key": "product-faq",
       "expectedCount": 1,
       "module": "D4.3",
       "objectTypes": ["QA_PAIR"],
-      "requiredItemCount": 8,
-      "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-2-row-3", "DP-YXB-SCRIPTS-20260826#sheet-2-row-4", "DP-YXB-SCRIPTS-20260826#sheet-2-row-5", "DP-YXB-SCRIPTS-20260826#sheet-2-row-6", "DP-YXB-SCRIPTS-20260826#sheet-2-row-7", "DP-YXB-SCRIPTS-20260826#sheet-2-row-8", "DP-YXB-SCRIPTS-20260826#sheet-2-row-9", "DP-YXB-SCRIPTS-20260826#sheet-2-row-10"]
+      "requiredItemCount": 9,
+      "evidence": ["DP-YXB-SCRIPTS-20260826#sheet-1-row-16", "DP-YXB-SCRIPTS-20260826#sheet-2-row-3", "DP-YXB-SCRIPTS-20260826#sheet-2-row-4", "DP-YXB-SCRIPTS-20260826#sheet-2-row-5", "DP-YXB-SCRIPTS-20260826#sheet-2-row-6", "DP-YXB-SCRIPTS-20260826#sheet-2-row-7", "DP-YXB-SCRIPTS-20260826#sheet-2-row-8", "DP-YXB-SCRIPTS-20260826#sheet-2-row-9", "DP-YXB-SCRIPTS-20260826#sheet-2-row-10"],
+      "requireAllEvidence": true,
+      "requiredContentFields": ["items", "factReferences", "applicability"],
+      "requiredItemFields": ["question", "answer", "claimRef"]
     }
   ],
   "prohibitedPatterns": [

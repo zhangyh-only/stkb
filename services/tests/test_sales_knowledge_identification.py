@@ -27,7 +27,13 @@ from app.features.sales_knowledge_identification.segmenter import segment_docume
 from app.features.sales_knowledge_identification.service import (
     DocumentPackageUnavailable,
     SalesKnowledgeIdentificationService,
+    _apply_plan_augmentations,
+    _automatic_uncovered_claim_ids,
     _enforce_plan_granularity,
+    _expand_compact_object_plan,
+    _merge_repair_plans,
+    _normalize_content_shape,
+    _plan_satisfies_primary_claim_role,
 )
 
 
@@ -869,6 +875,66 @@ def test_alternate_verbatim_reference_is_normalized_to_verified_source() -> None
     assert resolved == {"script": "先认可价格顾虑，再完整说明产品价值与适用边界。"}
 
 
+def test_verbatim_content_wrapper_is_normalized_to_plain_text() -> None:
+    resolved, reasons = resolve_verbatim_claim_references(
+        {"script": {"verbatimContent": "来自资料的完整标准话术。"}}, {}
+    )
+
+    assert reasons == []
+    assert resolved == {"script": "来自资料的完整标准话术。"}
+
+
+def test_nested_verbatim_wrappers_are_normalized_to_plain_text() -> None:
+    claim = AtomicClaim(
+        claim_id="CL1",
+        claim_kind="script",
+        statement="完整话术",
+        subject="产品引入",
+        evidence=[
+            ClaimEvidence(
+                anchor_id="DP-SCRIPT#row-1",
+                exact_quote="完整话术",
+                source_text="来自资料的完整标准话术。",
+            )
+        ],
+    )
+
+    first, first_reasons = resolve_verbatim_claim_references(
+        {"script": {"verbatim": True, "text": {"$verbatimFromClaim": "CL1"}}},
+        {"CL1": claim},
+    )
+    second, second_reasons = resolve_verbatim_claim_references(
+        {"script": {"verbatimContent": {"$verbatimFromClaim": "CL1"}}},
+        {"CL1": claim},
+    )
+
+    assert first_reasons == second_reasons == []
+    assert first == second == {"script": "来自资料的完整标准话术。"}
+
+
+def test_json_encoded_verbatim_macro_is_normalized_to_verified_source() -> None:
+    claim = AtomicClaim(
+        claim_id="CL1",
+        claim_kind="script",
+        statement="完整话术",
+        subject="产品引入",
+        evidence=[
+            ClaimEvidence(
+                anchor_id="DP-SCRIPT#row-1",
+                exact_quote="完整话术",
+                source_text="来自资料的完整标准话术。",
+            )
+        ],
+    )
+
+    resolved, reasons = resolve_verbatim_claim_references(
+        {"script": '{"$verbatimFromClaim":"CL1"}'}, {"CL1": claim}
+    )
+
+    assert reasons == []
+    assert resolved == {"script": "来自资料的完整标准话术。"}
+
+
 def test_validate_atomic_claims_rejects_non_verbatim_quote() -> None:
     package = _package("DP-QUOTE", "# 示例\n\n药享保提供在线问诊。")
     accepted, rejected = validate_atomic_claims(
@@ -1007,8 +1073,8 @@ def test_global_planning_can_merge_cross_kind_claims_into_one_object() -> None:
     assert len(result.object_plans) == 1
     assert result.object_plans[0].source_claim_ids == ["CL1", "CL2"]
     planning_request = gateway.requests[1]
-    assert '"claimKind": "fact"' in planning_request.user_prompt
-    assert '"claimKind": "rule"' in planning_request.user_prompt
+    assert '"claimKind":"fact"' in planning_request.user_prompt
+    assert '"claimKind":"rule"' in planning_request.user_prompt
 
 
 def test_unassigned_claim_is_exposed_as_unresolved_instead_of_disappearing() -> None:
@@ -1114,6 +1180,44 @@ def test_granularity_gate_splits_objections_sharing_one_source_anchor() -> None:
     assert [item.source_claim_ids for item in split] == [["CL1"], ["CL2"]]
 
 
+def test_granularity_gate_merges_qa_plans_from_one_document_unit() -> None:
+    claims = [
+        AtomicClaim(
+            claim_id=f"CL{index}",
+            claim_kind="qa",
+            statement=question,
+            subject=question,
+            evidence=[
+                ClaimEvidence(
+                    anchor_id=f"DP-FAQ#row-{index}",
+                    exact_quote=question,
+                    source_text=question,
+                )
+            ],
+        )
+        for index, question in enumerate(("如何问诊", "如何开发票"), start=1)
+    ]
+    plans = [
+        CandidateObjectPlan(
+            plan_id=f"P{index}",
+            title=question,
+            domain="D4",
+            module="D4.3",
+            object_type="QA_PAIR",
+            object_boundary="共同维护的问答集合",
+            classification_basis="标准问答",
+            identity_hints={"subject": question, "applicability": "药享保"},
+            source_claim_ids=[f"CL{index}"],
+        )
+        for index, question in enumerate(("如何问诊", "如何开发票"), start=1)
+    ]
+
+    merged = _enforce_plan_granularity(plans, claims)
+
+    assert len(merged) == 1
+    assert merged[0].source_claim_ids == ["CL1", "CL2"]
+
+
 def test_granularity_gate_splits_decision_rules_by_trigger_anchor() -> None:
     claims = [
         AtomicClaim(
@@ -1166,3 +1270,137 @@ def test_granularity_gate_splits_decision_rules_by_trigger_anchor() -> None:
         "首次分类",
         "复播迁移",
     ]
+
+
+def test_coverage_repair_augments_existing_plan_and_merges_new_identity() -> None:
+    existing = CandidateObjectPlan(
+        plan_id="P1",
+        title="药享保问答",
+        domain="D4",
+        module="D4.3",
+        object_type="QA_PAIR",
+        object_boundary="同一维护单元",
+        classification_basis="标准问答",
+        identity_hints={"subject": "药享保FAQ", "applicability": "全版本"},
+        source_claim_ids=["CL1"],
+    )
+    repair_claim = AtomicClaim(
+        claim_id="CL2",
+        claim_kind="qa",
+        statement="是否可以开具发票",
+        subject="发票问答",
+        evidence=[
+            ClaimEvidence(
+                anchor_id="DP-FAQ#row-2",
+                exact_quote="是否可以开具发票",
+                source_text="是否可以开具发票",
+            )
+        ],
+    )
+    augmented, augmentation_rejections = _apply_plan_augmentations(
+        [existing], [{"planId": "P1", "sourceClaimIds": ["CL2"]}], [repair_claim]
+    )
+    new_plan = CandidateObjectPlan(
+        plan_id="R1",
+        title="短时突出版本优势",
+        domain="D3",
+        module="D3.2",
+        object_type="SALES_TECHNIQUE",
+        object_boundary="机制不同必须拆分",
+        classification_basis="可复用销售方法",
+        identity_hints={
+            "techniqueName": "短时优势表达",
+            "purpose": "快速说明产品价值",
+            "mechanism": "聚焦核心特点",
+        },
+        source_claim_ids=["CL3"],
+    )
+    merged, duplicate_rejections = _merge_repair_plans(augmented, [new_plan])
+
+    assert augmentation_rejections == []
+    assert augmented[0].source_claim_ids == ["CL1", "CL2"]
+    assert duplicate_rejections == []
+    assert [plan.plan_id for plan in merged] == ["P1", "R1"]
+
+
+def test_coverage_repair_only_retries_automatic_planning_omissions() -> None:
+    automatic = {
+        "claimId": "CL1",
+        "reason": "模型未将该主张分配给任何对象计划，禁止静默丢失",
+    }
+    explicit = {"claimId": "CL2", "reason": "资料不足，保留为未决项"}
+
+    assert _automatic_uncovered_claim_ids(
+        [(automatic, {"A1"}), (explicit, {"A2"})]
+    ) == {"CL1"}
+
+
+def test_script_plan_does_not_consume_independent_strategy_role() -> None:
+    strategy_claim = AtomicClaim(
+        claim_id="CL1",
+        claim_kind="strategy",
+        statement="短时间讲清产品特点",
+        subject="产品引入方法",
+        evidence=[
+            ClaimEvidence(
+                anchor_id="DP-SCRIPT#row-1",
+                exact_quote="短时间讲清产品特点",
+                source_text="短时间讲清产品特点",
+            )
+        ],
+    )
+    script_plan = CandidateObjectPlan(
+        plan_id="P1",
+        title="产品引入话术",
+        domain="D4",
+        module="D4.1",
+        object_type="STANDARD_SCRIPT",
+        object_boundary="话术边界",
+        classification_basis="完整表达",
+        identity_hints={
+            "communicationGoal": "产品引入",
+            "method": "优势说明",
+            "applicability": "目标客户",
+        },
+        source_claim_ids=["CL1"],
+    )
+
+    assert not _plan_satisfies_primary_claim_role(script_plan, strategy_claim)
+
+
+def test_qa_content_normalizes_single_fact_reference_alias() -> None:
+    content = _normalize_content_shape(
+        "D4.3",
+        "QA_PAIR",
+        {
+            "items": [
+                {
+                    "question": "是否可以开具发票？",
+                    "answer": "全额自费订单可以开具。",
+                    "factReferences": ["CL1"],
+                }
+            ]
+        },
+    )
+
+    assert content["items"][0]["claimRef"] == "CL1"
+
+
+def test_compact_object_plan_expands_to_validation_shape() -> None:
+    expanded = _expand_compact_object_plan(
+        [
+            "P1",
+            "产品引入话术",
+            "D4.1",
+            "STANDARD_SCRIPT",
+            {
+                "communicationGoal": "产品引入",
+                "method": "优势说明",
+                "applicability": "目标客户",
+            },
+            ["CL1"],
+        ]
+    )
+
+    assert expanded["planId"] == "P1"
+    assert expanded["sourceClaimIds"] == ["CL1"]

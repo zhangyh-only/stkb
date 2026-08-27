@@ -2,13 +2,50 @@ from __future__ import annotations
 
 import json
 
-from .catalog import render_catalog_for_prompt
-from .content_contracts import render_content_contracts_for_prompt
-from .identity_contracts import render_identity_contracts_for_prompt
+from .catalog import KNOWLEDGE_MODULES
+from .content_contracts import (
+    CONTENT_CONTRACT_BY_MODULE,
+    render_content_contracts_for_prompt,
+)
+from .identity_contracts import IDENTITY_CONTRACT_BY_MODULE
 from .models import AtomicClaim, CandidateObjectPlan, DocumentPackage, ModelRequest
 
 PROMPT_VERSION = "sales-identification-v0.6"
 SCHEMA_VERSION = "candidate-knowledge-object-v0.5"
+
+
+def render_planning_contracts_for_prompt() -> str:
+    sections: list[str] = []
+    for module in KNOWLEDGE_MODULES:
+        content = CONTENT_CONTRACT_BY_MODULE[module.code]
+        identity = IDENTITY_CONTRACT_BY_MODULE[module.code]
+        sections.append(
+            "\n".join(
+                [
+                    f"### {module.code} {module.name}",
+                    f"- 含义：{module.meaning}",
+                    f"- 对象类型：{', '.join(module.object_types)}",
+                    f"- 纳入：{content.inclusion}",
+                    f"- 排除：{content.exclusion}",
+                    f"- 粒度：{content.granularity}",
+                    f"- 身份字段：{', '.join(identity.identity_fields)}",
+                    f"- 必须拆分：{identity.different_object_when}",
+                ]
+            )
+        )
+    return "\n\n".join(sections)
+
+
+def _compact_claim_for_planning(claim: AtomicClaim) -> dict[str, object]:
+    compact = claim.model_dump(by_alias=True)
+    compact["moduleHints"] = []
+    for evidence in compact["evidence"]:
+        excerpt = evidence.pop("exactQuote", "")
+        evidence.pop("sourceText", None)
+        evidence["sourceExcerpt"] = (
+            excerpt if len(excerpt) <= 240 else excerpt[:240] + "…"
+        )
+    return compact
 
 
 def build_claim_discovery_request(
@@ -85,10 +122,7 @@ def build_object_planning_request(
 ) -> ModelRequest:
     claims_payload = []
     for claim in claims:
-        compact = claim.model_dump(by_alias=True)
-        for evidence in compact["evidence"]:
-            evidence.pop("sourceText", None)
-        claims_payload.append(compact)
+        claims_payload.append(_compact_claim_for_planning(claim))
     system_prompt = f"""你是 STKB 销售知识对象边界规划器。你会一次看到整份资料所有已核验的
 原子主张。此阶段只决定应形成哪些可独立识别、归并、更新和消费的对象，以及每个对象使用哪些
 主张；不编写 content，不生成正式 KnowledgeObject ID。
@@ -98,16 +132,20 @@ def build_object_planning_request(
    适用范围与更新生命周期决定，绝不按句子数、claimKind 或模块机械拆分。
 2. 必须跨 claimKind 观察同一业务对象：同一产品版本的事实、限制和权益可共同形成完整产品版本对象；
    但产品事实、销售策略、客户异议和完整话术职责不同，必须保持独立并通过关系关联。
-3. FAQ 表按一个共同维护的问答集合规划，所有 qa 主张进入同一计划；不要按每个问题或主题拆对象。
+3. FAQ 表按一个共同维护的问答集合规划，所有 qa 主张及其同一来源行的版本范围、适用范围说明进入
+   同一计划；不要按每个问题或主题拆对象，也不要把“两个版本通用”等范围说明遗留为孤立主张。
 4. 同一沟通目标、客群、产品组合与方法下的完整话术形成一个话术对象；措辞变体进入同一对象。
-   同一资料行同时包含可复用的客群/选择策略与完整话术时，分别形成 D3.3 策略和 D4.1 话术；
-   两者下游职责不同，不能因为形成其中一个就丢掉另一个。
+   同一资料行同时包含销售方法/策略与完整话术时，方法或策略和 D4.1 话术分别形成对象；其中可跨
+   客群复用的方法原则归 D3.2，带明确客群、产品组合或条件动作的策略归 D3.3。两者下游职责不同，
+   不能因为形成话术就丢掉“如何突出优势”“如何按客户特点选择重点”等方法主张。
 5. 根本顾虑相同的异议表达归并；根本顾虑不同的异议保持独立。异议对象不吞并应对话术。
 6. 下列边界是硬约束：
    - 每个不同 productCombination/产品组合形成独立 D3.3 策略，不得因同属组合营销而合并；
    - D1.3 的用户操作顺序形成 BUSINESS_PROCESS；处方限量、同功效药限制、目录限制、发票条件等
      可独立查询的约束形成 POLICY_RULE_SET，不得塞进一个“通用流程与规则”对象；
    - 同一规则主题可聚合多条约束，但处方规则与发票规则因消费问题和更新依据不同必须拆分。
+   - “可能缺货，建议等待后重试”等面向客户情境的处置建议不是正式政策规则，应归 D3.3 判断规则；
+     只有来源明确表达规定、条件、允许或禁止的业务约束才归 D1.3 POLICY_RULE_SET。
    - 稳定的客户优先级、状态枚举及其完整值域属于 D2.1 PROFILE_DIMENSION；值域判定和迁移属于
      D3.3 DECISION_RULE。两者可以关联共存，但不得再把同一套枚举重复包装为 D3.2 通用技巧。
      资料只枚举优先级类别而没有规定每类后续动作时，仍是 D2.1 维度，禁止补造触发时机和销售动作
@@ -134,25 +172,15 @@ def build_object_planning_request(
    entityMentions、relations 或解释文字；这些由程序根据已发布合同注入，避免重复规则和输出截断。
    只输出合法 JSON，不输出隐藏推理过程。
 
-当前 D1-D5 / 22个知识内容模块规则：
-{render_catalog_for_prompt()}
+当前 D1-D5 / 22个模块规划合同：
+{render_planning_contracts_for_prompt()}
 
-当前22个模块对象粒度、纳入/排除与正反例：
-{render_content_contracts_for_prompt()}
-
-当前22个模块对象身份与归并合同：
-{render_identity_contracts_for_prompt()}
-
+为避免大型资料输出截断，objectPlans 必须使用紧凑数组，每项依次为
+[planId,title,module,objectType,identityHints,sourceClaimIds]，禁止改回字段重复的对象形态。
 输出形态：
 {{
-  "objectPlans": [{{
-    "planId": "P1",
-    "title": "业务可读标题",
-    "module": "D4.1",
-    "objectType": "STANDARD_SCRIPT",
-    "identityHints": {{"subject": "业务主体", "scope": "适用范围"}},
-    "sourceClaimIds": ["CL1"]
-  }}],
+  "objectPlans": [["P1","业务可读标题","D4.1","STANDARD_SCRIPT",
+    {{"communicationGoal":"目标","method":"方法","applicability":"范围"}},["CL1"]]],
   "weakSignals": [{{
     "claimId":"CL9",
     "module":"D2.4",
@@ -171,8 +199,13 @@ def build_object_planning_request(
         document_package_id=document_package_id,
         system_prompt=system_prompt,
         user_prompt=(
-            "以下是整份资料的全部已核验主张。exactQuote 已逐字校验：\n"
-            + json.dumps(claims_payload, ensure_ascii=False, indent=2)
+            "以下是整份资料的全部已核验主张。sourceExcerpt 来自已逐字校验引句，"
+            "仅为规划压缩显示：\n"
+            + json.dumps(
+                claims_payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
         ),
     )
 
@@ -238,6 +271,73 @@ def build_content_realization_request(
         user_prompt=(
             f"内容编制批次：{batch_label}\n对象任务（每项计划与证据严格隔离）：\n"
             + json.dumps(object_tasks, ensure_ascii=False, indent=2)
+        ),
+    )
+
+
+def build_plan_coverage_repair_request(
+    document_package_id: str,
+    existing_plans: list[CandidateObjectPlan],
+    uncovered_claims: list[AtomicClaim],
+) -> ModelRequest:
+    compact_plans = [
+        {
+            "planId": plan.plan_id,
+            "title": plan.title,
+            "module": plan.module,
+            "objectType": plan.object_type,
+            "identityHints": plan.identity_hints,
+            "sourceClaimIds": plan.source_claim_ids,
+        }
+        for plan in existing_plans
+    ]
+    compact_claims = []
+    for claim in uncovered_claims:
+        compact_claims.append(_compact_claim_for_planning(claim))
+    system_prompt = f"""你是 STKB 对象规划覆盖审查器。首轮全局规划后仍有原子主张未被对象计划消费。
+你必须逐条审查这些主张，并选择：补入已有对象、新建独立对象、保留为弱信号，或明确列为未决项。
+
+修复规则：
+1. 每条未覆盖主张必须且只能由 planAugmentations、objectPlans、weakSignals、unresolvedItems
+   至少一种方式明确处理，禁止再次静默遗漏。
+2. 主张若只是已有对象的事实、限制、适用范围、问答条目或支撑证据，使用 planAugmentations；
+   不能为了提高覆盖率创建重复对象。
+3. 主张具有独立消费职责、身份或更新生命周期时才新建 objectPlans。新计划 ID 使用 R1、R2……，
+   只输出规划字段，不输出 content、domain、边界、分类依据、实体或关系。
+4. 完整话术与方法/策略职责不同；FAQ 的遗漏条目补入已有 QA_PAIR；可跨客群复用的方法原则归 D3.2，
+   带明确客群、产品组合或条件动作的策略归 D3.3。
+5. moduleHints 已被清空，因为发现阶段提示不是分类结论。必须依据主张语义和当前规则重新裁决。
+6. 不得补造来源没有的事实、心理原因、流程步骤或话术。只输出合法 JSON。
+
+当前 D1-D5 / 22个模块规划合同：
+{render_planning_contracts_for_prompt()}
+
+为避免输出截断，objectPlans 必须使用紧凑数组，每项依次为
+[planId,title,module,objectType,identityHints,sourceClaimIds]。
+输出形态：
+{{
+  "planAugmentations": [{{"planId":"P1","sourceClaimIds":["CL9"]}}],
+  "objectPlans": [["R1","业务可读标题","D3.2","SALES_TECHNIQUE",
+    {{"techniqueName":"名称","purpose":"目的","mechanism":"机制"}},["CL10"]]],
+  "weakSignals": [],
+  "unresolvedItems": []
+}}"""
+    return ModelRequest(
+        document_package_id=document_package_id,
+        system_prompt=system_prompt,
+        user_prompt=(
+            "首轮已接受对象计划：\n"
+            + json.dumps(
+                compact_plans,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            + "\n\n尚未覆盖的已核验主张：\n"
+            + json.dumps(
+                compact_claims,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
         ),
     )
 

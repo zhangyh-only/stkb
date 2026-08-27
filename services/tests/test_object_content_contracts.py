@@ -7,7 +7,7 @@ from app.features.sales_knowledge_identification.content_contracts import (
 
 
 def test_content_contracts_cover_every_module_and_object_type() -> None:
-    assert CONTENT_CONTRACT_VERSION == "object-content-contracts-v0.9"
+    assert CONTENT_CONTRACT_VERSION == "object-content-contracts-v1.0"
     assert set(CONTENT_CONTRACT_BY_MODULE) == {
         module.code for module in KNOWLEDGE_MODULES
     }
@@ -67,6 +67,21 @@ def test_explicitly_allowed_empty_fields_do_not_force_model_invention() -> None:
     }
 
     assert validate_candidate_content("D4.1", "STANDARD_SCRIPT", content) == []
+
+
+def test_standard_script_rejects_nested_wrapper_after_normalization_stage() -> None:
+    content = {
+        "communicationGoal": "处理价格异议并准确说明产品价值",
+        "applicability": "客户明确提出价格顾虑时使用",
+        "script": {"verbatimContent": "不应残留在正式对象中的模型中间结构"},
+        "factReferences": ["DP-SCRIPT#row-1"],
+        "complianceConstraints": [],
+        "detail": "补充文字不能掩盖 script 字段类型不符合正式合同。" * 20,
+    }
+
+    errors = validate_candidate_content("D4.1", "STANDARD_SCRIPT", content)
+
+    assert "content fields must be non-empty strings: script" in errors
 
 
 def test_term_cannot_use_qa_pair_content_shape() -> None:

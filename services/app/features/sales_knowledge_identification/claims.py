@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -160,11 +161,6 @@ def supplement_structured_table_claims(
 ) -> list[AtomicClaim]:
     """Enforce source-table row duties that a probabilistic discovery call may miss."""
     sections = extract_anchor_sections(document_package)
-    existing = {
-        (claim.claim_kind, evidence.anchor_id)
-        for claim in claims
-        for evidence in claim.evidence
-    }
     supplemented = list(claims)
     active_group = ""
     sequence = 0
@@ -191,7 +187,44 @@ def supplement_structured_table_claims(
             claim_kind = "objection"
             module_hint = "D4.2"
             source_values = [("B列", question), ("D列", script)]
-        if claim_kind is None or (claim_kind, anchor.anchor_id) in existing:
+        if claim_kind is None:
+            continue
+        matching_indexes = [
+            index
+            for index, claim in enumerate(supplemented)
+            if claim.claim_kind == claim_kind
+            and any(
+                evidence.anchor_id == anchor.anchor_id
+                for evidence in claim.evidence
+            )
+        ]
+        structured_attributes = {
+            "question" if claim_kind == "qa" else "expression": question,
+            "answer" if claim_kind == "qa" else "responseContext": (
+                answer if claim_kind == "qa" else script
+            ),
+        }
+        structured_evidence = [
+            ClaimEvidence(
+                anchor_id=anchor.anchor_id,
+                exact_quote=value,
+                selector=selector,
+                source_text=value,
+            )
+            for selector, value in source_values
+        ]
+        if matching_indexes:
+            primary_index = matching_indexes[0]
+            current = supplemented[primary_index]
+            supplemented[primary_index] = current.model_copy(
+                update={
+                    "attributes": {**current.attributes, **structured_attributes},
+                    "module_hints": list(
+                        dict.fromkeys([*current.module_hints, module_hint])
+                    ),
+                    "evidence": structured_evidence,
+                }
+            )
             continue
         sequence += 1
         supplemented.append(
@@ -204,25 +237,11 @@ def supplement_structured_table_claims(
                     else f"客户异议：{question}"
                 ),
                 subject=question,
-                attributes={
-                    "question" if claim_kind == "qa" else "expression": question,
-                    "answer" if claim_kind == "qa" else "responseContext": (
-                        answer if claim_kind == "qa" else script
-                    ),
-                },
+                attributes=structured_attributes,
                 module_hints=[module_hint],
-                evidence=[
-                    ClaimEvidence(
-                        anchor_id=anchor.anchor_id,
-                        exact_quote=value,
-                        selector=selector,
-                        source_text=value,
-                    )
-                    for selector, value in source_values
-                ],
+                evidence=structured_evidence,
             )
         )
-        existing.add((claim_kind, anchor.anchor_id))
     return supplemented
 
 
@@ -232,6 +251,14 @@ def resolve_verbatim_claim_references(
 ) -> tuple[Any, list[str]]:
     """Resolve model macros to verified source text without asking it to copy long text."""
     if isinstance(value, dict):
+        if set(value) == {"verbatimContent"}:
+            return resolve_verbatim_claim_references(
+                value["verbatimContent"], claim_by_id
+            )
+        if "fullText" in value and set(value) <= {"strategy", "fullText"}:
+            return resolve_verbatim_claim_references(value["fullText"], claim_by_id)
+        if value.get("verbatim") is True and set(value) == {"verbatim", "text"}:
+            return resolve_verbatim_claim_references(value["text"], claim_by_id)
         if (
             value.get("verbatim") is True
             and isinstance(value.get("sourceRef"), str)
@@ -278,6 +305,16 @@ def resolve_verbatim_claim_references(
             resolved_items.append(resolved_item)
             reasons.extend(item_reasons)
         return resolved_items, reasons
+    if isinstance(value, str) and value.startswith("{"):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return value, []
+        if isinstance(parsed, dict) and (
+            set(parsed) == {"$verbatimFromClaim"}
+            or set(parsed) == {"$exactQuoteFromClaim"}
+        ):
+            return resolve_verbatim_claim_references(parsed, claim_by_id)
     return value, []
 
 

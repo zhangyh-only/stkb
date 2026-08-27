@@ -7,8 +7,12 @@ from pathlib import Path
 from typing import Any
 
 CONTRACTS_PATH = (
-    Path(__file__).with_name("rules") / "object-content-contracts-v0.9.toml"
+    Path(__file__).with_name("rules") / "object-content-contracts-v1.0.toml"
 )
+
+STRING_FIELDS_BY_OBJECT_TYPE: dict[str, tuple[str, ...]] = {
+    "STANDARD_SCRIPT": ("communicationGoal", "script"),
+}
 
 
 @dataclass(frozen=True)
@@ -87,6 +91,17 @@ def validate_candidate_content(module: str, object_type: str, content: dict[str,
     ]
     if missing_fields:
         errors.append("missing required content fields: " + ", ".join(missing_fields))
+    invalid_string_fields = [
+        field
+        for field in STRING_FIELDS_BY_OBJECT_TYPE.get(object_type, ())
+        if field in content
+        and (not isinstance(content[field], str) or not content[field].strip())
+    ]
+    if invalid_string_fields:
+        errors.append(
+            "content fields must be non-empty strings: "
+            + ", ".join(invalid_string_fields)
+        )
     item_fields = contract.item_fields_by_type.get(object_type)
     if item_fields:
         collection_field = next(

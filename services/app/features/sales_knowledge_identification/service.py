@@ -51,12 +51,32 @@ from .prompt_builder import (
     build_claim_discovery_request,
     build_content_realization_request,
     build_object_planning_request,
+    build_plan_coverage_repair_request,
     build_repair_request,
 )
 from .segmenter import DocumentSegment, segment_document
 
 CallPurpose = Literal["claim_discovery", "object_planning", "content_realization"]
 CONTENT_REALIZATION_BATCH_SIZE = 5
+PRIMARY_MODULE_PREFIXES_BY_CLAIM_KIND: dict[str, tuple[str, ...]] = {
+    "fact": ("D1.",),
+    "list": ("D1.2",),
+    "process": ("D1.3",),
+    "rule": ("D1.3", "D3.3", "D3.4", "D5.3"),
+    "comparison": ("D1.4",),
+    "customer_signal": ("D2.",),
+    "method": ("D3.2",),
+    "strategy": ("D3.2", "D3.3"),
+    "script": ("D4.1",),
+    "objection": ("D4.2",),
+    "qa": ("D4.3",),
+    "term": ("D4.3",),
+    "case": ("D4.4",),
+    "asset": ("D4.5",),
+    "value_proposition": ("D5.1",),
+    "evaluation": ("D5.2", "D5.3"),
+    "benchmark": ("D5.4",),
+}
 
 
 class ModelGateway(Protocol):
@@ -159,6 +179,131 @@ class SalesKnowledgeIdentificationService:
             planning_weak_inputs,
             planning_unresolved_inputs,
         ) = _validate_object_plans(planning_result, atomic_claims)
+        for _repair_pass in range(2):
+            uncovered_claim_ids = _automatic_uncovered_claim_ids(
+                planning_unresolved_inputs
+            )
+            if not uncovered_claim_ids:
+                break
+            repair_claims = [
+                claim
+                for claim in atomic_claims
+                if claim.claim_id in uncovered_claim_ids
+            ]
+            repair_result, repair_failures = self._repair_uncovered_object_plans(
+                document_package.document_package_id,
+                object_plans,
+                repair_claims,
+            )
+            model_calls.extend(_renumber_calls(repair_result, model_calls))
+            if repair_failures:
+                break
+            repair_payload = repair_result[0][2] if repair_result else {}
+            object_plans, augmentation_rejections = _apply_plan_augmentations(
+                object_plans,
+                repair_payload.get("planAugmentations", []),
+                repair_claims,
+            )
+            (
+                repair_plans,
+                repair_rejections,
+                repair_weak_inputs,
+                repair_unresolved_inputs,
+            ) = _validate_object_plans(repair_result, repair_claims)
+            object_plans, duplicate_rejections = _merge_repair_plans(
+                object_plans, repair_plans
+            )
+            rejected_object_plans.extend(
+                [
+                    *augmentation_rejections,
+                    *repair_rejections,
+                    *duplicate_rejections,
+                ]
+            )
+            claim_by_id = {
+                claim.claim_id: claim for claim in atomic_claims
+            }
+            covered_claim_ids = {
+                claim_id
+                for plan in object_plans
+                for claim_id in plan.source_claim_ids
+                if claim_id in claim_by_id
+                and _plan_satisfies_primary_claim_role(
+                    plan, claim_by_id[claim_id]
+                )
+            }
+            planning_unresolved_inputs = [
+                item
+                for item in planning_unresolved_inputs
+                if item[0].get("claimId") not in uncovered_claim_ids
+            ]
+            planning_unresolved_inputs.extend(
+                item
+                for item in repair_unresolved_inputs
+                if item[0].get("claimId") not in covered_claim_ids
+            )
+            planning_weak_inputs.extend(repair_weak_inputs)
+        remaining_uncovered_ids = _automatic_uncovered_claim_ids(
+            planning_unresolved_inputs
+        )
+        structured_objections = [
+            claim
+            for claim in atomic_claims
+            if claim.claim_id in remaining_uncovered_ids
+            and claim.claim_id.startswith("STRUCTURED-OBJECTION-")
+        ]
+        if structured_objections:
+            guard_result = [
+                (
+                    "structured-duty-guard",
+                    structured_objections,
+                    {
+                        "objectPlans": [
+                            [
+                                f"G-D42-{index}",
+                                f"客户异议：{claim.subject}",
+                                "D4.2",
+                                "CUSTOMER_OBJECTION",
+                                {
+                                    "rootConcern": claim.subject,
+                                    "context": "来源资料中的销售咨询与异议处理",
+                                },
+                                [claim.claim_id],
+                            ]
+                            for index, claim in enumerate(
+                                structured_objections, start=1
+                            )
+                        ],
+                        "weakSignals": [],
+                        "unresolvedItems": [],
+                    },
+                    None,
+                    [],
+                )
+            ]
+            (
+                guard_plans,
+                guard_rejections,
+                _guard_weak_inputs,
+                guard_unresolved_inputs,
+            ) = _validate_object_plans(guard_result, structured_objections)
+            object_plans, guard_duplicate_rejections = _merge_repair_plans(
+                object_plans, guard_plans
+            )
+            rejected_object_plans.extend(
+                [*guard_rejections, *guard_duplicate_rejections]
+            )
+            guarded_claim_ids = {
+                claim_id
+                for plan in guard_plans
+                for claim_id in plan.source_claim_ids
+            }
+            planning_unresolved_inputs = [
+                item
+                for item in planning_unresolved_inputs
+                if item[0].get("claimId") not in guarded_claim_ids
+            ]
+            planning_unresolved_inputs.extend(guard_unresolved_inputs)
         object_plans = _enforce_plan_granularity(object_plans, atomic_claims)
         planning_validation_duration_ms = round(
             (perf_counter() - planning_validation_started) * 1000
@@ -395,6 +540,27 @@ class SalesKnowledgeIdentificationService:
             max_concurrency=self.max_concurrency,
         )
 
+    def _repair_uncovered_object_plans(
+        self,
+        document_package_id: str,
+        existing_plans: list[CandidateObjectPlan],
+        uncovered_claims: list[AtomicClaim],
+    ) -> tuple[list[Any], list[str]]:
+        request = build_plan_coverage_repair_request(
+            document_package_id, existing_plans, uncovered_claims
+        )
+        try:
+            payload, completion, calls = self._complete_json_request(
+                request, "object_planning"
+            )
+        except SegmentIdentificationFailure as error:
+            return [("coverage-repair", uncovered_claims, {}, None, error.model_calls)], [
+                f"coverage-repair: {error}"
+            ]
+        return [
+            ("coverage-repair", uncovered_claims, payload, completion, calls)
+        ], []
+
     def _complete_json_request(
         self,
         request: ModelRequest,
@@ -581,7 +747,11 @@ class SalesKnowledgeIdentificationService:
             resolved_content, macro_reasons = resolve_verbatim_claim_references(
                 candidate_payload.get("content", {}), claim_by_id
             )
-            candidate_payload["content"] = resolved_content
+            candidate_payload["content"] = _normalize_content_shape(
+                candidate_payload.get("module"),
+                candidate_payload.get("objectType"),
+                resolved_content,
+            )
             reasons.extend(macro_reasons)
 
             raw_mentions = candidate_payload.get("entityMentions", [])
@@ -678,6 +848,17 @@ class SalesKnowledgeIdentificationService:
                     candidate.module, candidate.object_type, candidate.content
                 )
             )
+            if candidate.module == "D4.1":
+                verified_script_texts = {
+                    evidence.source_text
+                    for claim in source_claims
+                    if claim.claim_kind == "script"
+                    for evidence in claim.evidence
+                }
+                if candidate.content.get("script") not in verified_script_texts:
+                    reasons.append(
+                        "standard script must equal verified source text from a script claim"
+                    )
             if not candidate.title.strip():
                 reasons.append("candidate title is required")
             if not candidate.object_boundary.strip():
@@ -866,6 +1047,7 @@ def _validate_object_plans(
     if raw_plans is None:
         raw_plans = payload.get("candidates", [])
     for index, raw_plan in enumerate(raw_plans, start=1):
+        raw_plan = _expand_compact_object_plan(raw_plan)
         plan_id = (
             raw_plan.get("planId", f"INVALID-{index}")
             if isinstance(raw_plan, dict)
@@ -932,6 +1114,42 @@ def _validate_object_plans(
                     )
                 }
             )
+        if plan.module == "D4.3" and plan.object_type == "QA_PAIR":
+            qa_claim_ids = [
+                claim.claim_id for claim in claims if claim.claim_kind == "qa"
+            ]
+            plan = plan.model_copy(
+                update={
+                    "source_claim_ids": list(
+                        dict.fromkeys([*plan.source_claim_ids, *qa_claim_ids])
+                    )
+                }
+            )
+        if plan.module in {"D4.1", "D4.2", "D4.3"}:
+            plan_anchors = {
+                evidence.anchor_id
+                for claim_id in plan.source_claim_ids
+                if claim_id in claim_by_id
+                for evidence in claim_by_id[claim_id].evidence
+            }
+            scope_claim_ids = [
+                claim.claim_id
+                for claim in claims
+                if claim.claim_kind == "fact"
+                and {"scope", "applicability", "applicableVersions"}
+                & set(claim.attributes)
+                and plan_anchors
+                & {evidence.anchor_id for evidence in claim.evidence}
+            ]
+            plan = plan.model_copy(
+                update={
+                    "source_claim_ids": list(
+                        dict.fromkeys(
+                            [*plan.source_claim_ids, *scope_claim_ids]
+                        )
+                    )
+                }
+            )
         reasons.extend(
             validate_candidate_classification(plan.domain, plan.module, plan.object_type)
         )
@@ -980,10 +1198,30 @@ def _validate_object_plans(
             has_sourced_sequence = (
                 len(plan_claims) >= 2
                 and any(claim.claim_kind == "process" for claim in plan_claims)
-            ) or has_embedded_sequence
+            ) or has_embedded_sequence or any(
+                claim.attributes.get("answerType") == "process"
+                or any(
+                    evidence.exact_quote.count("→") >= 2
+                    for evidence in claim.evidence
+                )
+                for claim in plan_claims
+            )
             if not has_sourced_sequence:
                 reasons.append(
                     "business process requires a source-backed multi-step sequence"
+                )
+        if plan.module == "D1.3" and plan.object_type == "POLICY_RULE_SET":
+            statements = "\n".join(claim.statement for claim in plan_claims)
+            has_advisory_language = any(
+                marker in statements for marker in ("可能", "建议", "等待", "重试")
+            )
+            has_formal_constraint = any(
+                marker in statements
+                for marker in ("规定", "必须", "不得", "不能", "无法", "允许", "采用")
+            )
+            if has_advisory_language and not has_formal_constraint:
+                reasons.append(
+                    "advisory handling guidance is not a formal D1.3 policy rule"
                 )
         if (
             plan.module == "D3.3"
@@ -1032,7 +1270,12 @@ def _validate_object_plans(
             )
             continue
         accepted.append(plan)
-        covered_claim_ids.update(plan.source_claim_ids)
+        covered_claim_ids.update(
+            claim_id
+            for claim_id in plan.source_claim_ids
+            if claim_id in claim_by_id
+            and _plan_satisfies_primary_claim_role(plan, claim_by_id[claim_id])
+        )
 
     weak_inputs = [(item, valid_anchors) for item in payload.get("weakSignals", [])]
     unresolved_inputs = [
@@ -1069,10 +1312,215 @@ def _validate_object_plans(
     return accepted, rejected, weak_inputs, unresolved_inputs
 
 
+def _expand_compact_object_plan(raw_plan: Any) -> Any:
+    if not isinstance(raw_plan, list) or len(raw_plan) != 6:
+        return raw_plan
+    return dict(
+        zip(
+            (
+                "planId",
+                "title",
+                "module",
+                "objectType",
+                "identityHints",
+                "sourceClaimIds",
+            ),
+            raw_plan,
+            strict=True,
+        )
+    )
+
+
+def _plan_satisfies_primary_claim_role(
+    plan: CandidateObjectPlan, claim: AtomicClaim
+) -> bool:
+    if (
+        claim.claim_kind == "fact"
+        and {"scope", "applicability", "applicableVersions"}
+        & set(claim.attributes)
+        and plan.module in {"D4.1", "D4.2", "D4.3"}
+    ):
+        return True
+    prefixes = PRIMARY_MODULE_PREFIXES_BY_CLAIM_KIND.get(claim.claim_kind, ())
+    return any(plan.module == prefix or plan.module.startswith(prefix) for prefix in prefixes)
+
+
+def _normalize_content_shape(
+    module: Any, object_type: Any, content: Any
+) -> Any:
+    if module != "D4.3" or object_type != "QA_PAIR" or not isinstance(content, dict):
+        return content
+    items = content.get("items")
+    if not isinstance(items, list):
+        return content
+    normalized_items: list[Any] = []
+    for item in items:
+        if not isinstance(item, dict) or item.get("claimRef") not in (None, ""):
+            normalized_items.append(item)
+            continue
+        fact_references = item.get("factReferences")
+        if isinstance(fact_references, list) and len(fact_references) == 1:
+            normalized_items.append(
+                {**item, "claimRef": fact_references[0]}
+            )
+        else:
+            normalized_items.append(item)
+    return {**content, "items": normalized_items}
+
+
+def _automatic_uncovered_claim_ids(
+    unresolved_inputs: list[tuple[Any, set[str]]],
+) -> set[str]:
+    return {
+        item.get("claimId")
+        for item, _valid_anchors in unresolved_inputs
+        if isinstance(item, dict)
+        and item.get("reason")
+        == "模型未将该主张分配给任何对象计划，禁止静默丢失"
+        and isinstance(item.get("claimId"), str)
+    }
+
+
+def _apply_plan_augmentations(
+    plans: list[CandidateObjectPlan],
+    raw_augmentations: Any,
+    repair_claims: list[AtomicClaim],
+) -> tuple[list[CandidateObjectPlan], list[RejectedObjectPlan]]:
+    if not isinstance(raw_augmentations, list):
+        return plans, [
+            RejectedObjectPlan(
+                plan_id="AUGMENTATIONS",
+                reasons=["plan augmentations must be a list"],
+                raw_plan={"value": raw_augmentations},
+            )
+        ]
+    plan_by_id = {plan.plan_id: plan for plan in plans}
+    valid_claim_ids = {claim.claim_id for claim in repair_claims}
+    rejected: list[RejectedObjectPlan] = []
+    for index, augmentation in enumerate(raw_augmentations, start=1):
+        if not isinstance(augmentation, dict):
+            rejected.append(
+                RejectedObjectPlan(
+                    plan_id=f"AUGMENT-{index}",
+                    reasons=["plan augmentation must be a JSON object"],
+                    raw_plan={"value": augmentation},
+                )
+            )
+            continue
+        plan_id = augmentation.get("planId")
+        claim_ids = augmentation.get("sourceClaimIds")
+        reasons: list[str] = []
+        if plan_id not in plan_by_id:
+            reasons.append(f"unknown augmentation plan id: {plan_id}")
+        if not isinstance(claim_ids, list) or not claim_ids:
+            reasons.append("augmentation sourceClaimIds must be a non-empty list")
+            claim_ids = []
+        unknown_claim_ids = sorted(
+            claim_id for claim_id in claim_ids if claim_id not in valid_claim_ids
+        )
+        if unknown_claim_ids:
+            reasons.append(
+                "unknown augmentation claim ids: " + ", ".join(unknown_claim_ids)
+            )
+        if reasons:
+            rejected.append(
+                RejectedObjectPlan(
+                    plan_id=str(plan_id or f"AUGMENT-{index}"),
+                    reasons=reasons,
+                    raw_plan=augmentation,
+                )
+            )
+            continue
+        plan = plan_by_id[plan_id]
+        plan_by_id[plan_id] = plan.model_copy(
+            update={
+                "source_claim_ids": list(
+                    dict.fromkeys([*plan.source_claim_ids, *claim_ids])
+                )
+            }
+        )
+    return [plan_by_id[plan.plan_id] for plan in plans], rejected
+
+
+def _merge_repair_plans(
+    existing: list[CandidateObjectPlan],
+    repairs: list[CandidateObjectPlan],
+) -> tuple[list[CandidateObjectPlan], list[RejectedObjectPlan]]:
+    merged = list(existing)
+    seen_ids = {plan.plan_id for plan in existing}
+    seen_identities = {
+        (
+            plan.module,
+            plan.object_type,
+            json.dumps(
+                canonical_identity(plan.module, plan.identity_hints),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).casefold(),
+        )
+        for plan in existing
+    }
+    rejected: list[RejectedObjectPlan] = []
+    for plan in repairs:
+        reasons: list[str] = []
+        identity = (
+            plan.module,
+            plan.object_type,
+            json.dumps(
+                canonical_identity(plan.module, plan.identity_hints),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).casefold(),
+        )
+        if plan.plan_id in seen_ids:
+            reasons.append(f"duplicate repair plan id: {plan.plan_id}")
+        if identity in seen_identities:
+            reasons.append("repair plan duplicates an existing object identity")
+        if reasons:
+            rejected.append(
+                RejectedObjectPlan(
+                    plan_id=plan.plan_id,
+                    reasons=reasons,
+                    raw_plan=plan.model_dump(by_alias=True),
+                )
+            )
+            continue
+        merged.append(plan)
+        seen_ids.add(plan.plan_id)
+        seen_identities.add(identity)
+    return merged, rejected
+
+
 def _enforce_plan_granularity(
     plans: list[CandidateObjectPlan], claims: list[AtomicClaim]
 ) -> list[CandidateObjectPlan]:
     claim_by_id = {claim.claim_id: claim for claim in claims}
+    qa_plans = [
+        plan
+        for plan in plans
+        if plan.module == "D4.3" and plan.object_type == "QA_PAIR"
+    ]
+    if len(qa_plans) > 1:
+        primary_qa_plan = qa_plans[0].model_copy(
+            update={
+                "source_claim_ids": list(
+                    dict.fromkeys(
+                        claim_id
+                        for plan in qa_plans
+                        for claim_id in plan.source_claim_ids
+                    )
+                )
+            }
+        )
+        plans = [
+            primary_qa_plan
+            if plan.plan_id == qa_plans[0].plan_id
+            else plan
+            for plan in plans
+            if plan not in qa_plans[1:]
+        ]
     enforced: list[CandidateObjectPlan] = []
     for plan in plans:
         plan_claims = [

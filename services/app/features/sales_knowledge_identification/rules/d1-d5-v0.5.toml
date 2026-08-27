@@ -1,4 +1,4 @@
-version = "d1-d5-v0.4"
+version = "d1-d5-v0.5"
 status = "sample_validation"
 source = "docs/current/STKB-D1-D5知识对象与业务图模型映射矩阵.md"
 
@@ -18,14 +18,14 @@ code = "D2"
 name = "客户与画像"
 question = "卖给谁"
 meaning = "管理可复用的客户特征、需求、动因、触发机制和决策角色。"
-boundary = "不保存某次会话中的实时情绪、临时状态或AI扮演任务配置。"
+boundary = "只沉淀能够跨客户或销售场景复用的客户认知；单个客户事实、一次沟通表现和未经验证的心理推断不能直接泛化为画像或反应规律。"
 
 [[domains]]
 code = "D3"
 name = "方法与策略"
 question = "怎么卖"
 meaning = "管理可复用的销售方法、策略判断、场景阶段和合规规则。"
-boundary = "不保存某个AI应用的Prompt、任务编排、会话状态或实时下一步结果。"
+boundary = "只沉淀可复用的方法、判断条件和行动原则；某次销售执行的当前阶段、已采取动作和临时下一步属于运行记录，不作为策略知识。"
 
 [[domains]]
 code = "D4"
@@ -106,12 +106,12 @@ domain = "D2"
 code = "D2.2"
 name = "画像库"
 scope = "core"
-meaning = "管理具有稳定特征组合的客户画像及其背景事实、可复用扮演边界。"
-object_types = ["CUSTOMER_PROFILE", "PROFILE_BACKGROUND_FACT", "ROLEPLAY_RULE"]
-core_objects = ["客户画像", "画像背景事实", "扮演规则"]
-boundary = "画像具有维度值、需求和触发机制；画像可被案例实例化；扮演规则只保留稳定反应边界，不包含某次训练的实时状态或Prompt配置。"
+meaning = "管理由稳定特征、关注重点、决策方式和行为边界共同构成的客户画像，以及支撑画像判断的背景事实。"
+object_types = ["CUSTOMER_PROFILE", "PROFILE_BACKGROUND_FACT"]
+core_objects = ["客户画像", "画像背景事实"]
+boundary = "画像是可复用的客户类型定义，不是人口属性标签的堆叠。单个客户实例、一次对话中的态度和仅由销售经验推测的反应不能直接写入画像；有明确触发条件的稳定反应规律归D2.4。"
 sources = ["画像研究", "客户访谈", "业务经验材料", "典型案例"]
-consumers = ["AI客户扮演", "场景装配", "策略检索", "个性化话术"]
+consumers = ["客户识别", "场景装配", "策略检索", "个性化话术"]
 
 [[modules]]
 domain = "D2"

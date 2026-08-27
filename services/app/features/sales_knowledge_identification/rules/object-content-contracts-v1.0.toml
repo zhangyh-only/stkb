@@ -1,11 +1,11 @@
-version = "object-content-contracts-v0.9"
+version = "object-content-contracts-v1.0"
 
 [[contracts]]
 module = "D1.1"
 object_types = ["PRODUCT_FACT", "PRODUCT_VERSION_FACT", "PRODUCT_COMPONENT_FACT"]
 required_fields = ["subject", "facts", "applicability", "limitations"]
 allow_empty_fields = ["limitations"]
-minimum_content_chars = 220
+minimum_content_chars = 150
 granularity = "同一产品或版本、同一事实主题、适用范围和更新生命周期共同构成一项对象；参数不能逐字段拆对象。"
 inclusion = "具有明确产品或版本主体、可核验参数/责任/服务权益及来源证据。"
 exclusion = "销售建议、营销表达、客户反应、无版本或时点依据的宣传结论。"
@@ -59,12 +59,12 @@ negative_example = "把A/B/C判定流程包装为通用销售技巧，或把客�
 
 [[contracts]]
 module = "D2.2"
-object_types = ["CUSTOMER_PROFILE", "PROFILE_BACKGROUND_FACT", "ROLEPLAY_RULE"]
+object_types = ["CUSTOMER_PROFILE", "PROFILE_BACKGROUND_FACT"]
 required_fields = ["profileName", "stableTraits", "decisionStyle", "behaviorBoundary"]
 minimum_content_chars = 240
 granularity = "一组稳定特征、决策方式和反应边界共同构成可复用画像。"
 inclusion = "有稳定特征组合、关注点、决策风格和可复用反应边界。"
-exclusion = "某次会话情绪、临时任务配置、只含人口属性的薄标签。"
+exclusion = "单个客户实例、一次沟通态度、未经验证的心理推断，以及只含人口属性的薄标签。"
 positive_example = "价敏客户画像包含关注点、决策逻辑、典型异议和行为边界。"
 negative_example = "客户：男性，35岁。"
 
@@ -150,7 +150,7 @@ module = "D4.1"
 object_types = ["STANDARD_SCRIPT", "SCRIPT_VARIANT"]
 required_fields = ["communicationGoal", "applicability", "script", "factReferences", "complianceConstraints"]
 allow_empty_fields = ["factReferences", "complianceConstraints"]
-minimum_content_chars = 260
+minimum_content_chars = 180
 granularity = "同一沟通目标、策略方法和适用范围下的主话术及表达变体形成对象。"
 inclusion = "有明确目标、上下文、完整可复用表达、事实依据和合规边界。"
 exclusion = "把多种客群/目标/策略的话术压成摘要，或把原始案例原话直接发布。"
@@ -173,8 +173,8 @@ module = "D4.3"
 object_types = ["QA_PAIR", "TERM", "STANDARD_EXPLANATION"]
 required_fields = ["items", "factReferences", "applicability"]
 required_fields_by_type = { QA_PAIR = ["items", "factReferences", "applicability"], TERM = ["terms", "applicability"], STANDARD_EXPLANATION = ["subject", "standardExplanation", "factReferences", "applicability"] }
-item_fields_by_type = { TERM = ["termText", "standardExplanation", "sourceStance", "usageBoundary"] }
-minimum_content_chars = 180
+item_fields_by_type = { QA_PAIR = ["question", "answer", "claimRef"], TERM = ["termText", "standardExplanation", "sourceStance", "usageBoundary"] }
+minimum_content_chars = 150
 granularity = "同一主题和事实依据下可一起更新、检索的一组问答或术语形成对象；跨主题应拆分。"
 inclusion = "具体问题、销售术语或谚语，以及对应标准答案/解释、事实引用和适用范围。"
 exclusion = "只列问题主题摘要、答案无事实依据、跨多个独立主题的大杂烩。"
