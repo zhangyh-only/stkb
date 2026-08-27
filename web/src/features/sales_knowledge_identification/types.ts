@@ -123,7 +123,7 @@ export type RejectedCandidate = {
 
 export type CandidateNormalization = {
   candidateId: string
-  field: 'domain' | 'entity_mentions'
+  field: 'domain' | 'entity_mentions' | 'relations'
   originalValue: string
   normalizedValue: string
   reason: string

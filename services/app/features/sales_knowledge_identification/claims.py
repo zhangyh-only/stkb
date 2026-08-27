@@ -127,6 +127,76 @@ def validate_atomic_claims(
     return accepted, rejected
 
 
+def supplement_structured_table_claims(
+    document_package: DocumentPackage,
+    claims: list[AtomicClaim],
+) -> list[AtomicClaim]:
+    """Enforce source-table row duties that a probabilistic discovery call may miss."""
+    sections = extract_anchor_sections(document_package)
+    existing = {
+        (claim.claim_kind, evidence.anchor_id)
+        for claim in claims
+        for evidence in claim.evidence
+    }
+    supplemented = list(claims)
+    active_group = ""
+    sequence = 0
+    for anchor in document_package.anchors:
+        section = sections.get(anchor.anchor_id)
+        if section is None:
+            continue
+        group = _select_source_text(section, "A列")
+        if group:
+            active_group = group
+        question = _select_source_text(section, "B列")
+        answer = _select_source_text(section, "C列")
+        script = _select_source_text(section, "D列")
+        claim_kind: str | None = None
+        module_hint = ""
+        source_values: list[tuple[str, str]] = []
+        if question and answer and any(label in active_group for label in ("FAQ", "问答")):
+            claim_kind = "qa"
+            module_hint = "D4.3"
+            source_values = [("B列", question), ("C列", answer)]
+        elif question and script and "异议" in active_group:
+            claim_kind = "objection"
+            module_hint = "D4.2"
+            source_values = [("B列", question), ("D列", script)]
+        if claim_kind is None or (claim_kind, anchor.anchor_id) in existing:
+            continue
+        sequence += 1
+        supplemented.append(
+            AtomicClaim(
+                claim_id=f"STRUCTURED-{claim_kind.upper()}-{sequence}",
+                claim_kind=claim_kind,
+                statement=(
+                    f"标准问答：{question}"
+                    if claim_kind == "qa"
+                    else f"客户异议：{question}"
+                ),
+                subject=question,
+                attributes={
+                    "question" if claim_kind == "qa" else "expression": question,
+                    "answer" if claim_kind == "qa" else "responseContext": (
+                        answer if claim_kind == "qa" else script
+                    ),
+                },
+                module_hints=[module_hint],
+                evidence=[
+                    ClaimEvidence(
+                        anchor_id=anchor.anchor_id,
+                        exact_quote=value,
+                        selector=selector,
+                        source_text=value,
+                    )
+                    for selector, value in source_values
+                ],
+            )
+        )
+        existing.add((claim_kind, anchor.anchor_id))
+    return supplemented
+
+
 def resolve_verbatim_claim_references(
     value: Any,
     claim_by_id: dict[str, AtomicClaim],

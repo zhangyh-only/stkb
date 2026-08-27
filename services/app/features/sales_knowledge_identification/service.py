@@ -15,7 +15,11 @@ from .catalog import (
     MODULE_BY_CODE,
     validate_candidate_classification,
 )
-from .claims import resolve_verbatim_claim_references, validate_atomic_claims
+from .claims import (
+    resolve_verbatim_claim_references,
+    supplement_structured_table_claims,
+    validate_atomic_claims,
+)
 from .content_contracts import CONTENT_CONTRACT_BY_MODULE, validate_candidate_content
 from .identity_contracts import (
     IDENTITY_CONTRACT_BY_MODULE,
@@ -128,6 +132,10 @@ class SalesKnowledgeIdentificationService:
             )
             atomic_claims.extend(accepted)
             rejected_atomic_claims.extend(rejected)
+
+        atomic_claims = supplement_structured_table_claims(
+            document_package, atomic_claims
+        )
 
         planning_result, planning_failures = self._plan_candidate_objects(
             document_package.document_package_id, atomic_claims
@@ -589,6 +597,36 @@ class SalesKnowledgeIdentificationService:
                             reason=(
                                 "模型只返回实体名称，缺少类型、引用角色和来源；"
                                 "不据此创建低质量正式实体"
+                            ),
+                        )
+                    )
+
+            raw_relations = candidate_payload.get("relations", [])
+            if isinstance(raw_relations, list):
+                structured_relations = [
+                    relation
+                    for relation in raw_relations
+                    if isinstance(relation, dict)
+                    and set(relation) >= {
+                        "relationKind",
+                        "relationType",
+                        "sourceRef",
+                        "targetRef",
+                        "evidence",
+                    }
+                ]
+                discarded_count = len(raw_relations) - len(structured_relations)
+                if discarded_count:
+                    candidate_payload["relations"] = structured_relations
+                    normalizations.append(
+                        CandidateNormalization(
+                            candidate_id=candidate_id,
+                            field="relations",
+                            original_value=f"{discarded_count}个非合同关系建议",
+                            normalized_value="已隔离，保留对象内容与证据",
+                            reason=(
+                                "关系建议缺少关系种类、对象引用或证据；"
+                                "辅助关系失败不应删除已通过内容合同的知识对象"
                             ),
                         )
                     )

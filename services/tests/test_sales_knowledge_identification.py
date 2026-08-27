@@ -3,7 +3,10 @@ from copy import deepcopy
 
 import pytest
 
-from app.features.sales_knowledge_identification.claims import validate_atomic_claims
+from app.features.sales_knowledge_identification.claims import (
+    supplement_structured_table_claims,
+    validate_atomic_claims,
+)
 from app.features.sales_knowledge_identification.content_contracts import (
     CONTENT_CONTRACT_BY_MODULE,
 )
@@ -660,6 +663,34 @@ def test_claim_validation_uses_complete_selected_cell_when_model_paraphrases_quo
     )
 
 
+def test_structured_table_completeness_adds_missing_qa_and_inherited_objection() -> None:
+    package = _package(
+        "DP-STRUCTURED",
+        (
+            "### 第 1 行\n\n<!-- source-anchor: DP-STRUCTURED#row-1 -->\n\n"
+            "- **A列**：异议处理\n- **B列**：价格贵\n- **D列**：先确认顾虑再解释价值。\n\n"
+            "### 第 2 行\n\n<!-- source-anchor: DP-STRUCTURED#row-2 -->\n\n"
+            "- **B列**：一次能买几年\n- **D列**：产品按年续交。\n\n"
+            "### 第 3 行\n\n<!-- source-anchor: DP-STRUCTURED#row-3 -->\n\n"
+            "- **A列**：常见FAQ\n- **B列**：如何问诊\n- **C列**：进入服务页发起问诊。"
+        ),
+        [
+            SourceAnchor(anchor_id="DP-STRUCTURED#row-1", kind="table"),
+            SourceAnchor(anchor_id="DP-STRUCTURED#row-2", kind="table"),
+            SourceAnchor(anchor_id="DP-STRUCTURED#row-3", kind="table"),
+        ],
+    )
+
+    supplemented = supplement_structured_table_claims(package, [])
+
+    assert [(claim.claim_kind, claim.subject) for claim in supplemented] == [
+        ("objection", "价格贵"),
+        ("objection", "一次能买几年"),
+        ("qa", "如何问诊"),
+    ]
+    assert supplemented[-1].evidence[1].source_text == "进入服务页发起问诊。"
+
+
 def test_global_planning_can_merge_cross_kind_claims_into_one_object() -> None:
     claims = [
         _claim("DP-GLOBAL#page-1", "尊享版保障责任", kind="fact", claim_id="CL1"),
@@ -720,6 +751,9 @@ def test_content_realization_cannot_change_planned_identity_or_classification() 
                     "objectType": "MUTATED",
                     "identityHints": {"tampered": True},
                     "sourceClaimIds": ["UNKNOWN"],
+                    "relations": [
+                        {"source": "药享保", "target": "车险", "type": "ANALOGY"}
+                    ],
                 }
             )
             return completion.model_copy(
@@ -741,3 +775,5 @@ def test_content_realization_cannot_change_planned_identity_or_classification() 
         "factTheme": "P1-factTheme",
     }
     assert result.candidates[0].source_claim_ids == ["CL1"]
+    assert result.candidates[0].relations == []
+    assert result.normalizations[-1].field == "relations"
