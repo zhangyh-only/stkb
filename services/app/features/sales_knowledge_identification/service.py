@@ -3395,11 +3395,6 @@ def _enforce_plan_granularity(
     plans: list[CandidateObjectPlan], claims: list[AtomicClaim]
 ) -> list[CandidateObjectPlan]:
     claim_by_id = {claim.claim_id: claim for claim in claims}
-    plans = [
-        split_plan
-        for plan in plans
-        for split_plan in _split_composite_product_version_plan(plan)
-    ]
     plans = [_normalize_product_version_plan(plan) for plan in plans]
     version_fact_groups: dict[tuple[str, str], list[CandidateObjectPlan]] = {}
     for plan in plans:
@@ -3641,37 +3636,6 @@ def _split_explicit_strategy_combinations(
         for plan in plans
     ]
     return expanded_claims, expanded_plans
-
-
-def _split_composite_product_version_plan(
-    plan: CandidateObjectPlan,
-) -> list[CandidateObjectPlan]:
-    if plan.object_type not in {"PRODUCT_FACT", "PRODUCT_VERSION_FACT"}:
-        return [plan]
-    version_scope = plan.identity_hints.get("versionScope")
-    if not isinstance(version_scope, str):
-        return [plan]
-    versions = [
-        item.strip()
-        for item in re.split(r"(?:/|／|、|\bvs\.?\b|与|和)", version_scope, flags=re.I)
-        if item.strip()
-    ]
-    if len(versions) < 2 or not all("版" in version for version in versions):
-        return [plan]
-    return [
-        plan.model_copy(
-            update={
-                "plan_id": f"{plan.plan_id}-V{index}",
-                "title": f"{version}{plan.title}",
-                "object_type": "PRODUCT_VERSION_FACT",
-                "identity_hints": {
-                    **plan.identity_hints,
-                    "versionScope": version,
-                },
-            }
-        )
-        for index, version in enumerate(versions, start=1)
-    ]
 
 
 def _normalized_version_scope(value: Any) -> str:

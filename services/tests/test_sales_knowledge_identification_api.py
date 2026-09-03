@@ -280,7 +280,7 @@ def test_api_runs_identification_and_reads_the_saved_result(
     assert materials_response.json()[0]["documentPackageId"] == "DP-API"
     assert catalog_response.status_code == 200
     assert len(catalog_response.json()["modules"]) == 12
-    assert catalog_response.json()["version"] == "d1-d5-v0.8"
+    assert catalog_response.json()["version"] == "d1-d5-v0.9"
     assert catalog_response.json()["status"] == "sample_validation"
     assert len(catalog_response.json()["fingerprint"]) == 64
     assert catalog_response.json()["source"].endswith(
@@ -292,10 +292,10 @@ def test_api_runs_identification_and_reads_the_saved_result(
     assert catalog_response.json()["domains"][0]["question"] == "卖什么，事实和使用规则是什么"
     assert set(catalog_response.json()["scopeDefinitions"]) == {"core", "optional"}
     assert catalog_response.json()["contentContractVersion"] == (
-        "object-content-contracts-v1.3"
+        "object-content-contracts-v1.4"
     )
     assert catalog_response.json()["identityContractVersion"] == (
-        "object-identity-contracts-v0.3"
+        "object-identity-contracts-v0.4"
     )
     assert catalog_response.json()["modules"][0]["contentContract"][
         "requiredFieldsByType"

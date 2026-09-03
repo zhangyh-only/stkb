@@ -12,7 +12,7 @@ from app.features.sales_knowledge_identification.catalog import (
 
 
 def test_rule_package_defines_complete_versioned_d1_d5_catalog() -> None:
-    assert CATALOG_VERSION == "d1-d5-v0.8"
+    assert CATALOG_VERSION == "d1-d5-v0.9"
     assert CATALOG_STATUS == "sample_validation"
     assert len(CATALOG_FINGERPRINT) == 64
     assert CATALOG_SOURCE.endswith("STKB-通用销售知识规则体系与识别机制重审建议.md")

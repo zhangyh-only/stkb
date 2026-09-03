@@ -1,4 +1,4 @@
-version = "d1-d5-v0.8"
+version = "d1-d5-v0.9"
 status = "sample_validation"
 source = "docs/research/STKB-通用销售知识规则体系与识别机制重审建议.md"
 
@@ -49,7 +49,7 @@ scope = "core"
 meaning = "管理供给事实、参考清单、比较快照和由事实支撑的客户价值。"
 object_types = ["PRODUCT_FACT", "PRODUCT_VERSION_FACT", "PRODUCT_COMPONENT_FACT", "LIST_FACT", "LIST_ITEM_FACT", "ELIGIBILITY_FACT", "COMPETITOR_FACT", "COMPARISON_SNAPSHOT", "SELLING_POINT"]
 core_objects = ["供给事实", "参考清单", "比较快照", "价值主张"]
-boundary = "以供给主体、事实主题、版本或时点归并；价值必须引用事实，清单成员默认是对象内部条目。"
+boundary = "以供给主体、事实主题和共同更新生命周期归并；同一维护单元的多个版本形成内部矩阵，价值必须引用事实，清单成员默认是对象内部条目。"
 sources = ["产品与方案说明", "价格与服务目录", "官方清单", "可核验竞品资料"]
 consumers = ["知识问答", "推荐", "策略和话术", "角色扮演", "评价"]
 

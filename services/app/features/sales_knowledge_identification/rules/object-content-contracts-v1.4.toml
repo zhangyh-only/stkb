@@ -1,4 +1,4 @@
-version = "object-content-contracts-v1.3"
+version = "object-content-contracts-v1.4"
 
 [[contracts]]
 module = "D1.1"
@@ -6,10 +6,10 @@ object_types = ["PRODUCT_FACT", "PRODUCT_VERSION_FACT", "PRODUCT_COMPONENT_FACT"
 required_fields = ["subject", "facts", "applicability", "limitations"]
 allow_empty_fields = ["limitations"]
 minimum_content_chars = 120
-granularity = "同一产品或版本、同一事实主题、适用范围和更新生命周期共同构成一项对象；参数不能逐字段拆对象。"
+granularity = "同一产品、同一事实主题、适用范围和更新生命周期共同构成一项对象；同一维护单元中的多个版本形成对象内部版本矩阵，参数不能逐字段或逐版本机械拆对象。"
 inclusion = "具有明确产品或版本主体、可核验参数/责任/服务权益及来源证据。"
 exclusion = "销售建议、营销表达、客户反应、无版本或时点依据的宣传结论。"
-positive_example = "一个版本的保费、承保年龄、责任、限额、赔付比例及限制按主题聚合。"
+positive_example = "同一产品对比表中的基础版和专业版共同形成版本矩阵，分别保留保费、责任、限额、赔付比例及限制。"
 negative_example = "只输出‘产品保障全面’或把每个保额数字单独建对象。"
 
 [[contracts]]

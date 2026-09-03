@@ -9,7 +9,7 @@ from .catalog import KNOWLEDGE_MODULES, KnowledgeModule
 from .content_contracts import SOURCE_CONTENT_CONTRACTS
 
 CONTRACTS_PATH = (
-    Path(__file__).with_name("rules") / "object-identity-contracts-v0.3.toml"
+    Path(__file__).with_name("rules") / "object-identity-contracts-v0.4.toml"
 )
 
 

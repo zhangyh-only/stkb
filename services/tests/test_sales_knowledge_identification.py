@@ -54,7 +54,6 @@ from app.features.sales_knowledge_identification.service import (
     _object_granularity_metrics,
     _plan_satisfies_primary_claim_role,
     _prune_unattributed_d33_inferences,
-    _split_composite_product_version_plan,
     _split_explicit_strategy_combinations,
     _supplement_exact_match_claim_usage,
     _unclaimed_source_anchor_inputs,
@@ -387,7 +386,7 @@ def test_integrated_planning_keeps_versions_strategies_and_qa_boundaries() -> No
         _package("DP-PLAN", "# 资料\n\n产品与问答"), max_candidates=20
     )
 
-    assert "不同版本存在不同价格" in request.system_prompt
+    assert "形成一个版本矩阵计划" in request.system_prompt
     assert "每个组合形成独立 SALES_STRATEGY" in request.system_prompt
     assert "每个问题及答案分别形成 qa claim" in request.system_prompt
     assert "最多\n20 个" in request.system_prompt
@@ -2962,7 +2961,7 @@ def test_granularity_gate_keeps_related_decision_rules_in_one_object() -> None:
     assert split[0].identity_hints["triggerContext"] == "名单更新"
 
 
-def test_composite_product_versions_split_into_independent_identities() -> None:
+def test_composite_product_versions_remain_one_shared_matrix() -> None:
     plan = CandidateObjectPlan(
         plan_id="P1",
         title="产品权益",
@@ -2977,13 +2976,11 @@ def test_composite_product_versions_split_into_independent_identities() -> None:
         source_claim_ids=["CL1"],
     )
 
-    split = _split_composite_product_version_plan(plan)
+    normalized = _enforce_plan_granularity([plan], [])
 
-    assert [item.identity_hints["versionScope"] for item in split] == [
-        "基础版",
-        "专业版",
-    ]
-    assert [item.plan_id for item in split] == ["P1-V1", "P1-V2"]
+    assert len(normalized) == 1
+    assert normalized[0].identity_hints["versionScope"] == "基础版 vs 专业版"
+    assert normalized[0].plan_id == "P1"
 
 
 def test_explicit_numbered_strategy_combinations_become_independent_plans() -> None:

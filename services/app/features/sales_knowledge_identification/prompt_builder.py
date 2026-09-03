@@ -135,8 +135,8 @@ def build_document_object_planning_request(
 6. 每条 claim 至少被一个计划引用；无法形成对象的内容进入 unresolvedItems。不要输出 content、
    domain、对象边界说明、实体、关系或分析过程。
 7. 下列内容边界必须保持：
-   - 同一产品的不同版本存在不同价格、权益、限制或生效范围时，每个版本形成独立计划；只有来源明确
-     说明多版本共享同一事实时才合并。
+   - 同一产品的多个版本在同一来源维护单元中共同呈现、比较和更新时，形成一个版本矩阵计划，
+     在 content 内保留各版本差异；只有版本来自不同维护单元、生效周期或独立更新时才拆分。
    - 不同产品组合对应不同适用条件、行动或价值时，每个组合形成独立 SALES_STRATEGY 计划。
    - FAQ 的问答条目共享维护单元时形成一个 QA_PAIR 对象，但每个问题及答案分别形成 qa claim，
      attributes 至少包含 question 和 answer，计划引用全部 qa claim。

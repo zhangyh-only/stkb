@@ -1,11 +1,11 @@
-version = "object-identity-contracts-v0.3"
+version = "object-identity-contracts-v0.4"
 status = "sample_validation"
 
 [[contracts]]
 module = "D1.1"
 identity_fields = ["subject", "versionScope", "factTheme"]
-same_object_when = "产品或版本主体、事实主题、适用范围和更新生命周期相同；多个参数、责任、权益和限制是对象内部字段。"
-different_object_when = "产品/版本、事实主题、适用范围或正式生效周期不同。"
+same_object_when = "产品主体、事实主题、适用范围和更新生命周期相同；同一维护单元共同发布的多个版本及其参数、责任、权益和限制是对象内部版本矩阵。"
+different_object_when = "产品主体、事实主题、适用范围或正式生效周期不同；版本由不同维护单元独立发布或更新。"
 merge_strategy = "字段并集；同名事实值冲突时隔离冲突，不覆盖旧值。"
 conflict_rule = "版本号、生效时间或正式替代声明优先；缺少版本依据时不得仅凭新数值判为更新。"
 
