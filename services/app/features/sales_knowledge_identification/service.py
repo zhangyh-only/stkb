@@ -40,6 +40,7 @@ from .models import (
     ModelCompletion,
     ModelConfigurationSnapshot,
     ModelRequest,
+    ObjectGranularityMetrics,
     ProcessingStage,
     RejectedAtomicClaim,
     RejectedAuxiliaryItem,
@@ -389,6 +390,7 @@ class SalesKnowledgeIdentificationService:
 
         completion = _last_completion(object_results, planning_result, discovery_results)
         validation_duration_ms = round((perf_counter() - validation_started) * 1000)
+        granularity_metrics = _object_granularity_metrics(object_plans, atomic_claims)
         finished_at = datetime.now(UTC)
         return IdentificationResult(
             document_package_id=document_package.document_package_id,
@@ -492,7 +494,8 @@ class SalesKnowledgeIdentificationService:
                     duration_ms=max(validation_duration_ms, 0),
                     detail=(
                         f"接受 {len(accepted_candidates)} 项，"
-                        f"拒绝 {len(rejected_candidates)} 项"
+                        f"拒绝 {len(rejected_candidates)} 项；"
+                        f"单主张对象率 {granularity_metrics.single_claim_object_rate:.0%}"
                     ),
                 ),
                 ProcessingStage(
@@ -503,6 +506,7 @@ class SalesKnowledgeIdentificationService:
                     detail="候选来源锚点由 sourceClaimIds 程序推导，长原文由已核验主张回填",
                 ),
             ],
+            granularity_metrics=granularity_metrics,
             atomic_claims=atomic_claims,
             rejected_atomic_claims=rejected_atomic_claims,
             object_plans=object_plans,
@@ -2089,9 +2093,9 @@ def _ensure_explicit_script_plans(
         and claim_by_id[claim_id].claim_kind == "script"
     }
     normalized_plans = list(plans)
-
     identity_contract = IDENTITY_CONTRACT_BY_MODULE["D4.2"]
     content_contract = CONTENT_CONTRACT_BY_MODULE["D4.2"]
+    grouped_claims: dict[tuple[str, str], list[AtomicClaim]] = {}
     for claim in claims:
         if (
             not _claim_has_reusable_script(claim)
@@ -2100,10 +2104,23 @@ def _ensure_explicit_script_plans(
             continue
         communication_goal = claim.attributes.get("communicationGoal")
         audience = claim.attributes.get("audience")
+        goal = (
+            communication_goal.strip()
+            if isinstance(communication_goal, str) and communication_goal.strip()
+            else claim.subject
+        )
+        applicability = (
+            audience.strip()
+            if isinstance(audience, str) and audience.strip()
+            else "来源资料适用场景"
+        )
+        grouped_claims.setdefault((goal, applicability), []).append(claim)
+    for (goal, applicability), script_claims in grouped_claims.items():
+        first_claim = script_claims[0]
         normalized_plans.append(
             CandidateObjectPlan(
-                plan_id=f"guard-D41-{claim.claim_id}",
-                title=claim.subject,
+                plan_id=f"guard-D42-{first_claim.claim_id}",
+                title=first_claim.subject,
                 domain="D4",
                 module="D4.2",
                 object_type="STANDARD_SCRIPT",
@@ -2116,20 +2133,11 @@ def _ensure_explicit_script_plans(
                     f"排除：{content_contract.exclusion}"
                 ),
                 identity_hints={
-                    "communicationGoal": (
-                        communication_goal.strip()
-                        if isinstance(communication_goal, str)
-                        and communication_goal.strip()
-                        else claim.subject
-                    ),
+                    "communicationGoal": goal,
                     "method": "完整原文复用",
-                    "applicability": (
-                        audience.strip()
-                        if isinstance(audience, str) and audience.strip()
-                        else "来源资料适用场景"
-                    ),
+                    "applicability": applicability,
                 },
-                source_claim_ids=[claim.claim_id],
+                source_claim_ids=[claim.claim_id for claim in script_claims],
             )
         )
     return normalized_plans
@@ -2287,7 +2295,7 @@ def _ensure_explicit_term_plans(
         if plan.module in {"D2.1", "D4.1"}
         for claim_id in plan.source_claim_ids
     }
-    terms_by_anchor: dict[str, list[AtomicClaim]] = {}
+    uncovered_terms: list[AtomicClaim] = []
     for claim in claims:
         if (
             claim.claim_kind != "term"
@@ -2295,34 +2303,35 @@ def _ensure_explicit_term_plans(
             or not claim.evidence
         ):
             continue
-        terms_by_anchor.setdefault(claim.evidence[0].anchor_id, []).append(claim)
+        uncovered_terms.append(claim)
     guarded = list(plans)
+    if not uncovered_terms:
+        return guarded
     identity_contract = IDENTITY_CONTRACT_BY_MODULE["D4.1"]
     content_contract = CONTENT_CONTRACT_BY_MODULE["D4.1"]
-    for index, anchor_claims in enumerate(terms_by_anchor.values(), start=1):
-        subject = "、".join(claim.subject for claim in anchor_claims)
-        guarded.append(
-            CandidateObjectPlan(
-                plan_id=f"guard-D43-TERM-{index}-{anchor_claims[0].claim_id}",
-                title=f"{subject}术语说明",
-                domain="D4",
-                module="D4.1",
-                object_type="TERM",
-                object_boundary=(
-                    f"同一对象：{identity_contract.same_object_when} "
-                    f"必须拆分：{identity_contract.different_object_when}"
-                ),
-                classification_basis=(
-                    f"纳入：{content_contract.inclusion} "
-                    f"排除：{content_contract.exclusion}"
-                ),
-                identity_hints={
-                    "subject": subject,
-                    "applicability": "来源资料明确的内部业务语境",
-                },
-                source_claim_ids=[claim.claim_id for claim in anchor_claims],
-            )
+    subject = "、".join(claim.subject for claim in uncovered_terms)
+    guarded.append(
+        CandidateObjectPlan(
+            plan_id=f"guard-D41-TERM-{uncovered_terms[0].claim_id}",
+            title="资料术语与标准解释",
+            domain="D4",
+            module="D4.1",
+            object_type="TERM",
+            object_boundary=(
+                f"同一对象：{identity_contract.same_object_when} "
+                f"必须拆分：{identity_contract.different_object_when}"
+            ),
+            classification_basis=(
+                f"纳入：{content_contract.inclusion} "
+                f"排除：{content_contract.exclusion}"
+            ),
+            identity_hints={
+                "subject": subject,
+                "applicability": "来源资料明确的内部业务语境",
+            },
+            source_claim_ids=[claim.claim_id for claim in uncovered_terms],
         )
+    )
     return guarded
 
 
@@ -2419,15 +2428,15 @@ def _build_conversation_branch_plans(
         if plan.module == "D3.2"
         for claim_id in plan.source_claim_ids
     }
-    by_anchor: dict[str, list[AtomicClaim]] = {}
+    by_heading: dict[str, list[AtomicClaim]] = {}
     for claim in claims:
         if claim.claim_id in already_covered or not claim.evidence:
             continue
-        by_anchor.setdefault(claim.evidence[0].anchor_id, []).append(claim)
+        by_heading.setdefault(_source_heading(claim), []).append(claim)
     identity_contract = IDENTITY_CONTRACT_BY_MODULE["D3.2"]
     content_contract = CONTENT_CONTRACT_BY_MODULE["D3.2"]
     plans: list[CandidateObjectPlan] = []
-    for index, anchor_claims in enumerate(by_anchor.values(), start=1):
+    for index, anchor_claims in enumerate(by_heading.values(), start=1):
         heading = _source_heading(anchor_claims[0])
         goal = "；".join(claim.subject for claim in anchor_claims)
         plans.append(
@@ -3360,7 +3369,10 @@ def _enforce_plan_granularity(
         ]
         if plan.module == "D4.1" and plan.object_type == "CUSTOMER_OBJECTION":
             objections = [claim for claim in plan_claims if claim.claim_kind == "objection"]
-            if len(objections) > 1:
+            objection_intents = {
+                _normalize_match_text(claim.subject) for claim in objections
+            }
+            if len(objection_intents) > 1:
                 objection_context = plan.identity_hints.get(
                     "context", "来源资料适用场景"
                 )
@@ -3408,34 +3420,6 @@ def _enforce_plan_granularity(
                         },
                     )
                 )
-                continue
-        if plan.module == "D3.2" and plan.object_type == "DECISION_RULE":
-            claims_by_anchor: dict[str, list[AtomicClaim]] = {}
-            for claim in plan_claims:
-                if not claim.evidence:
-                    continue
-                claims_by_anchor.setdefault(claim.evidence[0].anchor_id, []).append(
-                    claim
-                )
-            if len(claims_by_anchor) > 1:
-                for index, anchor_claims in enumerate(
-                    claims_by_anchor.values(), start=1
-                ):
-                    trigger = anchor_claims[0].subject
-                    identity_hints = dict(plan.identity_hints)
-                    identity_hints["triggerContext"] = trigger
-                    enforced.append(
-                        plan.model_copy(
-                            update={
-                                "plan_id": f"{plan.plan_id}-{index}",
-                                "title": f"{plan.title}：{trigger}",
-                                "identity_hints": identity_hints,
-                                "source_claim_ids": [
-                                    claim.claim_id for claim in anchor_claims
-                                ],
-                            }
-                        )
-                    )
                 continue
         enforced.append(plan)
     return enforced
@@ -3533,6 +3517,34 @@ def _group_object_plans(
             )
         )
     return groups
+
+
+def _object_granularity_metrics(
+    plans: list[CandidateObjectPlan], claims: list[AtomicClaim]
+) -> ObjectGranularityMetrics:
+    if not plans:
+        return ObjectGranularityMetrics()
+    single_claim_count = sum(len(plan.source_claim_ids) == 1 for plan in plans)
+    anchor_to_plans: dict[str, set[str]] = {}
+    claim_by_id = {claim.claim_id: claim for claim in claims}
+    for plan in plans:
+        for claim_id in plan.source_claim_ids:
+            claim = claim_by_id.get(claim_id)
+            if claim is None:
+                continue
+            for evidence in claim.evidence:
+                anchor_to_plans.setdefault(evidence.anchor_id, set()).add(plan.plan_id)
+    return ObjectGranularityMetrics(
+        object_count=len(plans),
+        single_claim_object_count=single_claim_count,
+        single_claim_object_rate=round(single_claim_count / len(plans), 4),
+        average_claims_per_object=round(
+            sum(len(plan.source_claim_ids) for plan in plans) / len(plans), 2
+        ),
+        source_anchors_split_across_objects=sum(
+            len(plan_ids) > 1 for plan_ids in anchor_to_plans.values()
+        ),
+    )
 
 
 def _namespace_claim_payload(payload: dict[str, Any], namespace: str | None) -> dict[str, Any]:

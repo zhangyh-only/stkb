@@ -46,6 +46,7 @@ from app.features.sales_knowledge_identification.service import (
     _group_claims_for_planning,
     _merge_repair_plans,
     _normalize_content_shape,
+    _object_granularity_metrics,
     _plan_satisfies_primary_claim_role,
     _prune_unattributed_d33_inferences,
     _supplement_exact_match_claim_usage,
@@ -349,6 +350,41 @@ def test_planning_batches_keep_source_location_together() -> None:
         ["CL1", "CL2"],
         ["CL3"],
     ]
+
+
+def test_object_granularity_metrics_expose_single_claim_and_anchor_splits() -> None:
+    claims = [
+        AtomicClaim.model_validate(
+            _claim("DP-METRICS#section-1", text, claim_id=f"CL{index}")
+        )
+        for index, text in enumerate(("事实一", "事实二"), start=1)
+    ]
+    plans = [
+        CandidateObjectPlan(
+            plan_id="P1",
+            title="聚合对象",
+            domain="D1",
+            module="D1.1",
+            object_type="PRODUCT_FACT",
+            identity_hints={},
+            source_claim_ids=["CL1", "CL2"],
+        ),
+        CandidateObjectPlan(
+            plan_id="P2",
+            title="单主张对象",
+            domain="D1",
+            module="D1.1",
+            object_type="PRODUCT_FACT",
+            identity_hints={},
+            source_claim_ids=["CL2"],
+        ),
+    ]
+
+    metrics = _object_granularity_metrics(plans, claims)
+
+    assert metrics.single_claim_object_rate == 0.5
+    assert metrics.average_claims_per_object == 1.5
+    assert metrics.source_anchors_split_across_objects == 1
 
 
 def test_multiple_planning_batches_receive_unique_plan_ids() -> None:
@@ -655,6 +691,24 @@ def test_verified_script_claim_gets_independent_d41_plan_when_planner_only_uses_
     }
 
 
+def test_script_guard_groups_variants_with_same_goal_and_audience() -> None:
+    claims = []
+    for index, text in enumerate(("先确认现有流程", "再说明方案价值"), start=1):
+        payload = _claim(
+            f"DP-SCRIPT-GROUP#row-{index}", text, kind="script", claim_id=f"CL{index}"
+        )
+        payload["attributes"] = {
+            "communicationGoal": "说明方案价值",
+            "audience": "财务负责人",
+        }
+        claims.append(AtomicClaim.model_validate(payload))
+
+    plans = _ensure_explicit_script_plans([], claims)
+
+    assert len(plans) == 1
+    assert plans[0].source_claim_ids == ["CL1", "CL2"]
+
+
 def test_template_reference_does_not_become_standard_script_plan() -> None:
     payload = _claim(
         "DP-TEMPLATE#row-1",
@@ -683,6 +737,20 @@ def test_explicit_internal_identifier_definition_gets_term_duty() -> None:
     assert len(plans) == 1
     assert plans[0].module == "D4.1"
     assert plans[0].object_type == "TERM"
+
+
+def test_term_guard_groups_one_document_glossary_across_anchors() -> None:
+    claims = [
+        AtomicClaim.model_validate(
+            _claim(f"DP-TERM-GROUP#section-{index}", term, kind="term", claim_id=f"CL{index}")
+        )
+        for index, term in enumerate(("商机", "有效线索"), start=1)
+    ]
+
+    plans = _ensure_explicit_term_plans([], claims)
+
+    assert len(plans) == 1
+    assert plans[0].source_claim_ids == ["CL1", "CL2"]
 
 
 def test_rule_and_strategy_section_keeps_independent_policy_duty() -> None:
@@ -2535,7 +2603,7 @@ def test_granularity_gate_merges_qa_plans_from_one_document_unit() -> None:
     assert merged[0].source_claim_ids == ["CL1", "CL2"]
 
 
-def test_granularity_gate_splits_decision_rules_by_trigger_anchor() -> None:
+def test_granularity_gate_keeps_related_decision_rules_in_one_object() -> None:
     claims = [
         AtomicClaim(
             claim_id="CL1",
@@ -2582,11 +2650,9 @@ def test_granularity_gate_splits_decision_rules_by_trigger_anchor() -> None:
 
     split = _enforce_plan_granularity([plan], claims)
 
-    assert [item.source_claim_ids for item in split] == [["CL1"], ["CL2"]]
-    assert [item.identity_hints["triggerContext"] for item in split] == [
-        "首次分类",
-        "复播迁移",
-    ]
+    assert len(split) == 1
+    assert split[0].source_claim_ids == ["CL1", "CL2"]
+    assert split[0].identity_hints["triggerContext"] == "名单更新"
 
 
 def test_coverage_repair_augments_existing_plan_and_merges_new_identity() -> None:

@@ -189,6 +189,14 @@ export type ProcessingStage = {
   modelCallIds: string[]
 }
 
+export type ObjectGranularityMetrics = {
+  objectCount: number
+  singleClaimObjectCount: number
+  singleClaimObjectRate: number
+  averageClaimsPerObject: number
+  sourceAnchorsSplitAcrossObjects: number
+}
+
 export type StorageImpact = {
   postgresRunRecords: number
   formalKnowledgeFiles: number
@@ -265,6 +273,7 @@ export type IdentificationResult = {
   rawModelOutput: string
   modelCalls: ModelCallTrace[]
   processingStages: ProcessingStage[]
+  granularityMetrics: ObjectGranularityMetrics
   atomicClaims: AtomicClaim[]
   rejectedAtomicClaims: RejectedAtomicClaim[]
   objectPlans: CandidateObjectPlan[]

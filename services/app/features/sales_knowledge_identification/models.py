@@ -268,6 +268,14 @@ class ProcessingStage(ApiModel):
     model_call_ids: list[str] = Field(default_factory=list)
 
 
+class ObjectGranularityMetrics(ApiModel):
+    object_count: int = 0
+    single_claim_object_count: int = 0
+    single_claim_object_rate: float = 0.0
+    average_claims_per_object: float = 0.0
+    source_anchors_split_across_objects: int = 0
+
+
 class StorageImpact(ApiModel):
     postgres_run_records: int = 1
     formal_knowledge_files: int = 0
@@ -346,6 +354,9 @@ class IdentificationResult(ApiModel):
     raw_model_output: str
     model_calls: list[ModelCallTrace]
     processing_stages: list[ProcessingStage]
+    granularity_metrics: ObjectGranularityMetrics = Field(
+        default_factory=ObjectGranularityMetrics
+    )
     atomic_claims: list[AtomicClaim] = Field(default_factory=list)
     rejected_atomic_claims: list[RejectedAtomicClaim] = Field(default_factory=list)
     object_plans: list[CandidateObjectPlan] = Field(default_factory=list)
