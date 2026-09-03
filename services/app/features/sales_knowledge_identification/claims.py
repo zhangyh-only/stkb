@@ -97,6 +97,24 @@ def validate_atomic_claims(
                 source_text, evidence.exact_quote
             )
             if resolved_quote is None:
+                fragment_quotes = [
+                    resolved
+                    for line in evidence.exact_quote.splitlines()
+                    if line.strip()
+                    for resolved in [_resolve_markdown_formatted_quote(source_text, line)]
+                    if resolved is not None
+                ]
+                nonempty_lines = [
+                    line for line in evidence.exact_quote.splitlines() if line.strip()
+                ]
+                if len(nonempty_lines) >= 2 and len(fragment_quotes) == len(nonempty_lines):
+                    resolved_evidence.extend(
+                        evidence.model_copy(
+                            update={"exact_quote": quote, "source_text": source_text}
+                        )
+                        for quote in dict.fromkeys(fragment_quotes)
+                    )
+                    continue
                 if evidence.selector is not None:
                     resolved_evidence.append(
                         evidence.model_copy(

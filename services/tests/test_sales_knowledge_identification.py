@@ -418,6 +418,40 @@ def test_claim_validation_recovers_exact_span_across_markdown_table_formatting()
     assert accepted[0].evidence[0].exact_quote == "版本 | 尊享版 | 全能版"
 
 
+def test_claim_validation_accepts_reordered_multiline_source_fragments() -> None:
+    package = _package(
+        "DP-LAYOUT-QUOTE",
+        (
+            "<!-- source-anchor: DP-LAYOUT-QUOTE#page-1 -->\n"
+            "方案一\n方案二\n产品A+产品B\n补充能力\n产品A+产品C\n降低成本"
+        ),
+        [SourceAnchor(anchor_id="DP-LAYOUT-QUOTE#page-1", kind="page")],
+    )
+    claim = {
+        **_claim(
+            "DP-LAYOUT-QUOTE#page-1",
+            "方案一\n产品A+产品B\n方案二\n产品A+产品C",
+            kind="strategy",
+        ),
+        "evidence": [
+            {
+                "anchorId": "DP-LAYOUT-QUOTE#page-1",
+                "exactQuote": "方案一\n产品A+产品B\n方案二\n产品A+产品C",
+            }
+        ],
+    }
+
+    accepted, rejected = validate_atomic_claims([claim], package)
+
+    assert rejected == []
+    assert [item.exact_quote for item in accepted[0].evidence] == [
+        "方案一",
+        "产品A+产品B",
+        "方案二",
+        "产品A+产品C",
+    ]
+
+
 def test_claim_validation_recovers_ordered_source_lines_with_intervening_labels() -> None:
     package = _package(
         "DP-LINE-QUOTE",
