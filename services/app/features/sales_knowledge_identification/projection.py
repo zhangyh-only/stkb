@@ -70,7 +70,7 @@ class KnowledgeProjectionService:
                 for item in formation.knowledge_objects
                 for unit in self._retrieval_units(item)
             ]
-            texts = [unit["retrievalText"] for unit in units]
+            texts = [unit["embeddingText"] for unit in units]
             embeddings, embedding_tokens = self._embed(texts)
             vector_records = self._write_vectors(
                 workspace_id, formation, units, embeddings
@@ -192,6 +192,7 @@ class KnowledgeProjectionService:
                     "retrievalUnitId": f"RU-{item.knowledge_object_id}-R{item.revision}-ROOT",
                     "itemId": None,
                     "contentPath": "$",
+                    "embeddingText": text,
                     "retrievalText": text,
                     "object": item,
                 }
@@ -212,6 +213,12 @@ class KnowledgeProjectionService:
                 else None
             )
             item_id = str(explicit_id or hashlib.sha256(serialized.encode()).hexdigest()[:12])
+            is_qa = item.object_type == "QA_PAIR" and isinstance(value, dict)
+            retrieval_text = (
+                f"{item.title}\n问题：{value.get('question')}\n答案：{value.get('answer')}"
+                if is_qa
+                else f"{item.title}\n{field}: {serialized}"
+            )
             units.append(
                 {
                     "retrievalUnitId": (
@@ -219,12 +226,10 @@ class KnowledgeProjectionService:
                     ),
                     "itemId": item_id,
                     "contentPath": f"$.{field}[{index}]",
-                    "retrievalText": (
-                        f"{item.title}\n问题：{value.get('question')}\n"
-                        f"答案：{value.get('answer')}"
-                        if item.object_type == "QA_PAIR" and isinstance(value, dict)
-                        else f"{item.title}\n{field}: {serialized}"
+                    "embeddingText": (
+                        f"问题：{value.get('question')}" if is_qa else retrieval_text
                     ),
+                    "retrievalText": retrieval_text,
                     "object": item,
                 }
             )

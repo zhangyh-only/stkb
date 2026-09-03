@@ -106,6 +106,8 @@ def test_retrieval_units_are_derived_from_internal_qa_items() -> None:
         "$.items[1]",
     ]
     assert all("identityKey" not in unit["retrievalText"] for unit in units)
+    assert units[0]["embeddingText"] == "问题：问题一"
+    assert "答案：答案一" in units[0]["retrievalText"]
     assert units[0]["retrievalText"].index("问题一") < units[0]["retrievalText"].index(
         "答案一"
     )
