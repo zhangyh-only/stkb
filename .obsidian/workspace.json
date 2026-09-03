@@ -1,0 +1,233 @@
+{
+  "main": {
+    "id": "1da3363fd7512bc9",
+    "type": "split",
+    "children": [
+      {
+        "id": "63d98a3415c1ca22",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "3dbce412fb7288fe",
+            "type": "leaf",
+            "state": {
+              "type": "empty",
+              "state": {},
+              "icon": "lucide-file",
+              "title": "新标签页"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "34962cc4990e3237",
+    "type": "split",
+    "children": [
+      {
+        "id": "d57ca7b58b2ec5a8",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "a9bad8d9889b3bc6",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-folder-closed",
+              "title": "文件列表"
+            }
+          },
+          {
+            "id": "79955f4459390432",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "搜索"
+            }
+          },
+          {
+            "id": "6575027df06b45d1",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-bookmark",
+              "title": "书签"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "ff0a32499b5100f1",
+    "type": "split",
+    "children": [
+      {
+        "id": "3b71aef99547ee35",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "315275bacfa36095",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "反向链接"
+            }
+          },
+          {
+            "id": "06d8cfbecde67c5d",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "出链"
+            }
+          },
+          {
+            "id": "5a7f2863ebae0659",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "标签"
+            }
+          },
+          {
+            "id": "dde7d403f3096a74",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "添加笔记属性"
+            }
+          },
+          {
+            "id": "a28d8dcba0113f5f",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "大纲"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:打开快速切换": false,
+      "graph:查看关系图谱": false,
+      "canvas:新建白板": false,
+      "daily-notes:打开/创建今天的日记": false,
+      "templates:插入模板": false,
+      "command-palette:打开命令面板": false,
+      "bases:新建数据库": false
+    }
+  },
+  "active": "3dbce412fb7288fe",
+  "lastOpenFiles": [
+    "docs/research/STKB-通用销售知识规则体系与识别机制重审建议.md",
+    "docs/research/STKB-通用销售知识建模与低调用抽取研究补充.md",
+    "web/dist/assets/index-aujGSH5y.css",
+    "web/dist/assets/index-tKCVO4X8.js",
+    "web/dist/assets/index-BEfkoMkq.css",
+    "web/dist/assets/index-CjdH98F7.js",
+    "docs/current/STKB-销售知识识别质量验证报告.md",
+    "workspace/knowledge/D4/D4.3/KO-5369A1E8D69B1E62.md",
+    "workspace/knowledge/D3/D3.4/KO-84950782D9300AD6.md",
+    "workspace/knowledge/D3/D3.3/KO-EC352B570D4CE7BE.md",
+    "workspace/knowledge/D3/D3.3/KO-80863D2733ACE7AD.md",
+    "workspace/knowledge/D2/D2.1/KO-4867858B85E70E0C.md",
+    "workspace/knowledge/D2/D2.1/KO-2073CFBC991D5B52.md",
+    "workspace/knowledge/D2/D2.1",
+    "workspace/knowledge/D3/D3.3/KO-B8880FF0C6CD27A1.md",
+    "workspace/knowledge/D4/D4.3/KO-AC1817CD165E33FA.md",
+    "workspace/knowledge/D3/D3.3/KO-B12EAABFF4D444AF.md",
+    "workspace/knowledge/D1/D1.3/KO-F3EB7CD86AB3A39C.md",
+    "workspace/knowledge/D1/D1.3/KO-5C34A2EFA8470063.md",
+    "workspace/knowledge/D1/D1.3/KO-E1EBAA4490F6773A.md",
+    "workspace/knowledge/D3/D3.4/KO-F0B61CF71AC4C19A.md",
+    "workspace/knowledge/D3/D3.4/KO-BDD64C5B387B3B78.md",
+    "workspace/knowledge/D3/D3.4/KO-BA14FEA66B94F38D.md",
+    "workspace/knowledge/D3/D3.4/KO-AF235FF24C55E130.md",
+    "workspace/knowledge/D3/D3.4/KO-A6F55651BF190A1E.md",
+    "workspace/knowledge/D3/D3.4/KO-72FEF66E80DCBA82.md",
+    "workspace/knowledge/D3/D3.4/KO-67D352397DDC38CB.md",
+    "workspace/knowledge/D3/D3.4/KO-67025DBE5D9A34F2.md",
+    "workspace/knowledge/D3/D3.4/KO-6701C5D97B7B97B1.md",
+    "workspace/knowledge/D3/D3.4/KO-4CD0E8188D6A84B5.md",
+    "workspace/knowledge/D3/D3.4/KO-43DC6B0763B3D3A7.md",
+    "workspace/knowledge/D3/D3.4",
+    "services/app/features/sales_knowledge_identification/rules/object-content-contracts-v1.3.toml",
+    "services/app/features/sales_knowledge_identification/rules/object-identity-contracts-v0.3.toml",
+    "web/dist/assets/index-DezpXFri.js",
+    "web/dist/assets/index-B6IZyLO7.css",
+    "output/playwright/goal-build-flow-complete.png",
+    "output/playwright/goal-model-prompt-evidence.png",
+    "output/playwright/goal-formal-knowledge-objects.png",
+    "output/playwright/goal-rules-library.png",
+    "output/playwright/candidate-objects-workspace-v02.png",
+    "output/playwright/object-proposals-real-run-final.png",
+    "output/playwright/object-proposals-real-run.png",
+    "output/playwright/rules-workspace-v04-final.png",
+    "output/playwright/rules-workspace-v04.png",
+    "output/playwright/rules-review.png"
+  ]
+}

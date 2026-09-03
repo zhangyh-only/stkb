@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     llm_provider: str = "dashscope"
     llm_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     llm_api_key_env: str = "DASHSCOPE_API_KEY"
-    llm_model: str = "qwen-plus"
+    llm_model: str = "qwen3.7-plus"
     llm_temperature: float = 0.1
     llm_max_output_tokens: int = Field(default=8000, ge=256, le=32000)
     llm_timeout_seconds: int = Field(default=180, ge=5, le=600)

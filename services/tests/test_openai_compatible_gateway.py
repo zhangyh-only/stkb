@@ -17,7 +17,7 @@ def test_gateway_calls_chat_completions_with_json_output_contract() -> None:
         return httpx.Response(
             200,
             json={
-                "model": "qwen-plus",
+                "model": "qwen3.7-plus",
                 "choices": [
                     {
                         "message": {
@@ -40,7 +40,7 @@ def test_gateway_calls_chat_completions_with_json_output_contract() -> None:
         provider="dashscope",
         base_url="https://example.test/compatible-mode/v1",
         api_key="secret-key",
-        model="qwen-plus",
+        model="qwen3.7-plus",
         temperature=0.1,
         max_output_tokens=8000,
         timeout_seconds=30,
@@ -59,7 +59,7 @@ def test_gateway_calls_chat_completions_with_json_output_contract() -> None:
     assert str(captured_request.url) == ("https://example.test/compatible-mode/v1/chat/completions")
     assert captured_request.headers["authorization"] == "Bearer secret-key"
     body = json.loads(captured_request.content)
-    assert body["model"] == "qwen-plus"
+    assert body["model"] == "qwen3.7-plus"
     assert body["response_format"] == {"type": "json_object"}
     assert body["enable_thinking"] is False
     assert body["messages"][0] == {"role": "system", "content": "只输出 JSON"}

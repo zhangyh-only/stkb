@@ -59,6 +59,7 @@ const selectedModuleCode = ref('D1.1')
 const selectedCallIndex = ref(0)
 const error = ref('')
 const isLoadingPrevious = ref(false)
+const isLoadingMaterial = ref(false)
 
 const selectedMaterial = computed(() =>
   sourceMaterials.value.find((item) => item.documentPackageId === selectedMaterialId.value) ?? null,
@@ -175,6 +176,7 @@ async function selectMaterial(): Promise<void> {
     buildPhase.value = 'idle'
     return
   }
+  isLoadingMaterial.value = true
   try {
     documentPackage.value = await getDocumentPackage(selectedMaterialId.value)
     buildPhase.value = 'ready'
@@ -182,7 +184,23 @@ async function selectMaterial(): Promise<void> {
   } catch (reason) {
     error.value = errorMessage(reason)
     buildPhase.value = 'failed'
+  } finally {
+    isLoadingMaterial.value = false
   }
+}
+
+function resetWorkbench(): void {
+  selectedMaterialId.value = ''
+  documentPackage.value = null
+  identification.value = null
+  formation.value = null
+  selectedObjectId.value = ''
+  selectedCallIndex.value = 0
+  selectedDomainCode.value = 'D1'
+  selectedModuleCode.value = 'D1.1'
+  error.value = ''
+  buildPhase.value = 'idle'
+  activeView.value = 'build'
 }
 
 async function buildKnowledge(): Promise<void> {
@@ -295,7 +313,7 @@ onMounted(() => {
           <b v-if="item.key === 'knowledge' && formation">{{ formation.knowledgeObjects.length }}</b>
         </button>
       </nav>
-      <div class="build-service"><i></i>服务可用</div>
+      <div class="build-topbar-actions"><button class="build-reset" type="button" :disabled="isBuilding || isLoadingPrevious || isLoadingMaterial" title="只清空当前页面状态，不删除已落盘的知识对象" @click="resetWorkbench"><IconRefresh size="15" />重置页面</button><div class="build-service"><i></i>服务可用</div></div>
     </header>
 
     <section class="build-shell">
@@ -308,9 +326,9 @@ onMounted(() => {
 
       <section v-if="activeView === 'build'" class="build-view">
         <div class="build-command">
-          <label><span>选择测试资料</span><select v-model="selectedMaterialId" :disabled="isBuilding" @change="selectMaterial"><option value="">请选择资料</option><option v-for="item in sourceMaterials" :key="item.documentPackageId" :value="item.documentPackageId" :disabled="item.status !== 'available'">{{ item.sourceFileName }}</option></select></label>
+          <label><span>选择测试资料</span><select v-model="selectedMaterialId" :disabled="isBuilding || isLoadingMaterial" @change="selectMaterial"><option value="">请选择资料</option><option v-for="item in sourceMaterials" :key="item.documentPackageId" :value="item.documentPackageId" :disabled="item.status !== 'available'">{{ item.sourceFileName }}</option></select></label>
           <div v-if="documentPackage" class="source-inline"><IconFileDescription size="18" /><div><strong>{{ documentPackage.sourceFileName }}</strong><span>{{ documentPackage.anchors.length }}个来源位置 · {{ documentPackage.processingMethod === 'agent_assisted' ? '已完成代理解析' : '已完成解析' }}</span></div></div>
-          <div class="build-actions"><button class="build-secondary" type="button" :disabled="!canBuild || isBuilding || isLoadingPrevious" @click="loadLatestResult"><IconRefresh size="15" />{{ isLoadingPrevious ? '载入中' : '载入最近结果' }}</button><button class="build-primary" type="button" :disabled="!canBuild || isBuilding" @click="buildKnowledge"><IconPlayerPlay v-if="!isBuilding" size="17" fill="currentColor" /><span v-else class="build-pulse"></span>{{ isBuilding ? phaseLabel : formation ? '重新构建' : '开始构建知识' }}</button></div>
+          <div class="build-actions"><button class="build-secondary" type="button" :disabled="!canBuild || isBuilding || isLoadingPrevious || isLoadingMaterial" @click="loadLatestResult"><IconRefresh size="15" />{{ isLoadingPrevious ? '载入中' : '载入最近结果' }}</button><button class="build-primary" type="button" :disabled="!canBuild || isBuilding || isLoadingMaterial" @click="buildKnowledge"><IconPlayerPlay v-if="!isBuilding" size="17" fill="currentColor" /><span v-else class="build-pulse"></span>{{ isBuilding ? phaseLabel : formation ? '重新构建' : '开始构建知识' }}</button></div>
         </div>
 
         <div class="flow-board">
