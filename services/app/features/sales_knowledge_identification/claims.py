@@ -130,12 +130,12 @@ def validate_atomic_claims(
                 )
             )
             continue
+        resolved_claim = claim.model_copy(update={"evidence": resolved_evidence})
         accepted.append(
-            claim.model_copy(
+            resolved_claim.model_copy(
                 update={
-                    "attributes": _normalize_explicit_claim_attributes(claim),
+                    "attributes": _normalize_explicit_claim_attributes(resolved_claim),
                     "module_hints": valid_module_hints,
-                    "evidence": resolved_evidence,
                 }
             )
         )
@@ -431,6 +431,12 @@ def _normalize_explicit_claim_attributes(claim: AtomicClaim) -> dict[str, Any]:
         for step in re.split(r"\s*(?:->|→)\s*", claim.statement)
         if step.strip()
     ]
+    if len(steps) < 2:
+        evidence_steps = [
+            [line.strip() for line in item.exact_quote.splitlines() if line.strip()]
+            for item in claim.evidence
+        ]
+        steps = max(evidence_steps, key=len, default=[])
     if len(steps) >= 2:
         attributes["steps"] = steps
     return attributes

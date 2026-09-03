@@ -55,6 +55,7 @@ from app.features.sales_knowledge_identification.service import (
     _plan_satisfies_primary_claim_role,
     _prune_unattributed_d33_inferences,
     _split_composite_product_version_plan,
+    _split_explicit_strategy_combinations,
     _supplement_exact_match_claim_usage,
     _unclaimed_source_anchor_inputs,
     _validate_content_claim_usage,
@@ -2505,6 +2506,21 @@ def test_process_claim_derives_explicit_arrow_steps() -> None:
     assert accepted[0].attributes["steps"] == ["登录", "选择服务", "提交申请"]
 
 
+def test_process_claim_derives_steps_from_verified_multiline_evidence() -> None:
+    package = _package("DP-PROCESS-LINES", "填写信息\n确认内容\n提交申请")
+    raw = _claim(
+        "DP-PROCESS-LINES#page-1",
+        "填写信息\n确认内容\n提交申请",
+        kind="process",
+    )
+    raw["statement"] = "填写信息 确认内容 提交申请"
+
+    accepted, rejected = validate_atomic_claims([raw], package)
+
+    assert rejected == []
+    assert accepted[0].attributes["steps"] == ["填写信息", "确认内容", "提交申请"]
+
+
 def test_structured_table_completeness_adds_explicit_strategy_column() -> None:
     package = _package(
         "DP-STRATEGY",
@@ -2968,6 +2984,46 @@ def test_composite_product_versions_split_into_independent_identities() -> None:
         "专业版",
     ]
     assert [item.plan_id for item in split] == ["P1-V1", "P1-V2"]
+
+
+def test_explicit_numbered_strategy_combinations_become_independent_plans() -> None:
+    source = "方案一\n产品A+产品B\n• 补充能力\n方案二\n产品A+产品C\n• 降低成本"
+    claim = AtomicClaim(
+        claim_id="CL1",
+        claim_kind="strategy",
+        statement="方案一 产品A+产品B；方案二 产品A+产品C",
+        subject="组合销售",
+        attributes={"strategyGoal": "组合销售"},
+        evidence=[
+            ClaimEvidence(
+                anchor_id="DP-STRATEGY#page-1",
+                exact_quote=source,
+                source_text=source,
+            )
+        ],
+    )
+    plan = CandidateObjectPlan(
+        plan_id="P1",
+        title="组合销售策略",
+        domain="D3",
+        module="D3.2",
+        object_type="SALES_STRATEGY",
+        identity_hints={
+            "strategyGoal": "组合销售",
+            "triggerContext": "销售场景",
+            "applicability": "产品组合",
+        },
+        source_claim_ids=["CL1"],
+    )
+
+    claims, plans = _split_explicit_strategy_combinations([claim], [plan])
+    split = _enforce_plan_granularity(plans, claims)
+
+    assert [item.attributes["combination"] for item in claims] == [
+        "产品A+产品B",
+        "产品A+产品C",
+    ]
+    assert [item.source_claim_ids for item in split] == [["CL1-S1"], ["CL1-S2"]]
 
 
 def test_coverage_repair_augments_existing_plan_and_merges_new_identity() -> None:

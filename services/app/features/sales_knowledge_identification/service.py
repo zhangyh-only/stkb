@@ -214,6 +214,9 @@ class SalesKnowledgeIdentificationService:
                 rejected_atomic_claims,
             )
         )
+        atomic_claims, object_plans = _split_explicit_strategy_combinations(
+            atomic_claims, object_plans
+        )
         for _repair_pass in range(1):
             uncovered_claim_ids = _automatic_uncovered_claim_ids(
                 planning_unresolved_inputs
@@ -3562,6 +3565,82 @@ def _enforce_plan_granularity(
                 continue
         enforced.append(plan)
     return enforced
+
+
+def _split_explicit_strategy_combinations(
+    claims: list[AtomicClaim], plans: list[CandidateObjectPlan]
+) -> tuple[list[AtomicClaim], list[CandidateObjectPlan]]:
+    replacements: dict[str, list[AtomicClaim]] = {}
+    for claim in claims:
+        if claim.claim_kind != "strategy":
+            continue
+        combinations = [
+            item.strip()
+            for item in re.findall(
+                r"方案(?:[一二三四五六七八九十]|\d+)\s*[：:]?\s*([^；;\n]+)",
+                claim.statement,
+            )
+            if item.strip()
+        ]
+        if len(set(combinations)) < 2:
+            continue
+        split_claims = []
+        for index, combination in enumerate(dict.fromkeys(combinations), start=1):
+            evidence = []
+            for item in claim.evidence:
+                start = item.source_text.find(combination)
+                if start < 0:
+                    continue
+                later_starts = [
+                    item.source_text.find(other, start + len(combination))
+                    for other in combinations
+                    if other != combination
+                    and item.source_text.find(other, start + len(combination)) >= 0
+                ]
+                end = min(later_starts) if later_starts else len(item.source_text)
+                evidence.append(
+                    item.model_copy(
+                        update={"exact_quote": item.source_text[start:end].strip()}
+                    )
+                )
+            split_claims.append(
+                claim.model_copy(
+                    update={
+                        "claim_id": f"{claim.claim_id}-S{index}",
+                        "statement": combination,
+                        "subject": combination,
+                        "attributes": {
+                            **claim.attributes,
+                            "combination": combination,
+                        },
+                        "evidence": evidence or claim.evidence,
+                    }
+                )
+            )
+        replacements[claim.claim_id] = split_claims
+    if not replacements:
+        return claims, plans
+    expanded_claims = [
+        split_claim
+        for claim in claims
+        for split_claim in replacements.get(claim.claim_id, [claim])
+    ]
+    expanded_plans = [
+        plan.model_copy(
+            update={
+                "source_claim_ids": [
+                    replacement.claim_id
+                    for claim_id in plan.source_claim_ids
+                    for replacement in replacements.get(
+                        claim_id,
+                        [next(claim for claim in claims if claim.claim_id == claim_id)],
+                    )
+                ]
+            }
+        )
+        for plan in plans
+    ]
+    return expanded_claims, expanded_plans
 
 
 def _split_composite_product_version_plan(
