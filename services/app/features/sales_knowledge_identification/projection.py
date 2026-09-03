@@ -4,10 +4,12 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
+from typing import Any
 
 import httpx
 import psycopg
 from neo4j import GraphDatabase
+from psycopg.rows import dict_row
 
 from .models import (
     KnowledgeFormationResult,
@@ -59,6 +61,7 @@ class KnowledgeProjectionService:
         errors: list[str] = []
         stages: list[KnowledgeFormationStage] = []
         vector_records = 0
+        vector_record_data: list[dict[str, Any]] = []
         embedding_tokens = 0
         vector_started = perf_counter()
         try:
@@ -69,6 +72,9 @@ class KnowledgeProjectionService:
             embeddings, embedding_tokens = self._embed(texts)
             vector_records = self._write_vectors(
                 workspace_id, formation, texts, embeddings
+            )
+            vector_record_data = self._read_vector_records(
+                formation.document_package_id
             )
             vector_duration_ms = round((perf_counter() - vector_started) * 1000)
             stages.append(
@@ -98,8 +104,13 @@ class KnowledgeProjectionService:
 
         graph_started = perf_counter()
         graph_counts = (0, 0, 0, 0, 0)
+        graph_nodes: list[dict[str, Any]] = []
+        graph_relationships: list[dict[str, Any]] = []
         try:
             graph_counts = self._write_graph(workspace_id, formation)
+            graph_nodes, graph_relationships = self._read_graph_records(
+                formation.document_package_id
+            )
             graph_duration_ms = round((perf_counter() - graph_started) * 1000)
             stages.append(
                 KnowledgeFormationStage(
@@ -143,6 +154,18 @@ class KnowledgeProjectionService:
                 vector_duration_ms=vector_duration_ms,
                 graph_duration_ms=graph_duration_ms,
                 errors=errors,
+                formal_records=[
+                    {
+                        "knowledgeObjectId": item.knowledge_object_id,
+                        "revision": item.revision,
+                        "filePath": item.file_path,
+                        "fileSha256": item.file_sha256,
+                    }
+                    for item in formation.knowledge_objects
+                ],
+                vector_records=vector_record_data,
+                graph_nodes=graph_nodes,
+                graph_relationships=graph_relationships,
             ),
             stages=stages,
         )
@@ -366,3 +389,55 @@ class KnowledgeProjectionService:
             len(references),
             len(relationships),
         )
+
+    def _read_vector_records(self, document_package_id: str) -> list[dict[str, Any]]:
+        with psycopg.connect(self.postgres_dsn, row_factory=dict_row) as connection:
+            rows = connection.execute(
+                """
+                SELECT retrieval_unit_id, knowledge_object_id, revision,
+                       embedding_model, embedding_dimension, active,
+                       LEFT(retrieval_text, 160) AS text_preview
+                FROM knowledge_retrieval_units
+                WHERE document_package_id = %s AND active = TRUE
+                ORDER BY retrieval_unit_id
+                """,
+                (document_package_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _read_graph_records(
+        self, document_package_id: str
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        with GraphDatabase.driver(self.neo4j_uri, auth=self.neo4j_auth) as driver:
+            nodes = driver.execute_query(
+                """
+                MATCH (document:DocumentPackage {id: $documentId})-[:CONTAINS]->
+                      (object:KnowledgeObject)
+                OPTIONAL MATCH (object)-[:REFERS_TO]->(entity:BusinessEntity)
+                WITH document, collect(DISTINCT object) AS objects,
+                     collect(DISTINCT entity) AS entities
+                UNWIND [document] + objects + entities AS node
+                RETURN labels(node) AS labels, node.id AS id,
+                       node.revision AS revision, node.title AS title
+                ORDER BY labels, id
+                """,
+                documentId=document_package_id,
+                result_transformer_=lambda result: [record.data() for record in result],
+            )
+            relationships = driver.execute_query(
+                """
+                MATCH (document:DocumentPackage {id: $documentId})-[:CONTAINS]->
+                      (object:KnowledgeObject)
+                WITH document, collect(object.id) AS objectIds
+                MATCH (source)-[relation]->(target)
+                WHERE (source.id = $documentId AND type(relation) = 'CONTAINS')
+                   OR source.id IN objectIds
+                RETURN source.id AS source, type(relation) AS type,
+                       target.id AS target, relation.role AS role,
+                       relation.id AS relationshipId
+                ORDER BY type, source, target
+                """,
+                documentId=document_package_id,
+                result_transformer_=lambda result: [record.data() for record in result],
+            )
+        return nodes, relationships

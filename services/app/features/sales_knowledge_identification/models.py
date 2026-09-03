@@ -479,6 +479,10 @@ class KnowledgeStorageEvidence(ApiModel):
     vector_duration_ms: int = 0
     graph_duration_ms: int = 0
     errors: list[str] = Field(default_factory=list)
+    formal_records: list[dict[str, Any]] = Field(default_factory=list)
+    vector_records: list[dict[str, Any]] = Field(default_factory=list)
+    graph_nodes: list[dict[str, Any]] = Field(default_factory=list)
+    graph_relationships: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class KnowledgeFormationResult(ApiModel):

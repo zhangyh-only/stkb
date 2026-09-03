@@ -58,6 +58,14 @@ def test_projection_reports_each_store_independently() -> None:
         def _write_graph(self, *args, **kwargs) -> tuple[int, int, int, int, int]:  # type: ignore[no-untyped-def]
             return (1, 2, 1, 2, 3)
 
+        def _read_vector_records(self, document_package_id: str) -> list[dict]:
+            return []
+
+        def _read_graph_records(
+            self, document_package_id: str
+        ) -> tuple[list[dict], list[dict]]:
+            return [], []
+
     service = PartiallyFailingProjection(
         project_root=Path("."),
         postgres_dsn="postgresql://unused",

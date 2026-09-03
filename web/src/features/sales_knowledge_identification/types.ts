@@ -386,6 +386,10 @@ export type KnowledgeStorageEvidence = {
   vectorDurationMs: number
   graphDurationMs: number
   errors: string[]
+  formalRecords: Array<Record<string, unknown>>
+  vectorRecords: Array<Record<string, unknown>>
+  graphNodes: Array<Record<string, unknown>>
+  graphRelationships: Array<Record<string, unknown>>
 }
 
 export type KnowledgeFormationResult = {
