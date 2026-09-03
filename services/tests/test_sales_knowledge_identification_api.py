@@ -262,7 +262,7 @@ def test_api_runs_identification_and_reads_the_saved_result(
     ]
     assert run_response.status_code == 200
     assert run_response.json()["status"] == "completed"
-    assert run_response.json()["modelConfiguration"]["documentMaxChars"] == 16000
+    assert run_response.json()["modelConfiguration"]["documentMaxChars"] == 8000
     assert run_response.json()["candidates"][0]["candidateId"] == "P1"
     assert formation_response.status_code == 200
     assert formation_response.json()["status"] == "completed"

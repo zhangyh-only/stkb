@@ -104,7 +104,7 @@ class SalesKnowledgeIdentificationService:
         gateway: ModelGateway,
         max_retries: int = 0,
         max_candidates: int = 10,
-        document_max_chars: int = 16000,
+        document_max_chars: int = 8000,
         max_concurrency: int = 3,
         provider: str = "unknown",
         model: str = "unknown",

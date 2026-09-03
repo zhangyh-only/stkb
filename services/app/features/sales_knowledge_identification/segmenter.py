@@ -76,10 +76,6 @@ def segment_document(
     groups: list[str] = []
     current = ""
     for section in sections:
-        hard_boundary = section.startswith("## ") and not section.startswith("### ")
-        if current and hard_boundary:
-            groups.append(current)
-            current = ""
         proposed = f"{current}\n\n{section}".strip() if current else section
         if current and len(proposed) > max_chars:
             groups.append(current)

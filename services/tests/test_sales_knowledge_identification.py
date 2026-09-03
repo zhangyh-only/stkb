@@ -1870,6 +1870,28 @@ def test_segmenter_matches_source_anchors_exactly_and_supports_spreadsheet_rows(
     assert [anchor.anchor_id for anchor in segments[1].anchors] == ["DP-ROWS#row-2"]
 
 
+def test_segmenter_packs_adjacent_headings_until_capacity() -> None:
+    package = _package(
+        "DP-PACK",
+        "\n\n".join(
+            f"## 第 {index} 页\n\n<!-- source-anchor: DP-PACK#page-{index} -->\n\n内容{index}。"
+            for index in range(1, 4)
+        ),
+        [
+            SourceAnchor(anchor_id=f"DP-PACK#page-{index}", kind="page", page=index)
+            for index in range(1, 4)
+        ],
+    )
+
+    segments = segment_document(package, max_chars=125)
+
+    assert len(segments) == 2
+    assert [anchor.anchor_id for anchor in segments[0].anchors] == [
+        "DP-PACK#page-1",
+        "DP-PACK#page-2",
+    ]
+
+
 def test_claim_validation_rejects_cross_segment_evidence() -> None:
     package = _package(
         "DP-CROSS",
