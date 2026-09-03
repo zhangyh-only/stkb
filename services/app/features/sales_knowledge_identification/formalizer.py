@@ -164,15 +164,23 @@ class KnowledgeObjectFormationService:
         groups: dict[str, list[CandidateKnowledgeObject]] = defaultdict(list)
         identity_keys: dict[str, str] = {}
         lineage_keys: dict[str, set[str]] = defaultdict(set)
+        resolved_object_ids = self._unique_source_slot_matches(
+            eligible_candidates,
+            existing_objects,
+            existing_document_object_ids,
+        )
         for candidate in eligible_candidates:
             identity_key = self._identity_key(candidate)
             lineage_key = self._source_lineage_key(candidate)
-            object_id = existing_lineages.get(
-                lineage_key,
-                self._knowledge_object_id(
-                    document_package.workspace_id,
-                    candidate.object_type,
-                    identity_key,
+            object_id = resolved_object_ids.get(
+                candidate.candidate_id,
+                existing_lineages.get(
+                    lineage_key,
+                    self._knowledge_object_id(
+                        document_package.workspace_id,
+                        candidate.object_type,
+                        identity_key,
+                    ),
                 ),
             )
             groups[object_id].append(candidate)
@@ -217,7 +225,14 @@ class KnowledgeObjectFormationService:
         )
         superseded_count = len(existing_document_object_ids - current_object_ids)
         if identity_set_changed:
-            review_required_count = max(review_required_count, len(current_object_ids))
+            knowledge_objects = [
+                item.model_copy(update={"action": "review_required"})
+                for item in knowledge_objects
+            ]
+            created_count = 0
+            updated_count = 0
+            reused_count = 0
+            review_required_count = len(current_object_ids)
         requires_review = bool(review_required_count or quality_blocked_candidate_ids)
         if not requires_review:
             for item in knowledge_objects:
@@ -547,6 +562,32 @@ class KnowledgeObjectFormationService:
         if len(candidates) == 1:
             return candidates[0].content
         return {"mergedItems": [candidate.content for candidate in candidates]}
+
+    @classmethod
+    def _unique_source_slot_matches(
+        cls,
+        candidates: list[CandidateKnowledgeObject],
+        existing_objects: dict[str, ExistingKnowledgeObjectState],
+        active_object_ids: set[str],
+    ) -> dict[str, str]:
+        candidate_groups: dict[tuple[str, str, tuple[str, ...]], list[str]] = defaultdict(list)
+        existing_groups: dict[tuple[str, str, tuple[str, ...]], list[str]] = defaultdict(list)
+        for candidate in candidates:
+            candidate_groups[
+                (candidate.module, candidate.object_type, tuple(sorted(candidate.evidence)))
+            ].append(candidate.candidate_id)
+        for object_id in active_object_ids:
+            existing = existing_objects.get(object_id)
+            if existing is None:
+                continue
+            existing_groups[
+                (existing.module, existing.object_type, tuple(sorted(existing.evidence)))
+            ].append(object_id)
+        return {
+            candidate_ids[0]: existing_groups[key][0]
+            for key, candidate_ids in candidate_groups.items()
+            if len(candidate_ids) == 1 and len(existing_groups.get(key, [])) == 1
+        }
 
     @staticmethod
     def _identity_key(candidate: CandidateKnowledgeObject) -> str:

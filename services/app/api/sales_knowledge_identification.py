@@ -311,20 +311,22 @@ def form_knowledge_objects(
     existing_lineages = repository.get_existing_lineage_object_ids(
         package.workspace_id, lineage_keys
     )
+    existing_document_object_ids = repository.get_active_document_object_ids(
+        package.document_package_id
+    )
     object_ids = service.candidate_object_ids(
         package.workspace_id,
         identification.candidates,
         existing_lineages,
     )
+    object_ids.update(existing_document_object_ids)
     formation = service.form(
         document_package=package,
         identification=identification,
         existing_entities=repository.get_existing_entity_ids(entity_ids),
         existing_objects=repository.get_existing_object_states(object_ids),
         existing_lineages=existing_lineages,
-        existing_document_object_ids=repository.get_active_document_object_ids(
-            package.document_package_id
-        ),
+        existing_document_object_ids=existing_document_object_ids,
     )
     repository.save_knowledge_formation(
         workspace_id=package.workspace_id,

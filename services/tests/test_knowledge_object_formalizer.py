@@ -250,6 +250,49 @@ def test_formalizer_requires_review_when_document_identity_set_changes(
     assert result.review_required_count == 1
     assert result.superseded_count == 1
     assert result.formal_knowledge_files == 0
+    assert result.knowledge_objects[0].action == "review_required"
+
+
+def test_formalizer_reuses_unique_source_slot_when_identity_wording_drifts(
+    tmp_path: Path,
+) -> None:
+    service = KnowledgeObjectFormationService(project_root=tmp_path)
+    first = service.form(
+        document_package=_package(),
+        identification=_identification(),
+        existing_entities=set(),
+        existing_objects={},
+    )
+    existing = first.knowledge_objects[0]
+    changed = _identification().model_copy(deep=True)
+    changed.candidates[0].identity_hints["factTheme"] = "线上医疗服务"
+
+    result = service.form(
+        document_package=_package(),
+        identification=changed,
+        existing_entities=set(),
+        existing_objects={
+            existing.knowledge_object_id: ExistingKnowledgeObjectState(
+                revision=existing.revision,
+                content_fingerprint=existing.content_fingerprint,
+                title=existing.title,
+                domain=existing.domain,
+                module=existing.module,
+                object_type=existing.object_type,
+                identity_key=existing.identity_key,
+                content=existing.content,
+                entity_references=tuple(existing.entity_references),
+                evidence=tuple(existing.evidence),
+                file_path=existing.file_path,
+                file_sha256=existing.file_sha256,
+            )
+        },
+        existing_document_object_ids={existing.knowledge_object_id},
+    )
+
+    assert result.status == "completed"
+    assert result.knowledge_objects[0].knowledge_object_id == existing.knowledge_object_id
+    assert result.knowledge_objects[0].action == "reused"
 
 
 def test_formalizer_honors_an_explicit_existing_lineage_mapping(
