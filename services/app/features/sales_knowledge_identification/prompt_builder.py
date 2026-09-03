@@ -24,7 +24,9 @@ def render_planning_contracts_for_prompt() -> str:
                 [
                     f"### {module.code} {module.name}",
                     f"- 含义：{module.meaning}",
-                    f"- 对象类型：{', '.join(module.object_types)}",
+                    f"- 顶层对象合同：{', '.join(module.canonical_object_types)}",
+                    "- 内部条目（只能放在对象 content 内）："
+                    + (", ".join(module.item_types) or "无"),
                     f"- 纳入：{content.inclusion}",
                     f"- 排除：{content.exclusion}",
                     f"- 粒度：{content.granularity}",
@@ -137,7 +139,8 @@ def build_document_object_planning_request(
 7. 下列内容边界必须保持：
    - 同一产品的多个版本在同一来源维护单元中共同呈现、比较和更新时，形成一个版本矩阵计划，
      在 content 内保留各版本差异；只有版本来自不同维护单元、生效周期或独立更新时才拆分。
-   - 不同产品组合对应不同适用条件、行动或价值时，每个组合形成独立 SALES_STRATEGY 计划。
+   - 同一决策上下文共同发布的多个产品组合形成一个 SALES_STRATEGY 策略集，各方案作为内部
+     branch；只有独立发布、审批、生效期或下线生命周期时才拆分计划。
    - FAQ 的问答条目共享维护单元时形成一个 QA_PAIR 对象，但每个问题及答案分别形成 qa claim，
      attributes 至少包含 question 和 answer，计划引用全部 qa claim。
    - 完整流程可以形成一个 process claim，attributes 中用 steps 保存来源明确给出的有序步骤。

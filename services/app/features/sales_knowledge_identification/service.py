@@ -214,9 +214,6 @@ class SalesKnowledgeIdentificationService:
                 rejected_atomic_claims,
             )
         )
-        atomic_claims, object_plans = _split_explicit_strategy_combinations(
-            atomic_claims, object_plans
-        )
         for _repair_pass in range(1):
             uncovered_claim_ids = _automatic_uncovered_claim_ids(
                 planning_unresolved_inputs
@@ -3473,12 +3470,24 @@ def _enforce_plan_granularity(
             for plan in plans
             if plan not in group[1:]
         ]
-    qa_plans = [
-        plan
-        for plan in plans
-        if plan.module == "D4.2" and plan.object_type == "QA_PAIR"
-    ]
-    if len(qa_plans) > 1:
+    qa_groups: dict[tuple[str, ...], list[CandidateObjectPlan]] = {}
+    for plan in plans:
+        if plan.module != "D4.2" or plan.object_type != "QA_PAIR":
+            continue
+        anchors = tuple(
+            sorted(
+                {
+                    evidence.anchor_id
+                    for claim_id in plan.source_claim_ids
+                    if claim_id in claim_by_id
+                    for evidence in claim_by_id[claim_id].evidence
+                }
+            )
+        )
+        qa_groups.setdefault(anchors or (plan.plan_id,), []).append(plan)
+    for qa_plans in qa_groups.values():
+        if len(qa_plans) < 2:
+            continue
         primary_qa_plan = qa_plans[0].model_copy(
             update={
                 "source_claim_ids": list(
@@ -3526,116 +3535,8 @@ def _enforce_plan_granularity(
                     )
                 )
                 continue
-        if plan.module == "D3.2" and plan.object_type == "SALES_STRATEGY":
-            combination_claims = [
-                claim
-                for claim in plan_claims
-                if claim.claim_kind == "strategy"
-                and claim.attributes.get("combination")
-            ]
-            combinations = {
-                str(claim.attributes["combination"]) for claim in combination_claims
-            }
-            if len(combinations) > 1:
-                trigger_context = plan.identity_hints.get(
-                    "triggerContext", "组合营销场景"
-                )
-                enforced.extend(
-                    _split_plan_by_anchor(
-                        plan,
-                        plan_claims,
-                        combination_claims,
-                        title=lambda claim: (
-                            f"组合营销策略：{claim.attributes['combination']}"
-                        ),
-                        identity=lambda claim, context=trigger_context: {
-                            "strategyGoal": (
-                                f"组合营销-{claim.attributes['combination']}"
-                            ),
-                            "triggerContext": context,
-                            "applicability": claim.attributes["combination"],
-                        },
-                    )
-                )
-                continue
         enforced.append(plan)
     return enforced
-
-
-def _split_explicit_strategy_combinations(
-    claims: list[AtomicClaim], plans: list[CandidateObjectPlan]
-) -> tuple[list[AtomicClaim], list[CandidateObjectPlan]]:
-    replacements: dict[str, list[AtomicClaim]] = {}
-    for claim in claims:
-        if claim.claim_kind != "strategy":
-            continue
-        combinations = [
-            item.strip()
-            for item in re.findall(
-                r"方案(?:[一二三四五六七八九十]|\d+)\s*[：:]?\s*([^；;\n]+)",
-                claim.statement,
-            )
-            if item.strip()
-        ]
-        if len(set(combinations)) < 2:
-            continue
-        split_claims = []
-        for index, combination in enumerate(dict.fromkeys(combinations), start=1):
-            evidence = []
-            for item in claim.evidence:
-                start = item.source_text.find(combination)
-                if start < 0:
-                    continue
-                later_starts = [
-                    item.source_text.find(other, start + len(combination))
-                    for other in combinations
-                    if other != combination
-                    and item.source_text.find(other, start + len(combination)) >= 0
-                ]
-                end = min(later_starts) if later_starts else len(item.source_text)
-                evidence.append(
-                    item.model_copy(
-                        update={"exact_quote": item.source_text[start:end].strip()}
-                    )
-                )
-            split_claims.append(
-                claim.model_copy(
-                    update={
-                        "claim_id": f"{claim.claim_id}-S{index}",
-                        "statement": combination,
-                        "subject": combination,
-                        "attributes": {
-                            **claim.attributes,
-                            "combination": combination,
-                        },
-                        "evidence": evidence or claim.evidence,
-                    }
-                )
-            )
-        replacements[claim.claim_id] = split_claims
-    if not replacements:
-        return claims, plans
-    expanded_claims = [
-        split_claim
-        for claim in claims
-        for split_claim in replacements.get(claim.claim_id, [claim])
-    ]
-    expanded_plans = [
-        plan.model_copy(
-            update={
-                "source_claim_ids": [
-                    replacement.claim_id
-                    for claim_id in plan.source_claim_ids
-                    for replacement in replacements.get(
-                        claim_id,
-                        [next(claim for claim in claims if claim.claim_id == claim_id)],
-                    )
-                ]
-            }
-        )
-        for plan in plans
-    ]
-    return expanded_claims, expanded_plans
 
 
 def _normalized_version_scope(value: Any) -> str:

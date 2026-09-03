@@ -39,9 +39,7 @@ def _load_contracts() -> tuple[str, str, tuple[ObjectIdentityContract, ...]]:
         )
         for item in payload["contracts"]
     )
-    if len(contracts) != 22:
-        raise RuntimeError("source identity contracts must cover 22 legacy modules")
-    if any(not item.identity_fields for item in contracts):
+    if not contracts or any(not item.identity_fields for item in contracts):
         raise RuntimeError("every identity contract must define identity fields")
     return payload["version"], payload["status"], contracts
 
@@ -60,7 +58,7 @@ IDENTITY_CONTRACT_BY_OBJECT_TYPE = {
 
 
 def _module_contract(module: KnowledgeModule) -> ObjectIdentityContract:
-    object_types = module.object_types
+    object_types = module.canonical_object_types
     identity_fields_by_type = {
         object_type: IDENTITY_CONTRACT_BY_OBJECT_TYPE[object_type].identity_fields
         for object_type in object_types

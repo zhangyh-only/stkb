@@ -19,6 +19,8 @@ class KnowledgeModule:
     scope: Literal["core", "optional"]
     meaning: str
     object_types: tuple[str, ...]
+    canonical_object_types: tuple[str, ...]
+    item_types: tuple[str, ...]
     core_objects: tuple[str, ...]
     boundary: str
     sources: tuple[str, ...]
@@ -46,6 +48,8 @@ def _load_rule_package() -> tuple[
     rule_content = RULE_PACKAGE_PATH.read_bytes()
     payload = tomllib.loads(rule_content.decode("utf-8"))
     scope_definitions = payload["scope_definitions"]
+    canonical_types = set(payload["object_type_roles"]["canonical"])
+    item_types = set(payload["object_type_roles"]["item"])
     domains = tuple(
         KnowledgeDomain(
             code=item["code"],
@@ -64,6 +68,16 @@ def _load_rule_package() -> tuple[
             scope=item["scope"],
             meaning=item["meaning"],
             object_types=tuple(item["object_types"]),
+            canonical_object_types=tuple(
+                object_type
+                for object_type in item["object_types"]
+                if object_type in canonical_types
+            ),
+            item_types=tuple(
+                object_type
+                for object_type in item["object_types"]
+                if object_type in item_types
+            ),
             core_objects=tuple(item["core_objects"]),
             boundary=item["boundary"],
             sources=tuple(item["sources"]),
@@ -71,7 +85,9 @@ def _load_rule_package() -> tuple[
         )
         for item in payload["modules"]
     )
-    _validate_rule_package(scope_definitions, domains, modules)
+    _validate_rule_package(
+        scope_definitions, domains, modules, canonical_types, item_types
+    )
     fingerprint = sha256(rule_content).hexdigest()
     return (
         payload["version"],
@@ -88,6 +104,8 @@ def _validate_rule_package(
     scope_definitions: dict[str, str],
     domains: tuple[KnowledgeDomain, ...],
     modules: tuple[KnowledgeModule, ...],
+    canonical_types: set[str],
+    item_types: set[str],
 ) -> None:
     if set(scope_definitions) != {"core", "optional"} or not all(scope_definitions.values()):
         raise RuntimeError("knowledge rule package must define core and optional scopes")
@@ -110,6 +128,10 @@ def _validate_rule_package(
     object_types = [item for module in modules for item in module.object_types]
     if len(object_types) != len(set(object_types)):
         raise RuntimeError("object type contract may belong to only one module")
+    if canonical_types & item_types or canonical_types | item_types != set(object_types):
+        raise RuntimeError(
+            "every object type must be classified once as canonical or internal item"
+        )
     for module in modules:
         if not module.code.startswith(f"{module.domain}."):
             raise RuntimeError(f"module {module.code} does not belong to {module.domain}")
@@ -118,6 +140,7 @@ def _validate_rule_package(
             module.meaning,
             module.boundary,
             module.object_types,
+            module.canonical_object_types,
             module.core_objects,
             module.sources,
             module.consumers,
@@ -141,6 +164,14 @@ MODULE_BY_OBJECT_TYPE = {
     for module in KNOWLEDGE_MODULES
     for object_type in module.object_types
 }
+CANONICAL_OBJECT_TYPES = frozenset(
+    object_type
+    for module in KNOWLEDGE_MODULES
+    for object_type in module.canonical_object_types
+)
+ITEM_OBJECT_TYPES = frozenset(
+    object_type for module in KNOWLEDGE_MODULES for object_type in module.item_types
+)
 DOMAIN_BY_CODE = {domain.code: domain for domain in KNOWLEDGE_DOMAINS}
 
 
@@ -153,6 +184,10 @@ def validate_candidate_classification(domain: str, module: str, object_type: str
         errors.append(f"module {module} belongs to {definition.domain}, not {domain}")
     if object_type not in definition.object_types:
         errors.append(f"object type {object_type} is not allowed for module {module}")
+    elif object_type in ITEM_OBJECT_TYPES:
+        errors.append(
+            f"object type {object_type} is an internal item and cannot be a KnowledgeObject"
+        )
     return errors
 
 
@@ -165,7 +200,8 @@ def render_catalog_for_prompt() -> str:
                 [
                     f"### {module.code} {module.name}（{scope}）",
                     f"- 业务含义：{module.meaning}",
-                    f"- 允许对象类型：{', '.join(module.object_types)}",
+                    f"- 顶层对象合同：{', '.join(module.canonical_object_types)}",
+                    f"- 内部条目类型：{', '.join(module.item_types) or '无'}",
                     f"- 核心对象：{'、'.join(module.core_objects)}",
                     f"- 对象边界与分类裁决：{module.boundary}",
                     f"- 典型来源：{'、'.join(module.sources)}",

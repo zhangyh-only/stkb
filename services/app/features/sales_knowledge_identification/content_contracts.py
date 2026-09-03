@@ -166,10 +166,11 @@ def _load_contracts() -> tuple[str, tuple[ObjectContentContract, ...]]:
         )
         for item in payload["contracts"]
     )
-    if len(contracts) != 22:
-        raise RuntimeError("object content contracts must cover all 22 modules")
-    if len({item.module for item in contracts}) != len(contracts):
-        raise RuntimeError("object content contracts contain duplicate modules")
+    object_types = [
+        object_type for contract in contracts for object_type in contract.object_types
+    ]
+    if not contracts or len(object_types) != len(set(object_types)):
+        raise RuntimeError("each object type must have exactly one content contract")
     return payload["version"], contracts
 
 
@@ -224,7 +225,7 @@ def _module_contract(module_code: str, object_types: tuple[str, ...]) -> ObjectC
 
 
 OBJECT_CONTENT_CONTRACTS = tuple(
-    _module_contract(module.code, module.object_types)
+    _module_contract(module.code, module.canonical_object_types)
     for module in KNOWLEDGE_MODULES
 )
 CONTENT_CONTRACT_BY_MODULE = {item.module: item for item in OBJECT_CONTENT_CONTRACTS}

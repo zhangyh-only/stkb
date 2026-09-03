@@ -54,7 +54,6 @@ from app.features.sales_knowledge_identification.service import (
     _object_granularity_metrics,
     _plan_satisfies_primary_claim_role,
     _prune_unattributed_d33_inferences,
-    _split_explicit_strategy_combinations,
     _supplement_exact_match_claim_usage,
     _unclaimed_source_anchor_inputs,
     _validate_content_claim_usage,
@@ -387,7 +386,7 @@ def test_integrated_planning_keeps_versions_strategies_and_qa_boundaries() -> No
     )
 
     assert "形成一个版本矩阵计划" in request.system_prompt
-    assert "每个组合形成独立 SALES_STRATEGY" in request.system_prompt
+    assert "形成一个 SALES_STRATEGY 策略集" in request.system_prompt
     assert "每个问题及答案分别形成 qa claim" in request.system_prompt
     assert "最多\n20 个" in request.system_prompt
 
@@ -1833,10 +1832,10 @@ def test_identification_rejects_unavailable_packages_at_capability_boundary() ->
 
 
 def test_identification_canonicalizes_domain_when_model_repeats_module_code() -> None:
-    candidate = _candidate("D1.3", "PROCESS_STEP", ["CL1"])
-    candidate["domain"] = "D1.3"
+    candidate = _candidate("D1.1", "PRODUCT_FACT", ["CL1"])
+    candidate["domain"] = "D1.1"
     gateway = TwoStageGateway(
-        [_claim("DP-DOMAIN#page-1", "提交问诊", kind="process")],
+        [_claim("DP-DOMAIN#page-1", "产品事实")],
         {
             "candidates": [candidate],
             "weakSignals": [],
@@ -1845,7 +1844,7 @@ def test_identification_canonicalizes_domain_when_model_repeats_module_code() ->
     )
 
     result = SalesKnowledgeIdentificationService(gateway=gateway).identify(
-        _package("DP-DOMAIN", "# 示例\n\n提交问诊。")
+        _package("DP-DOMAIN", "# 示例\n\n产品事实。")
     )
 
     assert result.candidates[0].domain == "D1"
@@ -2850,13 +2849,13 @@ def test_granularity_gate_merges_same_product_version_fact_fragments() -> None:
     merged = _enforce_plan_granularity(plans, claims)
 
     assert len(merged) == 1
+    assert merged[0].source_claim_ids == ["CL1", "CL2"]
     assert merged[0].title == "药享保尊享版产品版本事实"
     assert merged[0].identity_hints == {
         "subject": "药享保",
         "versionScope": "尊享版",
         "factTheme": "产品版本综合事实",
     }
-    assert merged[0].source_claim_ids == ["CL1", "CL2"]
 
 
 def test_granularity_gate_merges_policy_rules_for_same_business_subject() -> None:
@@ -2914,7 +2913,7 @@ def test_granularity_gate_merges_qa_plans_from_one_document_unit() -> None:
             subject=question,
             evidence=[
                 ClaimEvidence(
-                    anchor_id=f"DP-FAQ#row-{index}",
+                    anchor_id="DP-FAQ#section-1",
                     exact_quote=question,
                     source_text=question,
                 )
@@ -2927,7 +2926,7 @@ def test_granularity_gate_merges_qa_plans_from_one_document_unit() -> None:
             plan_id=f"P{index}",
             title=question,
             domain="D4",
-                module="D4.2",
+            module="D4.2",
             object_type="QA_PAIR",
             object_boundary="共同维护的问答集合",
             classification_basis="标准问答",
@@ -2941,6 +2940,41 @@ def test_granularity_gate_merges_qa_plans_from_one_document_unit() -> None:
 
     assert len(merged) == 1
     assert merged[0].source_claim_ids == ["CL1", "CL2"]
+
+
+def test_granularity_gate_does_not_merge_qa_from_distinct_maintenance_units() -> None:
+    claims = [
+        AtomicClaim(
+            claim_id=f"CL{index}",
+            claim_kind="qa",
+            statement=question,
+            subject=question,
+            evidence=[
+                ClaimEvidence(
+                    anchor_id=f"DP-FAQ#section-{index}",
+                    exact_quote=question,
+                    source_text=question,
+                )
+            ],
+        )
+        for index, question in enumerate(("如何问诊", "如何开发票"), start=1)
+    ]
+    plans = [
+        CandidateObjectPlan(
+            plan_id=f"P{index}",
+            title=question,
+            domain="D4",
+            module="D4.2",
+            object_type="QA_PAIR",
+            object_boundary="独立维护的问答集合",
+            classification_basis="标准问答",
+            identity_hints={"subject": question, "applicability": "通用"},
+            source_claim_ids=[f"CL{index}"],
+        )
+        for index, question in enumerate(("如何问诊", "如何开发票"), start=1)
+    ]
+
+    assert len(_enforce_plan_granularity(plans, claims)) == 2
 
 
 def test_granularity_gate_keeps_related_decision_rules_in_one_object() -> None:
@@ -3017,7 +3051,7 @@ def test_composite_product_versions_remain_one_shared_matrix() -> None:
     assert normalized[0].plan_id == "P1"
 
 
-def test_explicit_numbered_strategy_combinations_become_independent_plans() -> None:
+def test_explicit_numbered_strategy_combinations_remain_one_strategy_set() -> None:
     source = "方案一\n产品A+产品B\n• 补充能力\n方案二\n产品A+产品C\n• 降低成本"
     claim = AtomicClaim(
         claim_id="CL1",
@@ -3047,14 +3081,10 @@ def test_explicit_numbered_strategy_combinations_become_independent_plans() -> N
         source_claim_ids=["CL1"],
     )
 
-    claims, plans = _split_explicit_strategy_combinations([claim], [plan])
-    split = _enforce_plan_granularity(plans, claims)
+    plans = _enforce_plan_granularity([plan], [claim])
 
-    assert [item.attributes["combination"] for item in claims] == [
-        "产品A+产品B",
-        "产品A+产品C",
-    ]
-    assert [item.source_claim_ids for item in split] == [["CL1-S1"], ["CL1-S2"]]
+    assert len(plans) == 1
+    assert plans[0].source_claim_ids == ["CL1"]
 
 
 def test_coverage_repair_augments_existing_plan_and_merges_new_identity() -> None:

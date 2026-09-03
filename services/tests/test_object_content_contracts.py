@@ -13,7 +13,7 @@ def test_content_contracts_cover_every_module_and_object_type() -> None:
     }
     for module in KNOWLEDGE_MODULES:
         contract = CONTENT_CONTRACT_BY_MODULE[module.code]
-        assert set(contract.object_types) == set(module.object_types)
+        assert set(contract.object_types) == set(module.canonical_object_types)
         assert contract.required_fields_by_type
         assert contract.minimum_content_chars >= 120
         assert contract.inclusion and contract.exclusion

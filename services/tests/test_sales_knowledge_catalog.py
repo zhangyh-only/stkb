@@ -1,8 +1,10 @@
 from app.features.sales_knowledge_identification.catalog import (
+    CANONICAL_OBJECT_TYPES,
     CATALOG_FINGERPRINT,
     CATALOG_SOURCE,
     CATALOG_STATUS,
     CATALOG_VERSION,
+    ITEM_OBJECT_TYPES,
     KNOWLEDGE_DOMAINS,
     KNOWLEDGE_MODULES,
     MODULE_BY_CODE,
@@ -43,6 +45,19 @@ def test_rule_package_defines_complete_versioned_d1_d5_catalog() -> None:
     assert "下沉到对象合同" in MODULE_SCOPE_DEFINITIONS["optional"]
     assert all(module.meaning and module.boundary for module in KNOWLEDGE_MODULES)
     assert all(module.object_types and module.sources for module in KNOWLEDGE_MODULES)
+    assert len(CANONICAL_OBJECT_TYPES) == 37
+    assert len(ITEM_OBJECT_TYPES) == 34
+    assert not CANONICAL_OBJECT_TYPES & ITEM_OBJECT_TYPES
+
+
+def test_internal_item_type_cannot_be_planned_as_knowledge_object() -> None:
+    from app.features.sales_knowledge_identification.catalog import (
+        validate_candidate_classification,
+    )
+
+    assert validate_candidate_classification("D1", "D1.2", "PROCESS_STEP") == [
+        "object type PROCESS_STEP is an internal item and cannot be a KnowledgeObject"
+    ]
 
 
 def test_prompt_catalog_contains_rules_that_distinguish_stage_and_strategy() -> None:
