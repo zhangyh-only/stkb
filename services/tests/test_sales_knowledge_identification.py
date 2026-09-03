@@ -1886,10 +1886,9 @@ def test_segmenter_packs_adjacent_headings_until_capacity() -> None:
     segments = segment_document(package, max_chars=125)
 
     assert len(segments) == 2
-    assert [anchor.anchor_id for anchor in segments[0].anchors] == [
-        "DP-PACK#page-1",
-        "DP-PACK#page-2",
-    ]
+    assert [
+        anchor.anchor_id for segment in segments for anchor in segment.anchors
+    ] == ["DP-PACK#page-1", "DP-PACK#page-2", "DP-PACK#page-3"]
 
 
 def test_claim_validation_rejects_cross_segment_evidence() -> None:

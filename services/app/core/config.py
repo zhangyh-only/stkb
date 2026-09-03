@@ -37,8 +37,8 @@ class Settings(BaseSettings):
     llm_api_key_env: str = "DASHSCOPE_API_KEY"
     llm_model: str = "qwen-plus"
     llm_temperature: float = 0.1
-    llm_max_output_tokens: int = Field(default=5000, ge=256, le=32000)
-    llm_timeout_seconds: int = Field(default=90, ge=5, le=600)
+    llm_max_output_tokens: int = Field(default=8000, ge=256, le=32000)
+    llm_timeout_seconds: int = Field(default=180, ge=5, le=600)
     llm_max_retries: int = Field(default=1, ge=0, le=5)
     llm_max_candidates: int = Field(default=10, ge=1, le=100)
     llm_enable_thinking: bool = False

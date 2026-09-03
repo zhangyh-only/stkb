@@ -550,7 +550,9 @@ class SalesKnowledgeIdentificationService:
             items=segments,
             worker=run,
             label=lambda segment: segment.label,
-            max_concurrency=self.max_concurrency,
+            # ponytail: discovery is sequential until the provider proves stable
+            # under concurrent long-form requests.
+            max_concurrency=1,
         )
 
     def _plan_candidate_objects(

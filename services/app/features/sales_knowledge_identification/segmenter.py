@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from math import ceil
 
 from .models import DocumentPackage, SourceAnchor
 
@@ -73,11 +74,17 @@ def segment_document(
             section = preamble + section
         sections.append(section.strip())
 
+    target_group_count = ceil(len(markdown) / max_chars)
+    target_chars = ceil(len(markdown) / target_group_count)
     groups: list[str] = []
     current = ""
     for section in sections:
         proposed = f"{current}\n\n{section}".strip() if current else section
-        if current and len(proposed) > max_chars:
+        if (
+            current
+            and len(proposed) > target_chars
+            and len(groups) < target_group_count - 1
+        ):
             groups.append(current)
             current = section
         else:
