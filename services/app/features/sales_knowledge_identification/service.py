@@ -54,6 +54,7 @@ from .prompt_builder import (
     SCHEMA_VERSION,
     build_claim_discovery_request,
     build_content_realization_request,
+    build_document_object_planning_request,
     build_object_planning_request,
     build_plan_coverage_repair_request,
     build_repair_request,
@@ -104,11 +105,12 @@ class SalesKnowledgeIdentificationService:
         gateway: ModelGateway,
         max_retries: int = 0,
         max_candidates: int = 10,
-        document_max_chars: int = 8000,
+        document_max_chars: int = 16000,
         max_concurrency: int = 3,
         provider: str = "unknown",
         model: str = "unknown",
         model_configuration: ModelConfigurationSnapshot | None = None,
+        integrated_planning: bool = False,
     ) -> None:
         self.gateway = gateway
         self.max_retries = max_retries
@@ -119,6 +121,7 @@ class SalesKnowledgeIdentificationService:
         self.provider = provider
         self.model = model
         self.model_configuration = model_configuration
+        self.integrated_planning = integrated_planning
 
     def identify(self, document_package: DocumentPackage) -> IdentificationResult:
         if document_package.status != "available":
@@ -129,10 +132,15 @@ class SalesKnowledgeIdentificationService:
             document_package, self.claim_discovery_max_chars
         )
         model_calls: list[ModelCallTrace] = []
-
-        discovery_results, discovery_failures = self._discover_claims(
-            document_package, segments
-        )
+        uses_integrated_planning = self.integrated_planning and len(segments) == 1
+        if uses_integrated_planning:
+            discovery_results, discovery_failures = self._discover_and_plan_document(
+                document_package, segments[0]
+            )
+        else:
+            discovery_results, discovery_failures = self._discover_claims(
+                document_package, segments
+            )
         model_calls.extend(_renumber_calls(discovery_results, model_calls))
         if discovery_failures:
             return self._failed_result(
@@ -146,6 +154,7 @@ class SalesKnowledgeIdentificationService:
         atomic_claims: list[AtomicClaim] = []
         rejected_atomic_claims: list[RejectedAtomicClaim] = []
         for segment, payload, _completion, _calls in discovery_results:
+            payload = _expand_compact_claim_payload(payload)
             namespaced = _namespace_claim_payload(
                 payload, f"S{segment.index}" if len(segments) > 1 else None
             )
@@ -165,10 +174,17 @@ class SalesKnowledgeIdentificationService:
             document_package, atomic_claims
         )
 
-        planning_result, planning_failures = self._plan_candidate_objects(
-            document_package.document_package_id, atomic_claims
-        )
-        model_calls.extend(_renumber_calls(planning_result, model_calls))
+        if uses_integrated_planning:
+            segment, payload, completion, _calls = discovery_results[0]
+            planning_result = [
+                ("document-planning", atomic_claims, payload, completion, [])
+            ]
+            planning_failures: list[str] = []
+        else:
+            planning_result, planning_failures = self._plan_candidate_objects(
+                document_package.document_package_id, atomic_claims
+            )
+            model_calls.extend(_renumber_calls(planning_result, model_calls))
         if planning_failures:
             return self._failed_result(
                 document_package=document_package,
@@ -391,6 +407,9 @@ class SalesKnowledgeIdentificationService:
         completion = _last_completion(object_results, planning_result, discovery_results)
         validation_duration_ms = round((perf_counter() - validation_started) * 1000)
         granularity_metrics = _object_granularity_metrics(object_plans, atomic_claims)
+        discovery_call_purpose = (
+            "object_planning" if uses_integrated_planning else "claim_discovery"
+        )
         finished_at = datetime.now(UTC)
         return IdentificationResult(
             document_package_id=document_package.document_package_id,
@@ -419,21 +438,25 @@ class SalesKnowledgeIdentificationService:
             processing_stages=[
                 ProcessingStage(
                     key="claim_discovery",
-                    name="原子主张发现",
+                    name=(
+                        "全文知识发现与对象规划"
+                        if uses_integrated_planning
+                        else "原子主张发现"
+                    ),
                     status="completed",
                     duration_ms=sum(
                         call.duration_ms
                         for call in model_calls
-                        if call.purpose == "claim_discovery"
+                        if call.purpose == discovery_call_purpose
                     ),
                     detail=(
-                        f"{len(segments)} 个结构分段发现 {len(atomic_claims)} 条可核验主张，"
+                        f"{len(segments)} 个文档范围发现 {len(atomic_claims)} 条对象证据，"
                         f"拒绝 {len(rejected_atomic_claims)} 条证据不成立主张；"
                         f"发现分段上限 {self.claim_discovery_max_chars} 字符"
                     ),
                     actor="model",
                     model_call_ids=_call_ids_for_purpose(
-                        model_calls, "claim_discovery"
+                        model_calls, discovery_call_purpose
                     ),
                 ),
                 ProcessingStage(
@@ -445,9 +468,13 @@ class SalesKnowledgeIdentificationService:
                 ),
                 ProcessingStage(
                     key="object_planning",
-                    name="全局对象边界规划",
+                    name=(
+                        "对象计划确定性校验"
+                        if uses_integrated_planning
+                        else "全局对象边界规划"
+                    ),
                     status="completed",
-                    duration_ms=sum(
+                    duration_ms=0 if uses_integrated_planning else sum(
                         call.duration_ms
                         for call in model_calls
                         if call.purpose == "object_planning"
@@ -457,9 +484,11 @@ class SalesKnowledgeIdentificationService:
                         f"{len(object_plans)} 个对象计划，拒绝 {len(rejected_object_plans)} 个；"
                         "未按主张类型或12个模块逐项拆分模型调用"
                     ),
-                    actor="model",
-                    model_call_ids=_call_ids_for_purpose(
-                        model_calls, "object_planning"
+                    actor="code" if uses_integrated_planning else "model",
+                    model_call_ids=(
+                        []
+                        if uses_integrated_planning
+                        else _call_ids_for_purpose(model_calls, "object_planning")
                     ),
                 ),
                 ProcessingStage(
@@ -554,6 +583,25 @@ class SalesKnowledgeIdentificationService:
             # under concurrent long-form requests.
             max_concurrency=1,
         )
+
+    def _discover_and_plan_document(
+        self,
+        document_package: DocumentPackage,
+        segment: DocumentSegment,
+    ) -> tuple[
+        list[tuple[DocumentSegment, dict[str, Any], ModelCompletion, list[ModelCallTrace]]],
+        list[str],
+    ]:
+        request = build_document_object_planning_request(
+            document_package, self.max_candidates
+        )
+        try:
+            payload, completion, calls = self._complete_json_request(
+                request, "object_planning"
+            )
+        except SegmentIdentificationFailure as error:
+            return [(segment, {}, None, error.model_calls)], [str(error)]
+        return [(segment, payload, completion, calls)], []
 
     def _plan_candidate_objects(
         self,
@@ -1806,6 +1854,8 @@ def _validate_object_plans(
             )
         if (
             plan.module == "D1.1"
+            and plan.object_type
+            in {"PRODUCT_FACT", "PRODUCT_VERSION_FACT", "PRODUCT_COMPONENT_FACT"}
             and _is_all_versions_scope(plan.identity_hints.get("versionScope"))
             and not all(_claim_explicitly_all_versions(claim) for claim in plan_claims)
         ):
@@ -1813,8 +1863,11 @@ def _validate_object_plans(
                 "all-versions product fact requires explicit all-version scope "
                 "on every source claim"
             )
-        if plan.module == "D1.1" and _is_unknown_version_scope(
-            plan.identity_hints.get("versionScope")
+        if (
+            plan.module == "D1.1"
+            and plan.object_type
+            in {"PRODUCT_FACT", "PRODUCT_VERSION_FACT", "PRODUCT_COMPONENT_FACT"}
+            and _is_unknown_version_scope(plan.identity_hints.get("versionScope"))
         ):
             reasons.append(
                 "version-sensitive product fact requires an explicit product version; "
@@ -1840,6 +1893,8 @@ def _validate_object_plans(
                 len(plan_claims) >= 2
                 and any(claim.claim_kind == "process" for claim in plan_claims)
             ) or has_embedded_sequence or any(
+                len(claim.evidence) >= 2 for claim in plan_claims
+            ) or any(
                 claim.attributes.get("answerType") == "process"
                 or any(
                     evidence.exact_quote.count("→") >= 2
@@ -3557,6 +3612,45 @@ def _namespace_claim_payload(payload: dict[str, Any], namespace: str | None) -> 
         if isinstance(raw_claim, dict) and isinstance(raw_claim.get("claimId"), str):
             raw_claim["claimId"] = f"{namespace}-{raw_claim['claimId']}"
     return namespaced
+
+
+def _expand_compact_claim_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    expanded = payload.copy()
+    claims = []
+    for raw_claim in payload.get("claims", []):
+        if not isinstance(raw_claim, list) or len(raw_claim) not in {5, 7}:
+            claims.append(raw_claim)
+            continue
+        claim_id, claim_kind, subject, attributes = raw_claim[:4]
+        if len(raw_claim) == 5:
+            raw_evidence = raw_claim[4]
+        else:
+            raw_evidence = [raw_claim[4:7]]
+        evidence = [
+            {
+                "anchorId": item[0],
+                "exactQuote": fragment.strip(),
+                "selector": item[2],
+            }
+            for item in raw_evidence
+            if isinstance(item, list) and len(item) == 3 and isinstance(item[1], str)
+            for fragment in re.split(r"(?:\.{3}|…+)", item[1])
+            if len(fragment.strip()) >= 2
+        ]
+        statement = "；".join(str(item["exactQuote"]) for item in evidence)
+        claims.append(
+            {
+                "claimId": claim_id,
+                "claimKind": claim_kind,
+                "statement": statement or subject,
+                "subject": subject,
+                "attributes": attributes,
+                "moduleHints": [],
+                "evidence": evidence,
+            }
+        )
+    expanded["claims"] = claims
+    return expanded
 
 
 def _namespace_candidate_payload(payload: dict[str, Any], namespace: str) -> dict[str, Any]:

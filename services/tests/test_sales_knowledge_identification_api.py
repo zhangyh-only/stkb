@@ -82,7 +82,41 @@ class InMemoryRepository:
 
 class ApiStubGateway:
     def complete(self, request):  # type: ignore[no-untyped-def]
-        if "原子主张发现器" in request.system_prompt:
+        if "全文知识发现与对象规划器" in request.system_prompt:
+            payload = {
+                "claims": [
+                    [
+                        "CL1",
+                        "fact",
+                        "药享保",
+                        {},
+                        [
+                            [
+                                "DP-API#page-1",
+                                "药享保提供在线问诊服务",
+                                None,
+                            ]
+                        ],
+                    ]
+                ],
+                "objectPlans": [
+                    [
+                        "P1",
+                        "测试对象 C1",
+                        "D1.1",
+                        "PRODUCT_FACT",
+                        {
+                            "subject": "药享保",
+                            "versionScope": "当前版本",
+                            "factTheme": "在线问诊服务",
+                        },
+                        ["CL1"],
+                    ]
+                ],
+                "weakSignals": [],
+                "unresolvedItems": [],
+            }
+        elif "原子主张发现器" in request.system_prompt:
             payload = {
                 "claims": [
                     {
@@ -262,7 +296,7 @@ def test_api_runs_identification_and_reads_the_saved_result(
     ]
     assert run_response.status_code == 200
     assert run_response.json()["status"] == "completed"
-    assert run_response.json()["modelConfiguration"]["documentMaxChars"] == 8000
+    assert run_response.json()["modelConfiguration"]["documentMaxChars"] == 16000
     assert run_response.json()["candidates"][0]["candidateId"] == "P1"
     assert formation_response.status_code == 200
     assert formation_response.json()["status"] == "completed"

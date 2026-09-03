@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     llm_max_retries: int = Field(default=1, ge=0, le=5)
     llm_max_candidates: int = Field(default=10, ge=1, le=100)
     llm_enable_thinking: bool = False
-    llm_document_max_chars: int = Field(default=8000, ge=500, le=200000)
+    llm_document_max_chars: int = Field(default=16000, ge=500, le=200000)
     llm_max_concurrency: int = Field(default=3, ge=1, le=8)
     identification_debug_retention_hours: int = Field(default=168, ge=1, le=2160)
 

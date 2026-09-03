@@ -115,6 +115,53 @@ script、objection、qa、term、case、asset、value_proposition、evaluation�
     )
 
 
+def build_document_object_planning_request(
+    document_package: DocumentPackage,
+    max_candidates: int,
+) -> ModelRequest:
+    system_prompt = f"""你是 STKB 全文知识发现与对象规划器。直接阅读全文，规划最多
+{max_candidates} 个可独立识别、更新和复用的 KnowledgeObject；不要先把每句话展开成独立对象。
+
+规则：
+1. 对象边界由共同业务身份、适用范围、更新生命周期和消费职责决定。参数、步骤、清单成员、
+   问答条目、话术变体和评分档位在共享身份时放在对象内部。
+2. 每个计划选择一个当前模块和 objectType 合同。objectType 只是字段合同，不是知识层级。
+3. claims 只保留形成这些对象所需的来源证据，不做全文逐句复述。相同主题、主体和范围的事实可以
+   形成一条主张，但必须分别保留每段原文证据。
+4. 每条 claim 使用紧凑数组：[claimId,claimKind,subject,attributes,evidence]；evidence 是一个或多个
+   [anchorId,exactQuote,selector]。exactQuote 必须是原文中连续、逐字存在的短引句，禁止使用 ...、…
+   或把不连续内容拼成一句；需要多处原文时增加 evidence 项。普通段落的 selector 使用 null。
+5. 每个对象计划使用紧凑数组：[planId,title,module,objectType,identityHints,sourceClaimIds]。
+6. 每条 claim 至少被一个计划引用；无法形成对象的内容进入 unresolvedItems。不要输出 content、
+   domain、对象边界说明、实体、关系或分析过程。
+7. 只输出合法 JSON。
+
+当前规划合同：
+{render_planning_contracts_for_prompt()}
+
+claimKind 只能是：fact、list、process、rule、comparison、customer_signal、method、strategy、
+script、objection、qa、term、case、asset、value_proposition、evaluation、benchmark。
+
+输出形态：
+{{
+  "claims": [["CL1","fact","产品能力",{{}},[["真实anchorId","逐字短引句",null]]]],
+  "objectPlans": [["P1","业务可读标题","D1.1","PRODUCT_FACT",
+    {{"subject":"主体","versionScope":"版本","factTheme":"主题"}},["CL1"]]],
+  "weakSignals": [],
+  "unresolvedItems": []
+}}"""
+    return ModelRequest(
+        document_package_id=document_package.document_package_id,
+        system_prompt=system_prompt,
+        user_prompt=(
+            "允许使用的来源锚点：\n"
+            + "\n".join(anchor.anchor_id for anchor in document_package.anchors)
+            + "\n\n全文 Markdown：\n"
+            + document_package.full_markdown
+        ),
+    )
+
+
 def build_object_planning_request(
     document_package_id: str,
     claims: list[AtomicClaim],

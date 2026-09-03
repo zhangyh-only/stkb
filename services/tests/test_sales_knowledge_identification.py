@@ -41,6 +41,7 @@ from app.features.sales_knowledge_identification.service import (
     _ensure_explicit_script_plans,
     _ensure_explicit_term_plans,
     _ensure_rule_policy_plans,
+    _expand_compact_claim_payload,
     _expand_compact_object_plan,
     _expand_content_path_to_leaf_paths,
     _group_claims_for_planning,
@@ -351,6 +352,82 @@ def test_planning_batches_keep_source_location_together() -> None:
         ["CL3"],
     ]
 
+
+def test_compact_claim_supports_multiple_verbatim_evidence_spans() -> None:
+    payload = _expand_compact_claim_payload(
+        {
+            "claims": [
+                [
+                    "CL1",
+                    "fact",
+                    "产品事实",
+                    {},
+                    [
+                        ["DP#page-1", "第一段原文...附加原文", None],
+                        ["DP#page-2", "第二段原文", None],
+                    ],
+                ]
+            ]
+        }
+    )
+
+    assert payload["claims"][0]["statement"] == "第一段原文；附加原文；第二段原文"
+    assert len(payload["claims"][0]["evidence"]) == 3
+
+
+def test_claim_validation_recovers_exact_span_across_markdown_table_formatting() -> None:
+    package = _package(
+        "DP-TABLE-QUOTE",
+        "<!-- source-anchor: DP-TABLE-QUOTE#page-1 -->\n| 版本 | 尊享版 | 全能版 |",
+        [SourceAnchor(anchor_id="DP-TABLE-QUOTE#page-1", kind="table")],
+    )
+    claim = {
+        **_claim(
+            "DP-TABLE-QUOTE#page-1",
+            "版本 尊享版 全能版",
+            claim_id="CL1",
+        ),
+        "evidence": [
+            {
+                "anchorId": "DP-TABLE-QUOTE#page-1",
+                "exactQuote": "版本 尊享版 全能版",
+            }
+        ],
+    }
+
+    accepted, rejected = validate_atomic_claims([claim], package)
+
+    assert rejected == []
+    assert accepted[0].evidence[0].exact_quote == "版本 | 尊享版 | 全能版"
+
+
+def test_claim_validation_recovers_ordered_source_lines_with_intervening_labels() -> None:
+    package = _package(
+        "DP-LINE-QUOTE",
+        (
+            "<!-- source-anchor: DP-LINE-QUOTE#page-1 -->\n"
+            "每笔订单不超过4种\n药房购药\n每种药品不超过1盒"
+        ),
+        [SourceAnchor(anchor_id="DP-LINE-QUOTE#page-1", kind="page")],
+    )
+    claim = {
+        **_claim(
+            "DP-LINE-QUOTE#page-1",
+            "每笔订单不超过4种 每种药品不超过1盒",
+            claim_id="CL1",
+        ),
+        "evidence": [
+            {
+                "anchorId": "DP-LINE-QUOTE#page-1",
+                "exactQuote": "每笔订单不超过4种 每种药品不超过1盒",
+            }
+        ],
+    }
+
+    accepted, rejected = validate_atomic_claims([claim], package)
+
+    assert rejected == []
+    assert "药房购药" in accepted[0].evidence[0].exact_quote
 
 def test_object_granularity_metrics_expose_single_claim_and_anchor_splits() -> None:
     claims = [

@@ -266,6 +266,7 @@ def run_identification(
         provider=settings.llm_provider,
         model=settings.llm_model,
         model_configuration=configuration,
+        integrated_planning=True,
     )
     try:
         result = service.identify(package)

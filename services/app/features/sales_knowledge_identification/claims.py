@@ -141,21 +141,43 @@ def _resolve_markdown_formatted_quote(source_text: str, quote: str) -> str | Non
     """Recover a literal source span when the model omits inline Markdown marks."""
     if quote in source_text:
         return quote
-    ignored = {"*", "`"}
+    ignored = {"*", "`", "|", "#", "-", "•"}
     normalized_chars: list[str] = []
     source_indexes: list[int] = []
     for index, char in enumerate(source_text):
-        if char in ignored:
+        if char in ignored or char.isspace():
             continue
         normalized_chars.append(char)
         source_indexes.append(index)
     normalized_source = "".join(normalized_chars)
-    normalized_quote = "".join(char for char in quote if char not in ignored)
+    normalized_quote = "".join(
+        char for char in quote if char not in ignored and not char.isspace()
+    )
     offset = normalized_source.find(normalized_quote)
-    if offset < 0 or not normalized_quote:
+    if offset >= 0 and normalized_quote:
+        start = source_indexes[offset]
+        end = source_indexes[offset + len(normalized_quote) - 1] + 1
+        return source_text[start:end]
+    tokens = [
+        "".join(char for char in token if char not in ignored)
+        for token in quote.split()
+    ]
+    tokens = [token for token in tokens if len(token) >= 2]
+    if len(tokens) < 2:
         return None
-    start = source_indexes[offset]
-    end = source_indexes[offset + len(normalized_quote) - 1] + 1
+    cursor = 0
+    first_offset = -1
+    last_end = -1
+    for token in tokens:
+        token_offset = normalized_source.find(token, cursor)
+        if token_offset < 0:
+            return None
+        if first_offset < 0:
+            first_offset = token_offset
+        cursor = token_offset + len(token)
+        last_end = cursor
+    start = source_indexes[first_offset]
+    end = source_indexes[last_end - 1] + 1
     return source_text[start:end]
 
 
