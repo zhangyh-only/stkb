@@ -31,6 +31,7 @@ import {
   type KnowledgeFormationResult,
   type KnowledgeModule,
   type ModelCallTrace,
+  type ProcessingStage,
   type SourceMaterial,
 } from '../types'
 
@@ -69,6 +70,14 @@ const selectedKnowledgeObject = computed<FormalKnowledgeObject | null>(() =>
   ) ?? formation.value?.knowledgeObjects[0] ?? null,
 )
 
+const selectedRelationships = computed(() => {
+  const objectId = selectedKnowledgeObject.value?.knowledgeObjectId
+  if (!objectId) return []
+  return formation.value?.relationships?.filter(
+    (item) => item.sourceRef === objectId || item.targetRef === objectId,
+  ) ?? []
+})
+
 const selectedDomain = computed(() =>
   catalog.value?.domains.find((item) => item.code === selectedDomainCode.value) ?? null,
 )
@@ -87,6 +96,12 @@ const selectedCall = computed<ModelCallTrace | null>(() =>
   identification.value?.modelCalls[selectedCallIndex.value] ?? null,
 )
 
+const repairCalls = computed(() =>
+  identification.value?.modelCalls
+    .map((call, index) => ({ call, index }))
+    .filter(({ call }) => ['repair', 'output_limit_retry'].includes(call.purpose)) ?? [],
+)
+
 const buildSteps = computed(() => {
   const hasSource = Boolean(documentPackage.value)
   const hasRules = Boolean(catalog.value)
@@ -94,7 +109,7 @@ const buildSteps = computed(() => {
   const hasFormation = Boolean(formation.value)
   return [
     { key: 'source', label: '准备资料', detail: '读取全文与来源定位', done: hasSource },
-    { key: 'rules', label: '装载规则', detail: '5个销售域 / 22个模块', done: hasRules },
+    { key: 'rules', label: '装载规则', detail: `5个销售域 / ${catalog.value?.modules.length ?? 0}个模块`, done: hasRules },
     { key: 'recognize', label: '识别知识', detail: '发现并组织知识内容', done: hasIdentification },
     { key: 'validate', label: '校验结果', detail: '对象边界、分类与证据', done: hasIdentification },
     { key: 'merge', label: '归一与归并', detail: '实体身份与知识身份', done: hasFormation },
@@ -137,15 +152,16 @@ function errorMessage(reason: unknown): string {
 
 async function initialize(): Promise<void> {
   try {
-    const [nextCatalog, materials] = await Promise.all([
-      getIdentificationCatalog(),
-      listSourceMaterials(),
-    ])
-    catalog.value = nextCatalog
-    sourceMaterials.value = materials
+    catalog.value = await getIdentificationCatalog()
   } catch (reason) {
     error.value = errorMessage(reason)
     buildPhase.value = 'failed'
+    return
+  }
+  try {
+    sourceMaterials.value = await listSourceMaterials()
+  } catch (reason) {
+    error.value = `资料运行记录暂不可用，仍可查看规则：${errorMessage(reason)}`
   }
 }
 
@@ -239,6 +255,31 @@ function callPurposeLabel(purpose: ModelCallTrace['purpose']): string {
   }[purpose]
 }
 
+function callsForStage(stage: ProcessingStage): Array<{ call: ModelCallTrace; index: number }> {
+  const calls = identification.value?.modelCalls ?? []
+  if (stage.modelCallIds?.length) {
+    const ids = new Set(stage.modelCallIds)
+    return calls
+      .map((call, index) => ({ call, index }))
+      .filter(({ call }) => ids.has(call.callId))
+  }
+  return calls
+    .map((call, index) => ({ call, index }))
+    .filter(({ call }) => call.purpose === stage.key)
+}
+
+function callResultFlow(purpose: ModelCallTrace['purpose']): string {
+  return {
+    identification: '进入历史候选结果',
+    claim_discovery: '输出进入主张证据校验',
+    object_planning: '输出进入对象合同与覆盖校验',
+    content_realization: '输出进入候选对象质量门禁',
+    object_formation: '输出进入正式知识形成',
+    output_limit_retry: '续接输出回到原调用结果',
+    repair: '修复结果回到原阶段解析',
+  }[purpose]
+}
+
 onMounted(() => {
   void initialize()
 })
@@ -299,7 +340,7 @@ onMounted(() => {
             </section>
             <section v-else><div v-if="selectedKnowledgeObject.equivalenceReason" class="equivalence-note"><strong>沿用正式版本</strong><span>{{ selectedKnowledgeObject.equivalenceReason }}</span></div><h3>规范内容</h3><pre>{{ prettyJson(selectedKnowledgeObject.content) }}</pre></section>
             <section><h3>本次正文主张追溯</h3><div class="source-trace-list"><article v-for="trace in selectedKnowledgeObject.sourceTraces" :key="trace.candidateId"><header><strong>{{ trace.candidateId }}</strong><span>{{ trace.attributedContentLeafCount }}/{{ trace.contentLeafCount }} 个正文叶子已归因</span></header><div><code v-for="usage in trace.claimUsage" :key="`${trace.candidateId}-${usage.claimId}`">{{ usage.claimId }} → {{ usage.contentPaths.join('、') }}</code></div></article></div></section>
-            <section><h3>业务实体引用</h3><div v-if="selectedKnowledgeObject.entityReferences.length" class="formal-refs"><div v-for="item in selectedKnowledgeObject.entityReferences" :key="`${item.entityId}-${item.referenceRole}`"><code>{{ item.entityId }}</code><strong>{{ item.referenceRole }}</strong><span>{{ item.evidence.join('、') }}</span></div></div><p v-else>该对象暂未形成业务实体引用。</p></section><section><h3>当前正式版来源证据</h3><div class="formal-evidence"><code v-for="item in selectedKnowledgeObject.evidence" :key="item">{{ item }}</code></div></section><section class="formal-file"><h3>正式知识文件</h3><code>{{ selectedKnowledgeObject.filePath }}</code><span>SHA-256 {{ selectedKnowledgeObject.fileSha256 }}</span></section></div></article>
+            <section><h3>正式知识关系</h3><div v-if="selectedRelationships.length" class="formal-refs"><div v-for="item in selectedRelationships" :key="item.relationshipId"><code>{{ item.sourceRef }}</code><strong>{{ item.relationType }}</strong><code>{{ item.targetRef }}</code></div></div><p v-else>该对象暂未形成已确认关系。</p></section><section><h3>业务实体引用</h3><div v-if="selectedKnowledgeObject.entityReferences.length" class="formal-refs"><div v-for="item in selectedKnowledgeObject.entityReferences" :key="`${item.entityId}-${item.referenceRole}`"><code>{{ item.entityId }}</code><strong>{{ item.referenceRole }}</strong><span>{{ item.evidence.join('、') }}</span></div></div><p v-else>该对象暂未形成业务实体引用。</p></section><section><h3>当前正式版来源证据</h3><div class="formal-evidence"><code v-for="item in selectedKnowledgeObject.evidence" :key="item">{{ item }}</code></div></section><section class="formal-file"><h3>正式知识文件</h3><code>{{ selectedKnowledgeObject.filePath }}</code><span>SHA-256 {{ selectedKnowledgeObject.fileSha256 }}</span></section></div></article>
         </div>
         <div v-else class="build-empty"><IconStack2 size="30" /><h2>还没有形成正式知识对象</h2><p>返回构建流程，选择资料并完成一次知识构建。</p><button type="button" @click="activeView = 'build'">返回构建流程</button></div>
       </section>
@@ -308,14 +349,14 @@ onMounted(() => {
         <div v-if="catalog" class="rules-library-grid">
           <nav class="rules-domain-list"><div><p>SALES DOMAINS</p><h2>销售域</h2></div><button v-for="domain in catalog.domains" :key="domain.code" type="button" :class="{ active: selectedDomainCode === domain.code }" @click="selectDomain(domain.code)"><span>{{ domain.code }}</span><div><strong>{{ domain.name }}</strong><small>{{ domain.question }}</small></div></button></nav>
           <div class="rules-module-list"><div><p>{{ selectedDomain?.code }}</p><h2>{{ selectedDomain?.name }}</h2><span>{{ domainModules.length }}个模块</span></div><button v-for="module in domainModules" :key="module.code" type="button" :class="{ active: selectedModule?.code === module.code }" @click="selectedModuleCode = module.code"><code>{{ module.code }}</code><div><strong>{{ module.name }}</strong><small>{{ module.scope === 'core' ? '核心范围' : '可选范围' }}</small></div></button></div>
-          <article v-if="selectedDomain && selectedModule" class="rules-detail"><header><div><p>{{ selectedModule.code }}</p><h2>{{ selectedModule.name }}</h2></div><span>{{ catalog.version }} / {{ catalog.contentContractVersion }} / {{ catalog.identityContractVersion }}</span></header><div class="rules-detail-scroll"><section class="domain-definition"><b>{{ selectedDomain.question }}</b><strong>{{ selectedDomain.meaning }}</strong><p>{{ selectedDomain.boundary }}</p></section><section><h3>模块定义</h3><p>{{ selectedModule.meaning }}</p></section><section class="rule-highlight"><h3>识别与对象边界</h3><p>{{ selectedModule.contentContract.granularity }}</p></section><section class="contract-decision-grid"><div><h3>纳入条件</h3><p>{{ selectedModule.contentContract.inclusion }}</p></div><div><h3>排除条件</h3><p>{{ selectedModule.contentContract.exclusion }}</p></div></section><section><h3>对象身份字段</h3><div class="rule-type-list"><code v-for="item in selectedModule.identityContract.identityFields" :key="item">{{ item }}</code></div><p class="contract-minimum">只有这些稳定业务字段参与对象身份；摘要、模块码、来源锚点不参与。</p></section><section class="contract-decision-grid"><div><h3>何时归为同一对象</h3><p>{{ selectedModule.identityContract.sameObjectWhen }}</p></div><div><h3>何时必须拆分</h3><p>{{ selectedModule.identityContract.differentObjectWhen }}</p></div></section><section class="contract-decision-grid"><div><h3>归并方式</h3><p>{{ selectedModule.identityContract.mergeStrategy }}</p></div><div><h3>冲突裁决</h3><p>{{ selectedModule.identityContract.conflictRule }}</p></div></section><section><h3>内容必填字段</h3><div v-if="Object.keys(selectedModule.contentContract.requiredFieldsByType).length" class="contract-decision-grid"><div v-for="(fields, objectType) in selectedModule.contentContract.requiredFieldsByType" :key="objectType"><h3>{{ objectType }}</h3><div class="rule-type-list"><code v-for="field in fields" :key="field">{{ field }}</code></div></div></div><div v-else class="rule-type-list"><code v-for="item in selectedModule.contentContract.requiredFields" :key="item">{{ item }}</code></div><div v-if="Object.keys(selectedModule.contentContract.fieldShapesByType).length" class="content-shape-list"><div v-for="(shape, objectType) in selectedModule.contentContract.fieldShapesByType" :key="objectType"><strong>{{ objectType }}</strong><code>{{ shape }}</code></div></div><div v-if="Object.keys(selectedModule.contentContract.itemFieldsByType).length" class="nested-contract"><h3>条目内部必填</h3><div class="contract-decision-grid"><div v-for="(fields, objectType) in selectedModule.contentContract.itemFieldsByType" :key="objectType"><h3>{{ objectType }}</h3><div class="rule-type-list"><code v-for="field in fields" :key="field">{{ field }}</code></div></div></div></div><p v-if="selectedModule.contentContract.allowEmptyFields.length" class="contract-minimum">资料未明确时允许显式为空：{{ selectedModule.contentContract.allowEmptyFields.join('、') }}；不允许模型补造。</p><p class="contract-minimum">最小有效内容量：{{ selectedModule.contentContract.minimumContentChars }}字符；仅有summary不通过质量校验。</p></section><section><h3>允许形成的对象类型</h3><div class="rule-type-list"><code v-for="item in selectedModule.objectTypes" :key="item">{{ item }}</code></div></section><section class="contract-example"><div><h3>正例</h3><p>{{ selectedModule.contentContract.positiveExample }}</p></div><div><h3>反例</h3><p>{{ selectedModule.contentContract.negativeExample }}</p></div></section><section><h3>适用资料与使用方</h3><p>{{ selectedModule.sources.join('、') }}</p><p class="contract-consumers">用于：{{ selectedModule.consumers.join('、') }}</p></section></div></article>
+          <article v-if="selectedDomain && selectedModule" class="rules-detail"><header><div><p>{{ selectedModule.code }}</p><h2>{{ selectedModule.name }}</h2></div><span>{{ catalog.version }} / {{ catalog.contentContractVersion }} / {{ catalog.identityContractVersion }}</span></header><div class="rules-detail-scroll"><section class="domain-definition"><b>{{ selectedDomain.question }}</b><strong>{{ selectedDomain.meaning }}</strong><p>{{ selectedDomain.boundary }}</p></section><section><h3>模块定义</h3><p>{{ selectedModule.meaning }}</p></section><section class="rule-highlight"><h3>KnowledgeObject 边界</h3><p>{{ selectedModule.contentContract.granularity }}</p></section><section class="contract-decision-grid"><div><h3>纳入条件</h3><p>{{ selectedModule.contentContract.inclusion }}</p></div><div><h3>排除条件</h3><p>{{ selectedModule.contentContract.exclusion }}</p></div></section><section><h3>对象身份字段</h3><div class="rule-type-list"><code v-for="item in selectedModule.identityContract.identityFields" :key="item">{{ item }}</code></div><p class="contract-minimum">只有这些稳定业务字段参与对象身份；摘要、模块码、来源锚点不参与。</p></section><section class="contract-decision-grid"><div><h3>何时归为同一对象</h3><p>{{ selectedModule.identityContract.sameObjectWhen }}</p></div><div><h3>何时必须拆分</h3><p>{{ selectedModule.identityContract.differentObjectWhen }}</p></div></section><section class="contract-decision-grid"><div><h3>归并方式</h3><p>{{ selectedModule.identityContract.mergeStrategy }}</p></div><div><h3>冲突裁决</h3><p>{{ selectedModule.identityContract.conflictRule }}</p></div></section><section><h3>对象合同字段</h3><p class="contract-minimum">objectType 只选择 KnowledgeObject 的字段与校验合同，不形成新的知识层级。</p><div v-if="Object.keys(selectedModule.contentContract.requiredFieldsByType).length" class="contract-decision-grid"><div v-for="(fields, objectType) in selectedModule.contentContract.requiredFieldsByType" :key="objectType"><h3>{{ objectType }}</h3><div class="rule-type-list"><code v-for="field in fields" :key="field">{{ field }}</code></div></div></div><div v-else class="rule-type-list"><code v-for="item in selectedModule.contentContract.requiredFields" :key="item">{{ item }}</code></div><div v-if="Object.keys(selectedModule.contentContract.fieldShapesByType).length" class="content-shape-list"><div v-for="(shape, objectType) in selectedModule.contentContract.fieldShapesByType" :key="objectType"><strong>{{ objectType }}</strong><code>{{ shape }}</code></div></div><div v-if="Object.keys(selectedModule.contentContract.itemFieldsByType).length" class="nested-contract"><h3>条目内部必填</h3><div class="contract-decision-grid"><div v-for="(fields, objectType) in selectedModule.contentContract.itemFieldsByType" :key="objectType"><h3>{{ objectType }}</h3><div class="rule-type-list"><code v-for="field in fields" :key="field">{{ field }}</code></div></div></div></div><div class="content-threshold-list"><div v-for="(minimum, objectType) in selectedModule.contentContract.minimumContentCharsByType" :key="objectType"><strong>{{ objectType }}</strong><span>最小 {{ minimum }} 字符</span><small v-if="selectedModule.contentContract.allowEmptyFieldsByType[objectType]?.length">可空：{{ selectedModule.contentContract.allowEmptyFieldsByType[objectType].join('、') }}</small></div></div><p class="contract-minimum">仅有 summary 不通过质量校验；可空字段只对对应对象合同生效。</p></section><section><h3>本模块可采用的对象合同</h3><div class="rule-type-list"><code v-for="item in selectedModule.objectTypes" :key="item">{{ item }}</code></div></section><section class="contract-example"><div><h3>正例</h3><p>{{ selectedModule.contentContract.positiveExample }}</p></div><div><h3>反例</h3><p>{{ selectedModule.contentContract.negativeExample }}</p></div></section><section><h3>适用资料与使用方</h3><p>{{ selectedModule.sources.join('、') }}</p><p class="contract-consumers">用于：{{ selectedModule.consumers.join('、') }}</p></section></div></article>
         </div>
       </section>
 
       <section v-else class="run-evidence-view">
         <div v-if="identification" class="evidence-layout">
-          <aside class="call-list"><div><p>MODEL EXCHANGES</p><h2>模型交互</h2></div><button v-for="(call, index) in identification.modelCalls" :key="`${call.attempt}-${call.purpose}`" type="button" :class="{ active: selectedCallIndex === index }" @click="selectedCallIndex = index"><span>{{ index + 1 }}</span><div><strong>{{ callPurposeLabel(call.purpose) }}</strong><small>{{ call.segment || '全文' }} · {{ formatDuration(call.durationMs) }}</small></div></button></aside>
-          <article v-if="selectedCall" class="prompt-review"><header><div><p>{{ identification.model }} · {{ selectedCall.promptTokens + selectedCall.completionTokens }} tokens</p><h2>模型输入与响应</h2></div><span>{{ selectedCall.status === 'completed' ? '完成' : '失败' }}</span></header><div class="prompt-sections"><section><h3>系统规则</h3><pre>{{ selectedCall.systemPrompt || '旧运行未记录系统规则。' }}</pre></section><section><h3>资料输入</h3><pre>{{ selectedCall.userPrompt || '旧运行未记录资料输入。' }}</pre></section><section><h3>模型响应</h3><pre>{{ prettyJson(selectedCall.rawOutput || '') }}</pre></section></div></article>
+          <aside class="call-list"><div><p>PROCESS & CALLS</p><h2>处理流程</h2></div><section v-for="stage in identification.processingStages" :key="stage.key" class="evidence-stage"><header><span :class="stage.actor">{{ stage.actor === 'model' ? '模型' : '代码' }}</span><div><strong>{{ stage.name }}</strong><small>{{ formatDuration(stage.durationMs) }}</small></div></header><p>{{ stage.detail }}</p><button v-for="item in callsForStage(stage)" :key="item.call.callId || `${item.call.attempt}-${item.call.purpose}`" type="button" :class="{ active: selectedCallIndex === item.index }" @click="selectedCallIndex = item.index"><span>{{ item.call.callId || item.index + 1 }}</span><div><strong>{{ callPurposeLabel(item.call.purpose) }}</strong><small>{{ item.call.segment || '全文' }} · {{ item.call.promptTokens + item.call.completionTokens }} tokens</small></div></button></section><section v-if="repairCalls.length" class="evidence-stage"><header><span class="model">模型</span><div><strong>结构修复与重试</strong><small>按失败触发</small></div></header><button v-for="item in repairCalls" :key="item.call.callId || item.index" type="button" :class="{ active: selectedCallIndex === item.index }" @click="selectedCallIndex = item.index"><span>{{ item.call.callId || item.index + 1 }}</span><div><strong>{{ callPurposeLabel(item.call.purpose) }}</strong><small>{{ item.call.retryOf ? `重试 ${item.call.retryOf}` : '定点修复' }}</small></div></button></section></aside>
+          <article v-if="selectedCall" class="prompt-review"><header><div><p>{{ identification.model }} · {{ selectedCall.callId || `调用 ${selectedCallIndex + 1}` }}</p><h2>{{ callPurposeLabel(selectedCall.purpose) }}</h2></div><span>{{ selectedCall.status === 'completed' ? '完成' : '失败' }}</span></header><div class="call-facts"><span>输入 {{ selectedCall.promptTokens }} tokens</span><span>输出 {{ selectedCall.completionTokens }} tokens</span><span>耗时 {{ formatDuration(selectedCall.durationMs) }}</span><span>范围 {{ selectedCall.segment || '全文' }}</span><span v-if="selectedCall.retryOf">重试自 {{ selectedCall.retryOf }}</span><span v-if="selectedCall.finishReason">结束原因 {{ selectedCall.finishReason }}</span></div><p class="call-flow">结果去向：{{ callResultFlow(selectedCall.purpose) }}</p><div class="prompt-sections"><section><h3>模型任务与规则</h3><pre>{{ selectedCall.systemPrompt || '旧运行未记录系统规则。' }}</pre></section><section><h3>本次输入范围</h3><pre>{{ selectedCall.userPrompt || '旧运行未记录资料输入。' }}</pre></section><section><h3>模型原始输出</h3><pre>{{ prettyJson(selectedCall.rawOutput || selectedCall.error || '') }}</pre></section></div></article>
           <aside class="run-summary"><section><span>规则版本</span><strong>{{ identification.catalogVersion }}</strong></section><section><span>提示词版本</span><strong>{{ identification.promptVersion }}</strong></section><section><span>输出合同</span><strong>{{ identification.schemaVersion }}</strong></section><section><span>中间主张</span><strong>{{ identification.atomicClaims.length }}条有效 / {{ identification.rejectedAtomicClaims.length }}条拒绝</strong></section><section v-if="identification.qualityReport"><span>Gold 对齐</span><strong>{{ identification.qualityReport.groupsMet }}/{{ identification.qualityReport.groupCount }}组 · 召回代理 {{ Math.round(identification.qualityReport.objectRecallProxy * 100) }}%</strong></section><section><span>模型参数</span><strong>temperature {{ identification.modelConfiguration?.temperature ?? '-' }}<br>max tokens {{ identification.modelConfiguration?.maxOutputTokens ?? '-' }}</strong></section><section><span>执行参数</span><strong>超时 {{ identification.modelConfiguration?.timeoutSeconds ?? '-' }}s · 重试 {{ identification.modelConfiguration?.maxRetries ?? '-' }}次<br>分段 {{ identification.modelConfiguration?.documentMaxChars ?? '-' }}字 · 并发 {{ identification.modelConfiguration?.maxConcurrency ?? '-' }}</strong></section><section><span>耗时</span><strong>{{ formatDuration(identification.durationMs) }}</strong></section><section><span>识别结果</span><strong>{{ identification.candidates.length }}项候选 / {{ identification.rejectedCandidates.length }}项拒绝</strong></section></aside>
         </div>
         <div v-else class="build-empty"><IconCode size="30" /><h2>还没有运行证据</h2><p>完成一次知识构建后，可查看模型输入、规则、资料内容和原始响应。</p><button type="button" @click="activeView = 'build'">返回构建流程</button></div>

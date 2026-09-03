@@ -162,6 +162,9 @@ export type UnresolvedItem = {
 }
 
 export type ModelCallTrace = {
+  callId: string
+  stageId: string
+  retryOf: string | null
   attempt: number
   purpose: ModelCallPurpose
   status: ModelCallStatus
@@ -182,6 +185,8 @@ export type ProcessingStage = {
   status: ProcessingStageStatus
   durationMs: number
   detail: string
+  actor: 'model' | 'code'
+  modelCallIds: string[]
 }
 
 export type StorageImpact = {
@@ -331,6 +336,24 @@ export type FormalKnowledgeObject = {
   fileSha256: string
 }
 
+export type FormalKnowledgeRelationship = {
+  relationshipId: string
+  relationType: string
+  sourceRef: string
+  sourceKind: 'knowledge_object' | 'business_entity'
+  sourceRevision: number | null
+  targetRef: string
+  targetKind: 'knowledge_object' | 'business_entity'
+  targetRevision: number | null
+  direction: 'forward'
+  inverseLabel: string
+  scope: Record<string, unknown>
+  effectivePeriod: Record<string, unknown>
+  evidence: string[]
+  status: 'active'
+  provenance: Record<string, string>
+}
+
 export type KnowledgeFormationStage = {
   key: 'entity_resolution' | 'knowledge_merge' | 'formal_write'
   name: string
@@ -345,6 +368,7 @@ export type KnowledgeFormationResult = {
   status: 'completed' | 'review_required' | 'failed'
   entities: ResolvedBusinessEntity[]
   knowledgeObjects: FormalKnowledgeObject[]
+  relationships: FormalKnowledgeRelationship[]
   stages: KnowledgeFormationStage[]
   createdCount: number
   updatedCount: number
@@ -374,7 +398,9 @@ export type KnowledgeModule = {
     itemFieldsByType: Record<string, string[]>
     fieldShapesByType: Record<string, string>
     allowEmptyFields: string[]
+    allowEmptyFieldsByType: Record<string, string[]>
     minimumContentChars: number
+    minimumContentCharsByType: Record<string, number>
     granularity: string
     inclusion: string
     exclusion: string
@@ -383,6 +409,7 @@ export type KnowledgeModule = {
   }
   identityContract: {
     identityFields: string[]
+    identityFieldsByType: Record<string, string[]>
     sameObjectWhen: string
     differentObjectWhen: string
     mergeStrategy: string
