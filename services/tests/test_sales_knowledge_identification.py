@@ -7,6 +7,7 @@ from app.features.sales_knowledge_identification.catalog import MODULE_BY_OBJECT
 from app.features.sales_knowledge_identification.claims import (
     resolve_verbatim_claim_references,
     supplement_explicit_internal_term_claims,
+    supplement_numbered_qa_claims,
     supplement_structured_table_claims,
     validate_atomic_claims,
 )
@@ -26,6 +27,9 @@ from app.features.sales_knowledge_identification.models import (
     ModelCompletion,
     ModelRequest,
     SourceAnchor,
+)
+from app.features.sales_knowledge_identification.prompt_builder import (
+    build_document_object_planning_request,
 )
 from app.features.sales_knowledge_identification.segmenter import segment_document
 from app.features.sales_knowledge_identification.service import (
@@ -50,8 +54,10 @@ from app.features.sales_knowledge_identification.service import (
     _object_granularity_metrics,
     _plan_satisfies_primary_claim_role,
     _prune_unattributed_d33_inferences,
+    _split_composite_product_version_plan,
     _supplement_exact_match_claim_usage,
     _unclaimed_source_anchor_inputs,
+    _validate_content_claim_usage,
     _validate_object_plans,
 )
 
@@ -373,6 +379,17 @@ def test_compact_claim_supports_multiple_verbatim_evidence_spans() -> None:
 
     assert payload["claims"][0]["statement"] == "第一段原文；附加原文；第二段原文"
     assert len(payload["claims"][0]["evidence"]) == 3
+
+
+def test_integrated_planning_keeps_versions_strategies_and_qa_boundaries() -> None:
+    request = build_document_object_planning_request(
+        _package("DP-PLAN", "# 资料\n\n产品与问答"), max_candidates=20
+    )
+
+    assert "不同版本存在不同价格" in request.system_prompt
+    assert "每个组合形成独立 SALES_STRATEGY" in request.system_prompt
+    assert "每个问题及答案分别形成 qa claim" in request.system_prompt
+    assert "最多\n20 个" in request.system_prompt
 
 
 def test_claim_validation_recovers_exact_span_across_markdown_table_formatting() -> None:
@@ -1286,6 +1303,40 @@ def test_invalid_claim_usage_path_cannot_count_as_written_content() -> None:
         item.claim_id == "CL1" and "claimUsage" in item.reason
         for item in result.unresolved_items
     )
+
+
+def test_valid_claim_usage_survives_an_extra_metadata_path() -> None:
+    package_id = "DP-MIXED-USAGE"
+    anchor = f"{package_id}#page-1"
+    content = {
+        "facts": [{"description": "事实一"}],
+        "factReferences": ["CL1"],
+    }
+    usage, unresolved = _validate_content_claim_usage(
+        [
+        {
+            "claimId": "CL1",
+            "role": "primary",
+            "contentPaths": [
+                "$.facts[0].description",
+                "$.factReferences[0]",
+            ],
+            "explanation": "事实已写入正文，并附带来源编号",
+        }
+        ],
+        content,
+        {
+            "CL1": AtomicClaim.model_validate(
+                _claim(anchor, "事实一", claim_id="CL1")
+            )
+        },
+        "C1",
+    )
+
+    assert unresolved == []
+    assert usage[0].content_paths == [
+        "$.facts[0].description"
+    ]
 
 
 def test_two_stage_identification_validates_catalog_and_source_claims() -> None:
@@ -2358,6 +2409,102 @@ def test_structured_table_completeness_adds_missing_qa_and_inherited_objection()
     assert supplemented[-1].evidence[1].source_text == "进入服务页发起问诊。"
 
 
+def test_numbered_qa_completeness_adds_only_missing_pairs() -> None:
+    package = _package(
+        "DP-NUMBERED-QA",
+        (
+            "## 常见问答\n\n<!-- source-anchor: DP-NUMBERED-QA#page-1 -->\n\n"
+            "Q1：如何开通服务\nA1：进入服务页提交申请。\n"
+            "Q2：多久可以使用\nA2：审核通过后即可使用。"
+        ),
+        [SourceAnchor(anchor_id="DP-NUMBERED-QA#page-1", kind="page")],
+    )
+    existing = AtomicClaim.model_validate(
+        {
+            **_claim("DP-NUMBERED-QA#page-1", "如何开通服务", kind="qa"),
+            "attributes": {
+                "question": "如何开通服务",
+                "answer": "进入服务页提交申请。",
+            },
+        }
+    )
+
+    supplemented = supplement_numbered_qa_claims(package, [existing])
+
+    assert [claim.attributes["question"] for claim in supplemented] == [
+        "如何开通服务",
+        "多久可以使用",
+    ]
+    assert supplemented[-1].attributes["answer"] == "审核通过后即可使用。"
+
+
+def test_numbered_qa_completeness_enriches_matching_model_claim() -> None:
+    package = _package(
+        "DP-QA-ENRICH",
+        (
+            "## 常见问答\n\n<!-- source-anchor: DP-QA-ENRICH#page-1 -->\n\n"
+            "Q1：如何开通服务\nA1：进入服务页提交申请。"
+        ),
+        [SourceAnchor(anchor_id="DP-QA-ENRICH#page-1", kind="page")],
+    )
+    existing = AtomicClaim.model_validate(
+        _claim(
+            "DP-QA-ENRICH#page-1",
+            "Q1：如何开通服务",
+            kind="qa",
+            claim_id="CL7",
+        )
+    )
+
+    supplemented = supplement_numbered_qa_claims(package, [existing])
+
+    assert [claim.claim_id for claim in supplemented] == ["CL7"]
+    assert supplemented[0].attributes == {
+        "question": "如何开通服务",
+        "answer": "进入服务页提交申请。",
+    }
+
+
+def test_numbered_qa_completeness_replaces_combined_model_claim() -> None:
+    package = _package(
+        "DP-QA-SPLIT",
+        (
+            "## 常见问答\n\n<!-- source-anchor: DP-QA-SPLIT#page-1 -->\n\n"
+            "Q1：如何开通服务\nA1：进入服务页提交申请。\n"
+            "Q2：多久可以使用\nA2：审核通过后即可使用。"
+        ),
+        [SourceAnchor(anchor_id="DP-QA-SPLIT#page-1", kind="page")],
+    )
+    combined = AtomicClaim.model_validate(
+        _claim(
+            "DP-QA-SPLIT#page-1",
+            "Q1：如何开通服务；Q2：多久可以使用",
+            kind="qa",
+            claim_id="CL9",
+        )
+    )
+
+    supplemented = supplement_numbered_qa_claims(package, [combined])
+
+    assert len(supplemented) == 2
+    assert all(claim.claim_id.startswith("STRUCTURED-QA-") for claim in supplemented)
+
+
+def test_process_claim_derives_explicit_arrow_steps() -> None:
+    package = _package("DP-PROCESS", "登录 -> 选择服务 -> 提交申请")
+    raw = _claim(
+        "DP-PROCESS#page-1",
+        "登录 -> 选择服务 -> 提交申请",
+        kind="process",
+    )
+    raw["statement"] = "登录 -> 选择服务 -> 提交申请"
+
+    accepted, rejected = validate_atomic_claims([raw], package)
+
+    assert rejected == []
+    assert accepted[0].attributes["steps"] == ["登录", "选择服务", "提交申请"]
+
+
 def test_structured_table_completeness_adds_explicit_strategy_column() -> None:
     package = _package(
         "DP-STRATEGY",
@@ -2522,6 +2669,52 @@ def test_content_realization_cannot_change_planned_identity_or_classification() 
     assert result.candidates[0].source_claim_ids == ["CL1"]
     assert result.candidates[0].relations == []
     assert result.normalizations[-1].field == "relations"
+
+
+def test_invalid_content_is_recompiled_once_without_replanning() -> None:
+    candidate = _candidate("D1.1", "PRODUCT_FACT", ["CL1"], candidate_id="P1")
+
+    class RepairingContentGateway(TwoStageGateway):
+        realization_calls = 0
+
+        def complete(self, request: ModelRequest) -> ModelCompletion:
+            if "内容编制器" not in request.system_prompt:
+                return super().complete(request)
+            self.realization_calls += 1
+            if self.realization_calls > 1:
+                return super().complete(request)
+            self.requests.append(request)
+            return ModelCompletion(
+                provider="test-provider",
+                model="test-model",
+                content=json.dumps(
+                    {
+                        "realizations": [
+                            {
+                                "planId": "P1",
+                                "content": {"subject": "测试产品"},
+                                "entityMentions": [],
+                                "relations": [],
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+
+    result = SalesKnowledgeIdentificationService(
+        gateway=RepairingContentGateway(
+            [_claim("DP-RECOMPILE#page-1", "可信事实")],
+            {"candidates": [candidate], "weakSignals": [], "unresolvedItems": []},
+        )
+    ).identify(_package("DP-RECOMPILE", "# 示例\n\n可信事实。"))
+
+    assert result.call_count == 4
+    assert [item.candidate_id for item in result.candidates] == ["P1"]
+    assert result.rejected_candidates == []
+    assert not any(
+        item.reason.startswith("候选被拒绝：") for item in result.unresolved_items
+    )
 
 
 def test_granularity_gate_splits_objections_sharing_one_source_anchor() -> None:
@@ -2751,6 +2944,30 @@ def test_granularity_gate_keeps_related_decision_rules_in_one_object() -> None:
     assert len(split) == 1
     assert split[0].source_claim_ids == ["CL1", "CL2"]
     assert split[0].identity_hints["triggerContext"] == "名单更新"
+
+
+def test_composite_product_versions_split_into_independent_identities() -> None:
+    plan = CandidateObjectPlan(
+        plan_id="P1",
+        title="产品权益",
+        domain="D1",
+        module="D1.1",
+        object_type="PRODUCT_FACT",
+        identity_hints={
+            "subject": "示例产品",
+            "versionScope": "基础版 vs 专业版",
+            "factTheme": "权益",
+        },
+        source_claim_ids=["CL1"],
+    )
+
+    split = _split_composite_product_version_plan(plan)
+
+    assert [item.identity_hints["versionScope"] for item in split] == [
+        "基础版",
+        "专业版",
+    ]
+    assert [item.plan_id for item in split] == ["P1-V1", "P1-V2"]
 
 
 def test_coverage_repair_augments_existing_plan_and_merges_new_identity() -> None:

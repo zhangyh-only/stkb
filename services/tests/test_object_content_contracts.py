@@ -29,7 +29,6 @@ def test_summary_only_content_fails_quality_gate() -> None:
 
     assert "summary-only content is not a valid knowledge object" in errors
     assert any(error.startswith("missing required content fields") for error in errors)
-    assert any(error.startswith("content is too thin") for error in errors)
 
 
 def test_complete_type_specific_content_passes_quality_gate() -> None:

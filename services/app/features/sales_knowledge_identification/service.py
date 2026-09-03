@@ -19,6 +19,7 @@ from .catalog import (
 from .claims import (
     resolve_verbatim_claim_references,
     supplement_explicit_internal_term_claims,
+    supplement_numbered_qa_claims,
     supplement_structured_table_claims,
     validate_atomic_claims,
 )
@@ -104,7 +105,7 @@ class SalesKnowledgeIdentificationService:
         self,
         gateway: ModelGateway,
         max_retries: int = 0,
-        max_candidates: int = 10,
+        max_candidates: int = 20,
         document_max_chars: int = 16000,
         max_concurrency: int = 3,
         provider: str = "unknown",
@@ -168,6 +169,9 @@ class SalesKnowledgeIdentificationService:
             rejected_atomic_claims.extend(rejected)
 
         atomic_claims = supplement_structured_table_claims(
+            document_package, atomic_claims
+        )
+        atomic_claims = supplement_numbered_qa_claims(
             document_package, atomic_claims
         )
         atomic_claims = supplement_explicit_internal_term_claims(
@@ -404,7 +408,73 @@ class SalesKnowledgeIdentificationService:
             object_results, planning_weak_inputs, planning_unresolved_inputs
         )
 
-        completion = _last_completion(object_results, planning_result, discovery_results)
+        content_repair_results: list[Any] = []
+        repairable_ids = {
+            item.candidate_id
+            for item in rejected_candidates
+            if _is_repairable_content_rejection(item)
+        }
+        if repairable_ids and len(model_calls) < 4:
+            repair_plans = [
+                plan for plan in object_plans if plan.plan_id in repairable_ids
+            ]
+            repair_groups = _group_object_plans(
+                repair_plans,
+                atomic_claims,
+                max(1, len(repair_plans)),
+            )
+            content_repair_results, repair_failures = self._realize_candidate_objects(
+                document_package.document_package_id, repair_groups
+            )
+            model_calls.extend(_renumber_calls(content_repair_results, model_calls))
+            if not repair_failures:
+                (
+                    repaired_candidates,
+                    repaired_rejections,
+                    repaired_auxiliary,
+                    repaired_normalizations,
+                    _repaired_weak,
+                    _repaired_unresolved,
+                    _repaired_coverage,
+                ) = self._validate_object_results(content_repair_results, [], [])
+                accepted_candidates.extend(repaired_candidates)
+                repaired_ids = {
+                    candidate.candidate_id for candidate in repaired_candidates
+                }
+                repaired_claim_ids = {
+                    claim_id
+                    for candidate in repaired_candidates
+                    for claim_id in candidate.source_claim_ids
+                }
+                rejected_candidates = [
+                    item
+                    for item in rejected_candidates
+                    if item.candidate_id not in repairable_ids
+                ]
+                rejected_candidates.extend(
+                    item
+                    for item in repaired_rejections
+                    if item.candidate_id not in repaired_ids
+                )
+                rejected_auxiliary_items.extend(repaired_auxiliary)
+                normalizations.extend(repaired_normalizations)
+                unresolved_items = [
+                    item
+                    for item in unresolved_items
+                    if not (
+                        item.claim_id in repaired_claim_ids
+                        and item.reason.startswith("候选被拒绝：")
+                    )
+                ]
+                for candidate in repaired_candidates:
+                    coverage[candidate.module] = "hit"
+
+        completion = _last_completion(
+            content_repair_results,
+            object_results,
+            planning_result,
+            discovery_results,
+        )
         validation_duration_ms = round((perf_counter() - validation_started) * 1000)
         granularity_metrics = _object_granularity_metrics(object_plans, atomic_claims)
         discovery_call_purpose = (
@@ -1053,6 +1123,14 @@ class SalesKnowledgeIdentificationService:
                 source_claims=source_claims,
                 existing_usage=valid_claim_usage,
             )
+            used_after_supplement = {
+                item.claim_id for item in valid_claim_usage
+            }
+            usage_unresolved = [
+                item
+                for item in usage_unresolved
+                if _auxiliary_claim_id(item) not in used_after_supplement
+            ]
             if valid_claim_usage != original_claim_usage:
                 normalizations.append(
                     CandidateNormalization(
@@ -2723,12 +2801,12 @@ def _validate_content_claim_usage(
                 invalid_paths.append(path)
             else:
                 expanded_paths.extend(expanded)
-        if not invalid_paths:
+        if expanded_paths:
             usage = usage.model_copy(
                 update={"content_paths": list(dict.fromkeys(expanded_paths))}
             )
         key = (usage.claim_id, tuple(usage.content_paths))
-        if claim is not None and not invalid_paths and key not in seen_claim_paths:
+        if claim is not None and expanded_paths and key not in seen_claim_paths:
             accepted.append(usage)
             seen_claim_paths.add(key)
             continue
@@ -3022,7 +3100,6 @@ def _claim_searchable_text(claim: AtomicClaim) -> str:
         claim.statement,
         claim.subject,
         json.dumps(claim.attributes, ensure_ascii=False, sort_keys=True),
-        *(evidence.source_text for evidence in claim.evidence),
         *(evidence.exact_quote for evidence in claim.evidence),
     ]
     return _normalize_match_text(" ".join(values))
@@ -3315,6 +3392,11 @@ def _enforce_plan_granularity(
     plans: list[CandidateObjectPlan], claims: list[AtomicClaim]
 ) -> list[CandidateObjectPlan]:
     claim_by_id = {claim.claim_id: claim for claim in claims}
+    plans = [
+        split_plan
+        for plan in plans
+        for split_plan in _split_composite_product_version_plan(plan)
+    ]
     plans = [_normalize_product_version_plan(plan) for plan in plans]
     version_fact_groups: dict[tuple[str, str], list[CandidateObjectPlan]] = {}
     for plan in plans:
@@ -3482,6 +3564,37 @@ def _enforce_plan_granularity(
     return enforced
 
 
+def _split_composite_product_version_plan(
+    plan: CandidateObjectPlan,
+) -> list[CandidateObjectPlan]:
+    if plan.object_type not in {"PRODUCT_FACT", "PRODUCT_VERSION_FACT"}:
+        return [plan]
+    version_scope = plan.identity_hints.get("versionScope")
+    if not isinstance(version_scope, str):
+        return [plan]
+    versions = [
+        item.strip()
+        for item in re.split(r"(?:/|／|、|\bvs\.?\b|与|和)", version_scope, flags=re.I)
+        if item.strip()
+    ]
+    if len(versions) < 2 or not all("版" in version for version in versions):
+        return [plan]
+    return [
+        plan.model_copy(
+            update={
+                "plan_id": f"{plan.plan_id}-V{index}",
+                "title": f"{version}{plan.title}",
+                "object_type": "PRODUCT_VERSION_FACT",
+                "identity_hints": {
+                    **plan.identity_hints,
+                    "versionScope": version,
+                },
+            }
+        )
+        for index, version in enumerate(versions, start=1)
+    ]
+
+
 def _normalized_version_scope(value: Any) -> str:
     if not isinstance(value, str):
         return ""
@@ -3601,6 +3714,18 @@ def _object_granularity_metrics(
         source_anchors_split_across_objects=sum(
             len(plan_ids) > 1 for plan_ids in anchor_to_plans.values()
         ),
+    )
+
+
+def _is_repairable_content_rejection(item: RejectedCandidate) -> bool:
+    prefixes = (
+        "missing required content fields",
+        "invalid content field types",
+        "content item",
+        "List should have at least",
+    )
+    return bool(item.reasons) and all(
+        reason.startswith(prefixes) for reason in item.reasons
     )
 
 

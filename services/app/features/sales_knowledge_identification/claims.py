@@ -14,6 +14,10 @@ INTERNAL_TERM_DEFINITION = re.compile(
     r"(?P<term>[A-Za-z0-9][A-Za-z0-9_-]{1,19})的"
     r"(?P<kind>电话|热线|代码|编号|标识)是(?P<definition>[^，。；\n]{2,40})"
 )
+NUMBERED_QA = re.compile(
+    r"(?ms)^Q(?P<number>\d+)[：:]\s*(?P<question>.+?)\n"
+    r"A(?P=number)[：:]\s*(?P<answer>.+?)(?=^Q\d+[：:]|\Z)"
+)
 
 
 def extract_anchor_sections(document_package: DocumentPackage) -> dict[str, str]:
@@ -129,6 +133,7 @@ def validate_atomic_claims(
         accepted.append(
             claim.model_copy(
                 update={
+                    "attributes": _normalize_explicit_claim_attributes(claim),
                     "module_hints": valid_module_hints,
                     "evidence": resolved_evidence,
                 }
@@ -329,6 +334,106 @@ def supplement_structured_table_claims(
                 )
             )
     return supplemented
+
+
+def supplement_numbered_qa_claims(
+    document_package: DocumentPackage,
+    claims: list[AtomicClaim],
+) -> list[AtomicClaim]:
+    """Recover explicit Qn/An pairs omitted by probabilistic discovery."""
+    supplemented = list(claims)
+    sequence = 0
+    for anchor_id, section in extract_anchor_sections(document_package).items():
+        numbered_pairs = list(NUMBERED_QA.finditer(section))
+        if len(numbered_pairs) > 1:
+            supplemented = [
+                claim
+                for claim in supplemented
+                if not (
+                    claim.claim_kind == "qa"
+                    and any(item.anchor_id == anchor_id for item in claim.evidence)
+                    and len(re.findall(r"Q\d+[：:]", claim.statement)) > 1
+                )
+            ]
+        for match in numbered_pairs:
+            raw_question = match.group("question").strip()
+            raw_answer = match.group("answer").strip()
+            question = _compact_source_text(raw_question)
+            answer = _compact_source_text(raw_answer)
+            if not question or not answer:
+                continue
+            matching_index = next(
+                (
+                    index
+                    for index, claim in enumerate(supplemented)
+                    if claim.claim_kind == "qa"
+                    and any(item.anchor_id == anchor_id for item in claim.evidence)
+                    and question
+                    in _compact_source_text(
+                        " ".join(
+                            [
+                                claim.statement,
+                                str(claim.attributes.get("question", "")),
+                            ]
+                        )
+                    )
+                ),
+                None,
+            )
+            evidence = [
+                ClaimEvidence(
+                    anchor_id=anchor_id,
+                    exact_quote=f"{raw_question}\n{raw_answer}",
+                    source_text=section,
+                )
+            ]
+            if matching_index is not None:
+                current = supplemented[matching_index]
+                supplemented[matching_index] = current.model_copy(
+                    update={
+                        "attributes": {
+                            **current.attributes,
+                            "question": question,
+                            "answer": answer,
+                        },
+                        "module_hints": list(
+                            dict.fromkeys([*current.module_hints, "D4.2"])
+                        ),
+                        "evidence": evidence,
+                    }
+                )
+                continue
+            sequence += 1
+            supplemented.append(
+                AtomicClaim(
+                    claim_id=f"STRUCTURED-QA-{sequence}",
+                    claim_kind="qa",
+                    statement=f"标准问答：{question}",
+                    subject=question,
+                    attributes={"question": question, "answer": answer},
+                    module_hints=["D4.2"],
+                    evidence=evidence,
+                )
+            )
+    return supplemented
+
+
+def _compact_source_text(value: str) -> str:
+    return re.sub(r"\s*\n\s*", "", value).strip()
+
+
+def _normalize_explicit_claim_attributes(claim: AtomicClaim) -> dict[str, Any]:
+    attributes = dict(claim.attributes)
+    if claim.claim_kind != "process" or isinstance(attributes.get("steps"), list):
+        return attributes
+    steps = [
+        step.strip()
+        for step in re.split(r"\s*(?:->|→)\s*", claim.statement)
+        if step.strip()
+    ]
+    if len(steps) >= 2:
+        attributes["steps"] = steps
+    return attributes
 
 
 def supplement_explicit_internal_term_claims(

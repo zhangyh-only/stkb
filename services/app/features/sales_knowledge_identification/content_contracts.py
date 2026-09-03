@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -341,12 +340,6 @@ def validate_candidate_content(module: str, object_type: str, content: dict[str,
                     f"resolutionElements item {index} repeats the customer expression "
                     "instead of a source-backed resolution detail"
                 )
-    serialized = json.dumps(content, ensure_ascii=False, sort_keys=True)
-    if len(serialized) < contract.minimum_content_chars:
-        errors.append(
-            f"content is too thin for {module}: {len(serialized)} < "
-            f"{contract.minimum_content_chars} chars"
-        )
     if set(content) == {"summary"}:
         errors.append("summary-only content is not a valid knowledge object")
     return errors
@@ -407,7 +400,7 @@ def render_content_contracts_for_prompt(
                         _render_allow_empty_fields(object_type)
                         for object_type in item.object_types
                     ),
-                    "- 分对象合同最小内容量："
+                    "- 分对象合同内容量参考（不单独作为拒绝条件）："
                     + "；".join(
                         f"{object_type}={CONTENT_CONTRACT_BY_OBJECT_TYPE[object_type].minimum_content_chars}字符"
                         for object_type in item.object_types
