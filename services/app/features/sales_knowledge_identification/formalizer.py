@@ -133,8 +133,10 @@ class KnowledgeObjectFormationService:
         existing_entities: set[str],
         existing_objects: dict[str, ExistingKnowledgeObjectState],
         existing_lineages: dict[str, str] | None = None,
+        existing_document_object_ids: set[str] | None = None,
     ) -> KnowledgeFormationResult:
         existing_lineages = existing_lineages or {}
+        existing_document_object_ids = existing_document_object_ids or set()
         quality_blocked_candidate_ids = [
             candidate.candidate_id
             for candidate in identification.candidates
@@ -208,6 +210,14 @@ class KnowledgeObjectFormationService:
         review_required_count = sum(
             item.action == "review_required" for item in knowledge_objects
         )
+        current_object_ids = set(groups)
+        identity_set_changed = bool(
+            existing_document_object_ids
+            and current_object_ids != existing_document_object_ids
+        )
+        superseded_count = len(existing_document_object_ids - current_object_ids)
+        if identity_set_changed:
+            review_required_count = max(review_required_count, len(current_object_ids))
         requires_review = bool(review_required_count or quality_blocked_candidate_ids)
         if not requires_review:
             for item in knowledge_objects:
@@ -247,7 +257,7 @@ class KnowledgeObjectFormationService:
                     name="正式知识写入",
                     status="pending" if requires_review else "completed",
                     detail=(
-                        f"有 {review_required_count} 个既有对象存在正文差异，"
+                        f"有 {review_required_count} 项正文或身份集合变化，"
                         f"{len(quality_blocked_candidate_ids)} 个候选未通过追溯门槛；"
                         "评审前不改写正式知识"
                         if requires_review
@@ -260,6 +270,7 @@ class KnowledgeObjectFormationService:
             updated_count=updated_count,
             reused_count=reused_count,
             review_required_count=review_required_count,
+            superseded_count=superseded_count,
             quality_blocked_candidate_ids=quality_blocked_candidate_ids,
             quality_blocked_count=len(quality_blocked_candidate_ids),
             formal_knowledge_files=sum(bool(item.file_sha256) for item in knowledge_objects),
@@ -559,7 +570,10 @@ class KnowledgeObjectFormationService:
         if not candidate.evidence:
             raise ValueError("candidate source lineage requires evidence")
         primary_anchor = sorted(candidate.evidence, key=cls._natural_sort_key)[0]
-        value = f"{candidate.module}|{candidate.object_type}|{primary_anchor}"
+        value = (
+            f"{candidate.module}|{candidate.object_type}|{primary_anchor}|"
+            f"{cls._identity_key(candidate)}"
+        )
         return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
     @staticmethod

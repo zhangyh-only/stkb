@@ -250,6 +250,18 @@ class PsycopgIdentificationRepository:
             for row in rows
         }
 
+    def get_active_document_object_ids(self, document_package_id: str) -> set[str]:
+        with psycopg.connect(self.postgres_dsn, row_factory=dict_row) as connection:
+            rows = connection.execute(
+                """
+                SELECT DISTINCT knowledge_object_id
+                FROM knowledge_object_sources
+                WHERE document_package_id = %s AND active = TRUE
+                """,
+                (document_package_id,),
+            ).fetchall()
+        return {row["knowledge_object_id"] for row in rows}
+
     def get_existing_lineage_object_ids(
         self, workspace_id: str, lineage_keys: set[str]
     ) -> dict[str, str]:

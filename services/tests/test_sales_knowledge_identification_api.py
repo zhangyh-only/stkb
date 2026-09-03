@@ -68,6 +68,9 @@ class InMemoryRepository:
     def get_existing_object_states(self, object_ids: set[str]) -> dict[str, object]:
         return {}
 
+    def get_active_document_object_ids(self, document_package_id: str) -> set[str]:
+        return set()
+
     def get_existing_lineage_object_ids(
         self, workspace_id: str, lineage_keys: set[str]
     ) -> dict[str, str]:

@@ -163,6 +163,23 @@ def test_formalizer_promotes_supported_candidate_relation_to_stable_refs(
     assert "**SUPPORTS**" in markdown
 
 
+def test_source_lineage_does_not_merge_distinct_objects_from_one_anchor() -> None:
+    service = KnowledgeObjectFormationService(project_root=Path("."))
+    first = _identification().candidates[0]
+    second = first.model_copy(
+        deep=True,
+        update={
+            "candidate_id": "C2",
+            "identity_hints": {
+                **first.identity_hints,
+                "versionScope": "另一产品版本",
+            },
+        },
+    )
+
+    assert service._source_lineage_key(first) != service._source_lineage_key(second)
+
+
 def test_formalizer_reuses_unchanged_object_and_requires_review_for_changed_content(
     tmp_path: Path,
 ) -> None:
@@ -207,7 +224,35 @@ def test_formalizer_reuses_unchanged_object_and_requires_review_for_changed_cont
     }
 
 
-def test_formalizer_resolves_model_wording_drift_through_source_lineage(
+def test_formalizer_requires_review_when_document_identity_set_changes(
+    tmp_path: Path,
+) -> None:
+    service = KnowledgeObjectFormationService(project_root=tmp_path)
+    first = service.form(
+        document_package=_package(),
+        identification=_identification(),
+        existing_entities=set(),
+        existing_objects={},
+    )
+    first_id = first.knowledge_objects[0].knowledge_object_id
+    changed = _identification().model_copy(deep=True)
+    changed.candidates[0].identity_hints["factTheme"] = "线上医疗服务"
+
+    result = service.form(
+        document_package=_package(),
+        identification=changed,
+        existing_entities=set(),
+        existing_objects={},
+        existing_document_object_ids={first_id},
+    )
+
+    assert result.status == "review_required"
+    assert result.review_required_count == 1
+    assert result.superseded_count == 1
+    assert result.formal_knowledge_files == 0
+
+
+def test_formalizer_honors_an_explicit_existing_lineage_mapping(
     tmp_path: Path,
 ) -> None:
     service = KnowledgeObjectFormationService(project_root=tmp_path)

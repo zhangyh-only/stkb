@@ -322,6 +322,9 @@ def form_knowledge_objects(
         existing_entities=repository.get_existing_entity_ids(entity_ids),
         existing_objects=repository.get_existing_object_states(object_ids),
         existing_lineages=existing_lineages,
+        existing_document_object_ids=repository.get_active_document_object_ids(
+            package.document_package_id
+        ),
     )
     repository.save_knowledge_formation(
         workspace_id=package.workspace_id,
