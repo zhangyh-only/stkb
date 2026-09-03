@@ -364,10 +364,28 @@ export type FormalKnowledgeRelationship = {
 }
 
 export type KnowledgeFormationStage = {
-  key: 'entity_resolution' | 'knowledge_merge' | 'formal_write'
+  key: 'entity_resolution' | 'knowledge_merge' | 'formal_write' | 'pgvector_projection' | 'neo4j_projection'
   name: string
   status: 'completed' | 'pending' | 'failed'
   detail: string
+  durationMs: number
+}
+
+export type KnowledgeStorageEvidence = {
+  postgresObjects: number
+  formalFiles: number
+  pgvectorRecords: number
+  neo4jKnowledgeObjects: number
+  neo4jEntities: number
+  neo4jRelationships: number
+  neo4jDocumentLinks: number
+  neo4jEntityReferences: number
+  neo4jKnowledgeRelationships: number
+  embeddingModel: string
+  embeddingTokens: number
+  vectorDurationMs: number
+  graphDurationMs: number
+  errors: string[]
 }
 
 export type KnowledgeFormationResult = {
@@ -387,6 +405,7 @@ export type KnowledgeFormationResult = {
   qualityBlockedCandidateIds: string[]
   qualityBlockedCount: number
   formalKnowledgeFiles: number
+  storageEvidence: KnowledgeStorageEvidence
 }
 
 export type KnowledgeModule = {

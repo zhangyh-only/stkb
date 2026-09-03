@@ -71,6 +71,8 @@ const selectedKnowledgeObject = computed<FormalKnowledgeObject | null>(() =>
   ) ?? formation.value?.knowledgeObjects[0] ?? null,
 )
 
+const storageEvidence = computed(() => formation.value?.storageEvidence ?? null)
+
 const selectedRelationships = computed(() => {
   const objectId = selectedKnowledgeObject.value?.knowledgeObjectId
   if (!objectId) return []
@@ -115,6 +117,7 @@ const buildSteps = computed(() => {
     { key: 'validate', label: '校验结果', detail: '对象边界、分类与证据', done: hasIdentification },
     { key: 'merge', label: '归一与归并', detail: '实体身份与知识身份', done: hasFormation },
     { key: 'write', label: '形成知识对象', detail: '评审后登记正式版本', done: formation.value?.status === 'completed' },
+    { key: 'project', label: '同步三种存储', detail: '正式文件、pgvector与Neo4j', done: Boolean(storageEvidence.value && !storageEvidence.value.errors.length && storageEvidence.value.pgvectorRecords) },
   ]
 })
 
@@ -126,6 +129,7 @@ const currentStepKey = computed(() => {
   if (!identification.value) return 'recognize'
   if (!formation.value) return 'merge'
   if (formation.value.status === 'review_required') return 'write'
+  if (formation.value.status === 'failed') return 'project'
   return ''
 })
 
@@ -134,7 +138,7 @@ const phaseLabel = computed(() => {
     idle: '选择一份资料开始',
     ready: '资料和规则已就绪',
     recognizing: '正在识别并校验销售知识',
-    forming: '正在归一实体并形成知识对象',
+    forming: '正在形成知识对象并同步三种存储',
     review: '发现版本差异，等待质量评审',
     completed: '本次知识构建已完成',
     failed: '本次构建未完成',
@@ -222,6 +226,9 @@ async function buildKnowledge(): Promise<void> {
     formation.value = nextFormation
     selectedObjectId.value = nextFormation.knowledgeObjects[0]?.knowledgeObjectId ?? ''
     selectedCallIndex.value = 0
+    if (nextFormation.status === 'failed') {
+      throw new Error('知识对象已形成，但存储投影失败，请查看存储证据。')
+    }
     buildPhase.value = nextFormation.status === 'review_required' ? 'review' : 'completed'
     activeView.value = 'knowledge'
   } catch (reason) {
@@ -344,10 +351,11 @@ onMounted(() => {
           <button type="button" @click="activeView = 'knowledge'">{{ formation.status === 'review_required' ? '审阅版本差异' : '查看知识结果' }}</button>
         </div>
 
-        <div v-else class="build-guidance"><div><span>验证目标</span><h2>检查规则能否把一份资料稳定转换为正式知识对象</h2><p>一次执行会完成知识识别、分类与证据校验、业务实体归一、同身份知识归并、PostgreSQL登记和正式Markdown写入。</p></div><div class="build-boundary"><strong>本轮暂不执行</strong><span>pgvector索引</span><span>Neo4j图投影</span></div></div>
+        <div v-else class="build-guidance"><div><span>验证目标</span><h2>从DocumentPackage形成知识对象并同步三种存储</h2><p>一次执行会完成真实模型识别、证据校验、实体与知识身份归并、正式Markdown写入、pgvector检索投影和Neo4j图投影。</p></div><div class="build-boundary"><strong>同一修订点</strong><span>正式知识文件</span><span>pgvector检索投影</span><span>Neo4j图投影</span></div></div>
       </section>
 
       <section v-else-if="activeView === 'knowledge'" class="knowledge-result-view">
+        <div v-if="formation && storageEvidence" class="storage-proof" :class="{ failed: storageEvidence.errors.length }"><article><span>正式知识</span><strong>{{ storageEvidence.postgresObjects }} 对象 / {{ storageEvidence.formalFiles }} 文件</strong><small>PostgreSQL登记与Markdown</small></article><article><span>向量检索</span><strong>{{ storageEvidence.pgvectorRecords }} 条</strong><small>{{ storageEvidence.embeddingModel || '未执行' }} · {{ storageEvidence.embeddingTokens }} tokens · {{ storageEvidence.vectorDurationMs }} ms</small></article><article><span>知识图谱</span><strong>{{ storageEvidence.neo4jKnowledgeObjects }} 对象 / {{ storageEvidence.neo4jRelationships }} 关系</strong><small>承载 {{ storageEvidence.neo4jDocumentLinks }} · 实体引用 {{ storageEvidence.neo4jEntityReferences }} · 知识关系 {{ storageEvidence.neo4jKnowledgeRelationships }} · {{ storageEvidence.graphDurationMs }} ms</small></article><p v-if="storageEvidence.errors.length">{{ storageEvidence.errors.join('；') }}</p></div>
         <div v-if="formation" class="knowledge-result-grid">
           <aside class="knowledge-object-list"><div class="result-pane-title"><div><p>KNOWLEDGE OBJECTS</p><h2>{{ formation.status === 'review_required' ? '知识对象审阅' : '正式知识对象' }}</h2></div><span>{{ formation.knowledgeObjects.length }}</span></div><div class="object-list-scroll"><button v-for="item in formation.knowledgeObjects" :key="item.knowledgeObjectId" type="button" :class="{ active: selectedKnowledgeObject?.knowledgeObjectId === item.knowledgeObjectId }" @click="selectedObjectId = item.knowledgeObjectId"><span>{{ objectActionLabel(item.action) }}</span><div><strong>{{ item.title }}</strong><small>{{ item.domain }} / {{ item.module }} · {{ item.objectType }}</small></div></button></div></aside>
           <article v-if="selectedKnowledgeObject" class="formal-object-detail"><header><div><p>{{ selectedKnowledgeObject.knowledgeObjectId }} · revision {{ selectedKnowledgeObject.revision }}</p><h2>{{ selectedKnowledgeObject.title }}</h2><span>{{ selectedKnowledgeObject.domain }} / {{ selectedKnowledgeObject.module }} · {{ selectedKnowledgeObject.objectType }}</span></div><em>{{ objectActionLabel(selectedKnowledgeObject.action) }}</em></header><div class="formal-object-scroll">
