@@ -5,6 +5,7 @@ import json
 import re
 from collections import defaultdict
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
@@ -69,6 +70,7 @@ INVERSE_RELATION_LABELS = {
     "EVALUATED_BY": "EVALUATES",
     "EXEMPLIFIED_BY": "EXEMPLIFIES",
 }
+TENTATIVE_SUBJECT_SIMILARITY = 0.85
 
 
 @dataclass(frozen=True)
@@ -164,7 +166,7 @@ class KnowledgeObjectFormationService:
         groups: dict[str, list[CandidateKnowledgeObject]] = defaultdict(list)
         identity_keys: dict[str, str] = {}
         lineage_keys: dict[str, set[str]] = defaultdict(set)
-        resolved_object_ids = self._unique_source_slot_matches(
+        resolved_object_ids, tentative_match_candidate_ids = self._source_slot_matches(
             eligible_candidates,
             existing_objects,
             existing_document_object_ids,
@@ -212,12 +214,6 @@ class KnowledgeObjectFormationService:
             identification.run_id,
             document_package.document_package_id,
         )
-        created_count = sum(item.action == "created" for item in knowledge_objects)
-        updated_count = sum(item.action == "updated" for item in knowledge_objects)
-        reused_count = sum(item.action == "reused" for item in knowledge_objects)
-        review_required_count = sum(
-            item.action == "review_required" for item in knowledge_objects
-        )
         current_object_ids = set(groups)
         identity_set_changed = bool(
             existing_document_object_ids
@@ -229,10 +225,23 @@ class KnowledgeObjectFormationService:
                 item.model_copy(update={"action": "review_required"})
                 for item in knowledge_objects
             ]
-            created_count = 0
-            updated_count = 0
-            reused_count = 0
-            review_required_count = len(current_object_ids)
+        elif tentative_match_candidate_ids:
+            tentative_object_ids = {
+                resolved_object_ids[candidate_id]
+                for candidate_id in tentative_match_candidate_ids
+            }
+            knowledge_objects = [
+                item.model_copy(update={"action": "review_required"})
+                if item.knowledge_object_id in tentative_object_ids
+                else item
+                for item in knowledge_objects
+            ]
+        created_count = sum(item.action == "created" for item in knowledge_objects)
+        updated_count = sum(item.action == "updated" for item in knowledge_objects)
+        reused_count = sum(item.action == "reused" for item in knowledge_objects)
+        review_required_count = sum(
+            item.action == "review_required" for item in knowledge_objects
+        )
         requires_review = bool(review_required_count or quality_blocked_candidate_ids)
         if not requires_review:
             for item in knowledge_objects:
@@ -564,12 +573,12 @@ class KnowledgeObjectFormationService:
         return {"mergedItems": [candidate.content for candidate in candidates]}
 
     @classmethod
-    def _unique_source_slot_matches(
+    def _source_slot_matches(
         cls,
         candidates: list[CandidateKnowledgeObject],
         existing_objects: dict[str, ExistingKnowledgeObjectState],
         active_object_ids: set[str],
-    ) -> dict[str, str]:
+    ) -> tuple[dict[str, str], set[str]]:
         candidate_groups: dict[tuple[str, str, tuple[str, ...]], list[str]] = defaultdict(list)
         existing_groups: dict[tuple[str, str, tuple[str, ...]], list[str]] = defaultdict(list)
         for candidate in candidates:
@@ -583,11 +592,140 @@ class KnowledgeObjectFormationService:
             existing_groups[
                 (existing.module, existing.object_type, tuple(sorted(existing.evidence)))
             ].append(object_id)
-        return {
+        matches = {
             candidate_ids[0]: existing_groups[key][0]
             for key, candidate_ids in candidate_groups.items()
             if len(candidate_ids) == 1 and len(existing_groups.get(key, [])) == 1
         }
+        matched_existing_ids = set(matches.values())
+        candidate_slots: dict[tuple[Any, ...], list[str]] = defaultdict(list)
+        existing_slots: dict[tuple[Any, ...], list[str]] = defaultdict(list)
+        for candidate in candidates:
+            if candidate.candidate_id in matches:
+                continue
+            discriminator = cls._source_slot_discriminator(
+                candidate.object_type, candidate.content
+            )
+            if discriminator:
+                candidate_slots[
+                    (
+                        candidate.module,
+                        candidate.object_type,
+                        tuple(sorted(candidate.evidence)),
+                        discriminator,
+                    )
+                ].append(candidate.candidate_id)
+        for object_id in active_object_ids - matched_existing_ids:
+            existing = existing_objects.get(object_id)
+            if existing is None:
+                continue
+            discriminator = cls._source_slot_discriminator(
+                existing.object_type, existing.content or {}
+            )
+            if discriminator:
+                existing_slots[
+                    (
+                        existing.module,
+                        existing.object_type,
+                        tuple(sorted(existing.evidence)),
+                        discriminator,
+                    )
+                ].append(object_id)
+        matches.update(
+            {
+                candidate_ids[0]: existing_slots[key][0]
+                for key, candidate_ids in candidate_slots.items()
+                if len(candidate_ids) == 1
+                and len(existing_slots.get(key, [])) == 1
+            }
+        )
+        tentative_matches = cls._tentative_product_version_matches(
+            candidates,
+            existing_objects,
+            active_object_ids,
+            matches,
+        )
+        matches.update(tentative_matches)
+        return matches, set(tentative_matches)
+
+    @classmethod
+    def _tentative_product_version_matches(
+        cls,
+        candidates: list[CandidateKnowledgeObject],
+        existing_objects: dict[str, ExistingKnowledgeObjectState],
+        active_object_ids: set[str],
+        confirmed_matches: dict[str, str],
+    ) -> dict[str, str]:
+        pairs: list[tuple[str, str]] = []
+        unmatched_object_ids = active_object_ids - set(confirmed_matches.values())
+        for candidate in candidates:
+            if (
+                candidate.candidate_id in confirmed_matches
+                or candidate.object_type != "PRODUCT_VERSION_FACT"
+            ):
+                continue
+            candidate_parts = cls._product_version_parts(candidate.content)
+            if candidate_parts is None:
+                continue
+            candidate_subject, candidate_version = candidate_parts
+            for object_id in unmatched_object_ids:
+                existing = existing_objects.get(object_id)
+                if (
+                    existing is None
+                    or existing.module != candidate.module
+                    or existing.object_type != candidate.object_type
+                    or tuple(sorted(existing.evidence))
+                    != tuple(sorted(candidate.evidence))
+                ):
+                    continue
+                existing_parts = cls._product_version_parts(existing.content or {})
+                if existing_parts is None or existing_parts[1] != candidate_version:
+                    continue
+                if (
+                    SequenceMatcher(None, candidate_subject, existing_parts[0]).ratio()
+                    >= TENTATIVE_SUBJECT_SIMILARITY
+                ):
+                    pairs.append((candidate.candidate_id, object_id))
+        candidate_counts: dict[str, int] = defaultdict(int)
+        object_counts: dict[str, int] = defaultdict(int)
+        for candidate_id, object_id in pairs:
+            candidate_counts[candidate_id] += 1
+            object_counts[object_id] += 1
+        return {
+            candidate_id: object_id
+            for candidate_id, object_id in pairs
+            if candidate_counts[candidate_id] == 1 and object_counts[object_id] == 1
+        }
+
+    @staticmethod
+    def _product_version_parts(content: dict[str, Any]) -> tuple[str, str] | None:
+        applicability = content.get("applicability")
+        subject = content.get("subject")
+        if not isinstance(applicability, dict) or not isinstance(subject, str):
+            return None
+        version = applicability.get("version")
+        if not isinstance(version, str) or not subject.strip() or not version.strip():
+            return None
+        return (re.sub(r"\s+", "", subject).casefold(), version.strip().casefold())
+
+    @staticmethod
+    def _source_slot_discriminator(
+        object_type: str, content: dict[str, Any]
+    ) -> tuple[str, ...]:
+        applicability = content.get("applicability")
+        if object_type == "PRODUCT_VERSION_FACT" and isinstance(applicability, dict):
+            subject = content.get("subject")
+            product = applicability.get("product")
+            version = applicability.get("version")
+            if all(isinstance(item, str) and item.strip() for item in (subject, product, version)):
+                return tuple(item.strip().casefold() for item in (subject, product, version))
+        if object_type == "SALES_STRATEGY" and isinstance(applicability, dict):
+            products = applicability.get("products")
+            if isinstance(products, list) and products and all(
+                isinstance(item, str) and item.strip() for item in products
+            ):
+                return tuple(sorted(item.strip().casefold() for item in products))
+        return ()
 
     @staticmethod
     def _identity_key(candidate: CandidateKnowledgeObject) -> str:

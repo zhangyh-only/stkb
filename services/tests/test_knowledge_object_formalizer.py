@@ -180,6 +180,132 @@ def test_source_lineage_does_not_merge_distinct_objects_from_one_anchor() -> Non
     assert service._source_lineage_key(first) != service._source_lineage_key(second)
 
 
+def test_multi_object_source_slots_use_product_version_business_key() -> None:
+    service = KnowledgeObjectFormationService(project_root=Path("."))
+    first = _identification().candidates[0]
+    candidates = [
+        first.model_copy(
+            deep=True,
+            update={
+                "candidate_id": f"C-{version}",
+                "object_type": "PRODUCT_VERSION_FACT",
+                "content": {
+                    "subject": "示例产品",
+                    "applicability": {"product": "示例产品", "version": version},
+                },
+            },
+        )
+        for version in ("基础版", "专业版")
+    ]
+    existing = {
+        f"KO-{version}": ExistingKnowledgeObjectState(
+            revision=1,
+            content_fingerprint="old",
+            module="D1.1",
+            object_type="PRODUCT_VERSION_FACT",
+            content={
+                "subject": "示例产品",
+                "applicability": {"product": "示例产品", "version": version},
+            },
+            evidence=("DP-FORMAL#section-1",),
+        )
+        for version in ("基础版", "专业版")
+    }
+
+    matches, tentative = service._source_slot_matches(
+        candidates, existing, set(existing)
+    )
+
+    assert matches == {"C-基础版": "KO-基础版", "C-专业版": "KO-专业版"}
+    assert tentative == set()
+
+
+def test_multi_object_source_slots_use_strategy_product_set() -> None:
+    service = KnowledgeObjectFormationService(project_root=Path("."))
+    first = _identification().candidates[0]
+    candidate = first.model_copy(
+        deep=True,
+        update={
+            "candidate_id": "C-STRATEGY",
+            "module": "D3.2",
+            "object_type": "SALES_STRATEGY",
+            "content": {
+                "applicability": {"products": ["产品B", "产品A"]},
+            },
+        },
+    )
+    existing = {
+        "KO-STRATEGY": ExistingKnowledgeObjectState(
+            revision=1,
+            content_fingerprint="old",
+            module="D3.2",
+            object_type="SALES_STRATEGY",
+            content={"applicability": {"products": ["产品A", "产品B"]}},
+            evidence=("DP-FORMAL#section-1",),
+        ),
+        "KO-OTHER": ExistingKnowledgeObjectState(
+            revision=1,
+            content_fingerprint="old",
+            module="D3.2",
+            object_type="SALES_STRATEGY",
+            content={"applicability": {"products": ["产品A", "产品C"]}},
+            evidence=("DP-FORMAL#section-1",),
+        ),
+    }
+
+    matches, tentative = service._source_slot_matches(
+        [candidate], existing, set(existing)
+    )
+
+    assert matches == {"C-STRATEGY": "KO-STRATEGY"}
+    assert tentative == set()
+
+
+def test_product_version_near_subject_match_is_tentative_and_unique() -> None:
+    service = KnowledgeObjectFormationService(project_root=Path("."))
+    first = _identification().candidates[0]
+    candidates = [
+        first.model_copy(
+            deep=True,
+            update={
+                "candidate_id": candidate_id,
+                "object_type": "PRODUCT_VERSION_FACT",
+                "content": {
+                    "subject": subject,
+                    "applicability": {"product": subject, "version": "专业版"},
+                },
+            },
+        )
+        for candidate_id, subject in (
+            ("C-PRODUCT", "示例互联网问诊产品"),
+            ("C-BENEFIT", "示例权益商城"),
+        )
+    ]
+    existing = {
+        "KO-PRODUCT": ExistingKnowledgeObjectState(
+            revision=1,
+            content_fingerprint="old",
+            module="D1.1",
+            object_type="PRODUCT_VERSION_FACT",
+            content={
+                "subject": "示例互联网门诊产品",
+                "applicability": {
+                    "product": "示例互联网门诊产品",
+                    "version": "专业版",
+                },
+            },
+            evidence=("DP-FORMAL#section-1",),
+        )
+    }
+
+    matches, tentative = service._source_slot_matches(
+        candidates, existing, set(existing)
+    )
+
+    assert matches == {"C-PRODUCT": "KO-PRODUCT"}
+    assert tentative == {"C-PRODUCT"}
+
+
 def test_formalizer_reuses_unchanged_object_and_requires_review_for_changed_content(
     tmp_path: Path,
 ) -> None:
