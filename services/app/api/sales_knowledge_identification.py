@@ -22,6 +22,7 @@ from app.features.sales_knowledge_identification.catalog import (
 )
 from app.features.sales_knowledge_identification.content_contracts import (
     CONTENT_CONTRACT_BY_MODULE,
+    CONTENT_CONTRACT_BY_OBJECT_TYPE,
     CONTENT_CONTRACT_VERSION,
     CONTENT_SHAPES_BY_OBJECT_TYPE,
 )
@@ -114,9 +115,21 @@ def identification_catalog() -> dict[str, object]:
                     "allowEmptyFields": CONTENT_CONTRACT_BY_MODULE[
                         module.code
                     ].allow_empty_fields,
+                    "allowEmptyFieldsByType": {
+                        object_type: CONTENT_CONTRACT_BY_OBJECT_TYPE[
+                            object_type
+                        ].allow_empty_fields
+                        for object_type in module.object_types
+                    },
                     "minimumContentChars": CONTENT_CONTRACT_BY_MODULE[
                         module.code
                     ].minimum_content_chars,
+                    "minimumContentCharsByType": {
+                        object_type: CONTENT_CONTRACT_BY_OBJECT_TYPE[
+                            object_type
+                        ].minimum_content_chars
+                        for object_type in module.object_types
+                    },
                     "granularity": CONTENT_CONTRACT_BY_MODULE[module.code].granularity,
                     "inclusion": CONTENT_CONTRACT_BY_MODULE[module.code].inclusion,
                     "exclusion": CONTENT_CONTRACT_BY_MODULE[module.code].exclusion,
@@ -131,6 +144,9 @@ def identification_catalog() -> dict[str, object]:
                     "identityFields": IDENTITY_CONTRACT_BY_MODULE[
                         module.code
                     ].identity_fields,
+                    "identityFieldsByType": IDENTITY_CONTRACT_BY_MODULE[
+                        module.code
+                    ].identity_fields_by_type,
                     "sameObjectWhen": IDENTITY_CONTRACT_BY_MODULE[
                         module.code
                     ].same_object_when,

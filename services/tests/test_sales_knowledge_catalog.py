@@ -12,11 +12,11 @@ from app.features.sales_knowledge_identification.catalog import (
 
 
 def test_rule_package_defines_complete_versioned_d1_d5_catalog() -> None:
-    assert CATALOG_VERSION == "d1-d5-v0.7"
+    assert CATALOG_VERSION == "d1-d5-v0.8"
     assert CATALOG_STATUS == "sample_validation"
     assert len(CATALOG_FINGERPRINT) == 64
-    assert CATALOG_SOURCE.endswith("STKB-D1-D5知识对象与业务图模型映射矩阵.md")
-    assert len(KNOWLEDGE_MODULES) == 22
+    assert CATALOG_SOURCE.endswith("STKB-通用销售知识规则体系与识别机制重审建议.md")
+    assert len(KNOWLEDGE_MODULES) == 12
     assert [domain.code for domain in KNOWLEDGE_DOMAINS] == [
         "D1",
         "D2",
@@ -25,11 +25,11 @@ def test_rule_package_defines_complete_versioned_d1_d5_catalog() -> None:
         "D5",
     ]
     assert [domain.question for domain in KNOWLEDGE_DOMAINS] == [
-        "卖什么",
-        "卖给谁",
-        "怎么卖",
-        "具体怎么说",
-        "卖得怎么样",
+        "卖什么，事实和使用规则是什么",
+        "卖给谁，客户为什么行动",
+        "在什么场景下应该怎么做",
+        "客户怎么表达，销售怎么回应",
+        "怎样判断做得好不好",
     ]
     assert {module.domain for module in KNOWLEDGE_MODULES} == {
         "D1",
@@ -38,12 +38,9 @@ def test_rule_package_defines_complete_versioned_d1_d5_catalog() -> None:
         "D4",
         "D5",
     }
-    assert {
-        module.code for module in KNOWLEDGE_MODULES if module.scope == "optional"
-    } == {"D1.4", "D2.5"}
-    assert sum(module.scope == "core" for module in KNOWLEDGE_MODULES) == 20
-    assert "20个知识模块" in MODULE_SCOPE_DEFINITIONS["core"]
-    assert "2个模块" in MODULE_SCOPE_DEFINITIONS["optional"]
+    assert all(module.scope == "core" for module in KNOWLEDGE_MODULES)
+    assert "12个候选知识内容模块" in MODULE_SCOPE_DEFINITIONS["core"]
+    assert "下沉到对象合同" in MODULE_SCOPE_DEFINITIONS["optional"]
     assert all(module.meaning and module.boundary for module in KNOWLEDGE_MODULES)
     assert all(module.object_types and module.sources for module in KNOWLEDGE_MODULES)
 
@@ -51,13 +48,11 @@ def test_rule_package_defines_complete_versioned_d1_d5_catalog() -> None:
 def test_prompt_catalog_contains_rules_that_distinguish_stage_and_strategy() -> None:
     prompt_catalog = render_catalog_for_prompt()
 
-    assert "### D3.1 场景与流程阶段库" in prompt_catalog
-    assert "具体会话当前处于哪个阶段属于运行时状态" in prompt_catalog
-    assert "仅描述特定条件下应采取动作的内容优先归入D3.3" in prompt_catalog
-    assert "### D3.3 策略与判断规则库" in prompt_catalog
-    assert "场景的稳定阶段骨架归D3.1" in prompt_catalog
-    assert "产品事实或卖点本身不归策略" in prompt_catalog
-    assert MODULE_BY_CODE["D3.3"].object_types == (
+    assert "### D3.1 销售场景与旅程" in prompt_catalog
+    assert "某次会话当前阶段属于运行状态" in prompt_catalog
+    assert "### D3.2 销售方法与策略" in prompt_catalog
+    assert "场景骨架、完整话术和产品事实不进入" in prompt_catalog
+    assert MODULE_BY_CODE["D3.2"].object_types[-4:] == (
         "SALES_STRATEGY",
         "DECISION_RULE",
         "NEXT_BEST_ACTION",

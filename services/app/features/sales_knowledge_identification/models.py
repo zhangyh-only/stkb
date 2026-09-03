@@ -233,6 +233,9 @@ class UnresolvedItem(ApiModel):
 
 
 class ModelCallTrace(ApiModel):
+    call_id: str = ""
+    stage_id: str = ""
+    retry_of: str | None = None
     attempt: int
     purpose: Literal[
         "identification",
@@ -261,6 +264,8 @@ class ProcessingStage(ApiModel):
     status: Literal["completed", "failed"]
     duration_ms: int
     detail: str
+    actor: Literal["model", "code"] = "code"
+    model_call_ids: list[str] = Field(default_factory=list)
 
 
 class StorageImpact(ApiModel):
@@ -416,6 +421,24 @@ class FormalKnowledgeObject(ApiModel):
     file_sha256: str
 
 
+class FormalKnowledgeRelationship(ApiModel):
+    relationship_id: str
+    relation_type: str
+    source_ref: str
+    source_kind: Literal["knowledge_object", "business_entity"]
+    source_revision: int | None = None
+    target_ref: str
+    target_kind: Literal["knowledge_object", "business_entity"]
+    target_revision: int | None = None
+    direction: Literal["forward"] = "forward"
+    inverse_label: str
+    scope: dict[str, Any] = Field(default_factory=dict)
+    effective_period: dict[str, Any] = Field(default_factory=dict)
+    evidence: list[str] = Field(min_length=1)
+    status: Literal["active"] = "active"
+    provenance: dict[str, str]
+
+
 class KnowledgeFormationStage(ApiModel):
     key: Literal["entity_resolution", "knowledge_merge", "formal_write"]
     name: str
@@ -430,6 +453,7 @@ class KnowledgeFormationResult(ApiModel):
     status: Literal["completed", "review_required", "failed"] = "completed"
     entities: list[ResolvedBusinessEntity]
     knowledge_objects: list[FormalKnowledgeObject]
+    relationships: list[FormalKnowledgeRelationship] = Field(default_factory=list)
     stages: list[KnowledgeFormationStage]
     created_count: int
     updated_count: int

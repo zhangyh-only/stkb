@@ -3,6 +3,7 @@ from copy import deepcopy
 
 import pytest
 
+from app.features.sales_knowledge_identification.catalog import MODULE_BY_OBJECT_TYPE
 from app.features.sales_knowledge_identification.claims import (
     resolve_verbatim_claim_references,
     supplement_explicit_internal_term_claims,
@@ -216,7 +217,7 @@ class SegmentAwareGateway:
                         "planId": "P1",
                     },
                     {
-                        **_candidate("D4.3", "QA_PAIR", ["S2-CL1"], candidate_id="P2"),
+                        **_candidate("D4.2", "QA_PAIR", ["S2-CL1"], candidate_id="P2"),
                         "planId": "P2",
                     },
                 ],
@@ -233,11 +234,14 @@ class SegmentAwareGateway:
                 "realizations": [
                     {
                         "planId": plan_id,
-                        "content": _contract_content(module, {}),
+                        "content": _contract_content(module, {}, object_type),
                         "entityMentions": [],
                         "relations": [],
                     }
-                    for plan_id, module in (("P1", "D1.1"), ("P2", "D4.3"))
+                    for plan_id, module, object_type in (
+                        ("P1", "D1.1", "PRODUCT_FACT"),
+                        ("P2", "D4.2", "QA_PAIR"),
+                    )
                     if plan_id in request.user_prompt
                 ]
             }
@@ -505,7 +509,7 @@ def test_objection_identity_uses_observable_customer_expression() -> None:
                     [
                         "P1",
                         "缴费周期异议",
-                        "D4.2",
+                            "D4.1",
                         "CUSTOMER_OBJECTION",
                         {
                             "objectionIntent": "担心涨价并希望锁定长期权益",
@@ -576,7 +580,7 @@ def test_strategy_plan_keeps_same_anchor_script_as_supporting_evidence() -> None
                     [
                         "P1",
                         "产品引入策略",
-                        "D3.3",
+                            "D3.2",
                         "SALES_STRATEGY",
                         {
                             "strategyGoal": "产品引入",
@@ -624,7 +628,7 @@ def test_verified_script_claim_gets_independent_d41_plan_when_planner_only_uses_
         plan_id="P1",
         title="异议处理策略",
         domain="D3",
-        module="D3.3",
+        module="D3.2",
         object_type="SALES_STRATEGY",
         object_boundary="同一策略目标与适用范围",
         classification_basis="来源提供策略主张",
@@ -641,7 +645,7 @@ def test_verified_script_claim_gets_independent_d41_plan_when_planner_only_uses_
     )
 
     assert plans[0].source_claim_ids == ["CL-SCRIPT", "CL-STRATEGY"]
-    assert plans[1].module == "D4.1"
+    assert plans[1].module == "D4.2"
     assert plans[1].object_type == "STANDARD_SCRIPT"
     assert plans[1].source_claim_ids == ["CL-SCRIPT"]
     assert plans[1].identity_hints == {
@@ -677,7 +681,7 @@ def test_explicit_internal_identifier_definition_gets_term_duty() -> None:
     assert claims[0].subject == "1010电话"
     assert claims[0].evidence[0].exact_quote == "1010的电话是质检的"
     assert len(plans) == 1
-    assert plans[0].module == "D4.3"
+    assert plans[0].module == "D4.1"
     assert plans[0].object_type == "TERM"
 
 
@@ -702,7 +706,7 @@ def test_rule_and_strategy_section_keeps_independent_policy_duty() -> None:
         plan_id="P1",
         title="异地客户产品选择策略",
         domain="D3",
-        module="D3.3",
+        module="D3.2",
         object_type="SALES_STRATEGY",
         identity_hints={
             "strategyGoal": "受限客户产品选择",
@@ -716,7 +720,7 @@ def test_rule_and_strategy_section_keeps_independent_policy_duty() -> None:
         [plan], [rule_one, rule_two, strategy]
     )
 
-    policy = next(item for item in guarded if item.module == "D1.3")
+    policy = next(item for item in guarded if item.module == "D1.2")
     assert policy.object_type == "POLICY_RULE_SET"
     assert policy.source_claim_ids == ["CL1", "CL2"]
 
@@ -744,7 +748,7 @@ def test_exact_source_text_can_recover_missing_critical_attribution() -> None:
     }
 
     usage = _supplement_exact_match_claim_usage(
-        module="D3.3",
+        module="D3.2",
         object_type="SALES_STRATEGY",
         content=content,
         source_claims=[claim],
@@ -784,6 +788,7 @@ def _candidate(
     *,
     candidate_id: str = "C1",
 ) -> dict[str, object]:
+    module = MODULE_BY_OBJECT_TYPE[object_type].code
     return {
         "candidateId": candidate_id,
         "title": f"测试对象 {candidate_id}",
@@ -791,7 +796,9 @@ def _candidate(
         "classificationBasis": "依据测试模块规则分类",
         "identityHints": {
             field: f"{candidate_id}-{field}"
-            for field in IDENTITY_CONTRACT_BY_MODULE[module].identity_fields
+            for field in IDENTITY_CONTRACT_BY_MODULE[
+                module
+            ].identity_fields_by_type[object_type]
         },
         "domain": module.split(".")[0],
         "module": module,
@@ -1171,12 +1178,18 @@ def test_two_stage_identification_validates_catalog_and_source_claims() -> None:
     assert result.atomic_claims[0].evidence[0].source_text.endswith(
         "药品需在保障目录内。"
     )
-    assert result.coverage_by_module["D4.2"] == "hit"
+    assert result.coverage_by_module["D4.1"] == "hit"
     assert result.call_count == 3
     assert [call.purpose for call in result.model_calls] == [
         "claim_discovery",
         "object_planning",
         "content_realization",
+    ]
+    model_stages = [stage for stage in result.processing_stages if stage.actor == "model"]
+    assert [stage.model_call_ids for stage in model_stages] == [
+        ["call-001"],
+        ["call-002"],
+        ["call-003"],
     ]
     assert "原子主张发现器" in gateway.requests[0].system_prompt
     assert "对象边界规划器" in gateway.requests[1].system_prompt
@@ -1325,7 +1338,7 @@ def test_planning_rejects_service_guidance_as_sales_decision_rule() -> None:
 
     assert result.candidates == []
     assert any(
-        "service operation guidance belongs to D1.3 or D4.3" in reason
+            "not service operation guidance" in reason
         for reason in result.rejected_object_plans[0].reasons
     )
 
@@ -1399,7 +1412,7 @@ def test_planning_rejects_sales_conversation_branch_as_business_process() -> Non
 
     assert result.candidates == []
     assert any(
-        "sales-conversation conditional branches belong to D3.3" in reason
+            "sales-conversation conditional branches belong to D3.2" in reason
         for reason in result.rejected_object_plans[0].reasons
     )
 
@@ -1452,7 +1465,7 @@ def test_enumeration_terms_used_by_rule_also_form_profile_dimension() -> None:
             plan_id="P1",
             title="系统名单分类规则",
             domain="D3",
-            module="D3.3",
+            module="D3.2",
             object_type="DECISION_RULE",
             identity_hints={
                 "strategyGoal": "名单分类",
@@ -1695,6 +1708,8 @@ def test_identification_records_failed_model_attempt_before_retrying() -> None:
     assert result.status == "completed"
     assert result.call_count == 2
     assert [trace.status for trace in result.model_calls] == ["failed", "completed"]
+    assert result.model_calls[0].retry_of is None
+    assert result.model_calls[1].retry_of == "call-001"
 
 
 def test_identification_returns_auditable_failed_result_after_final_retry() -> None:
@@ -1719,7 +1734,7 @@ def test_identification_fails_closed_when_model_output_is_truncated() -> None:
     assert "truncated" in result.processing_stages[0].detail
 
 
-def test_identification_runs_discovery_and_object_formation_per_structural_group() -> None:
+def test_identification_batches_mixed_object_contracts_in_one_realization_call() -> None:
     gateway = SegmentAwareGateway()
     package = _package(
         "DP-SEGMENT",
@@ -1740,7 +1755,7 @@ def test_identification_runs_discovery_and_object_formation_per_structural_group
         gateway=gateway, document_max_chars=90
     ).identify(package)
 
-    assert result.call_count == 5
+    assert result.call_count == 4
     assert [candidate.candidate_id for candidate in result.candidates] == ["P1", "P2"]
     assert {claim.claim_id for claim in result.atomic_claims} == {"S1-CL1", "S2-CL1"}
     realization_prompts = [
@@ -1748,21 +1763,22 @@ def test_identification_runs_discovery_and_object_formation_per_structural_group
         for request in gateway.requests
         if "内容编制器" in request.system_prompt
     ]
-    assert len(realization_prompts) == 2
+    assert len(realization_prompts) == 1
     realization_requests = [
         request
         for request in gateway.requests
         if "内容编制器" in request.system_prompt
     ]
     assert all('"sourceText"' not in request.user_prompt for request in realization_requests)
-    assert any(
-        "### D1.1 内容合同" in prompt and "### D4.3 内容合同" not in prompt
-        for prompt in realization_prompts
-    )
-    assert any(
-        "### D4.3 内容合同" in prompt and "### D1.1 内容合同" not in prompt
-        for prompt in realization_prompts
-    )
+    assert "### D1.1 内容合同" in realization_prompts[0]
+    assert "### D4.2 内容合同" in realization_prompts[0]
+    assert [call.call_id for call in result.model_calls] == [
+        "call-001",
+        "call-002",
+        "call-003",
+        "call-004",
+    ]
+    assert all(call.stage_id for call in result.model_calls)
 
 
 def test_segmenter_matches_source_anchors_exactly_and_supports_spreadsheet_rows() -> None:
@@ -2363,7 +2379,7 @@ def test_granularity_gate_splits_objections_sharing_one_source_anchor() -> None:
         plan_id="P1",
         title="常见异议",
         domain="D4",
-        module="D4.2",
+        module="D4.1",
         object_type="CUSTOMER_OBJECTION",
         object_boundary="不同根本顾虑必须拆分",
         classification_basis="属于客户异议",
@@ -2449,7 +2465,7 @@ def test_granularity_gate_merges_policy_rules_for_same_business_subject() -> Non
             plan_id=f"P{index}",
             title=title,
             domain="D1",
-            module="D1.3",
+                module="D1.2",
             object_type="POLICY_RULE_SET",
             object_boundary="同一处方规则主题共同维护",
             classification_basis="属于处方约束",
@@ -2503,7 +2519,7 @@ def test_granularity_gate_merges_qa_plans_from_one_document_unit() -> None:
             plan_id=f"P{index}",
             title=question,
             domain="D4",
-            module="D4.3",
+                module="D4.2",
             object_type="QA_PAIR",
             object_boundary="共同维护的问答集合",
             classification_basis="标准问答",
@@ -2552,7 +2568,7 @@ def test_granularity_gate_splits_decision_rules_by_trigger_anchor() -> None:
         plan_id="P1",
         title="名单状态规则",
         domain="D3",
-        module="D3.3",
+        module="D3.2",
         object_type="DECISION_RULE",
         object_boundary="触发上下文不同必须拆分",
         classification_basis="属于行动规则",
@@ -2629,7 +2645,7 @@ def test_coverage_repair_cannot_attach_conversation_branch_to_business_process()
         plan_id="P1",
         title="禁呼屏蔽流程",
         domain="D1",
-        module="D1.3",
+        module="D1.2",
         object_type="BUSINESS_PROCESS",
         identity_hints={
             "purpose": "执行禁呼屏蔽",
@@ -2655,7 +2671,7 @@ def test_coverage_repair_cannot_attach_conversation_branch_to_business_process()
     )
 
     assert augmented[0].source_claim_ids == ["CL1"]
-    assert "cannot augment a D1.3" in rejected[0].reasons[0]
+    assert "cannot augment a D1.2" in rejected[0].reasons[0]
 
 
 def test_coverage_repair_only_retries_automatic_planning_omissions() -> None:
@@ -2705,7 +2721,7 @@ def test_script_plan_does_not_consume_independent_strategy_role() -> None:
 
 def test_qa_content_normalizes_single_fact_reference_alias() -> None:
     content = _normalize_content_shape(
-        "D4.3",
+        "D4.2",
         "QA_PAIR",
         {
             "items": [

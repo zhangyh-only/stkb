@@ -76,7 +76,7 @@ def build_claim_discovery_request(
     - 异议处理行还必须输出 objection；异议根因与完整处理话术是两个不同消费职责。
     - 出现“某版本引入/某产品引入”及其保障、价格、权益等说明时，除 script/strategy 外还要输出
       对应 product/version fact，不能遗漏产品版本事实。
-11. moduleHints 只能填写 D1.1 到 D5.4 范围内的模块码；不确定时留空，禁止自造英文分类名。
+11. moduleHints 只能填写当前12个模块之一；不确定时留空，禁止自造分类名。
 
 claimKind 只能是：fact、list、process、rule、comparison、customer_signal、method、strategy、
 script、objection、qa、term、case、asset、value_proposition、evaluation、benchmark。
@@ -89,7 +89,7 @@ script、objection、qa、term、case、asset、value_proposition、evaluation�
     "statement": "面向忙碌上班族的药享保完整引入话术",
     "subject": "忙碌上班族药享保引入",
     "attributes": {"communicationGoal": "痛点引入", "audience": "忙碌上班族"},
-    "moduleHints": ["D4.1"],
+    "moduleHints": ["D4.2"],
     "evidence": [{
       "anchorId": "文档包锚点",
       "exactQuote": "逐字原文短引句",
@@ -132,63 +132,38 @@ def build_object_planning_request(
    适用范围与更新生命周期决定，绝不按句子数、claimKind 或模块机械拆分。
 2. 必须跨 claimKind 观察同一业务对象：同一产品版本的事实、限制和权益可共同形成完整产品版本对象；
    但产品事实、销售策略、客户异议和完整话术职责不同，必须保持独立并通过关系关联。
-3. FAQ 表按一个共同维护的问答集合规划，所有 qa 主张及其同一来源行的版本范围、适用范围说明进入
-   同一计划；不要按每个问题或主题拆对象，也不要把“两个版本通用”等范围说明遗留为孤立主张。
-4. 同一沟通目标、客群、产品组合与方法下的完整话术形成一个话术对象；措辞变体进入同一对象。
-   同一资料行同时包含销售方法/策略与完整话术时，方法或策略和 D4.1 话术分别形成对象；其中可跨
-   客群复用的方法原则归 D3.2，带明确客群、产品组合或条件动作的策略归 D3.3。两者下游职责不同，
-   不能因为形成话术就丢掉“如何突出优势”“如何按客户特点选择重点”等方法主张。
-5. D4.2 的 objectionIntent 只能概括客户可观察的异议/咨询意图，例如“质疑价格”“询问缴费周期”；
-   不得写“害怕麻烦、担心涨价、希望长期锁定”等资料未明确表达的心理原因。可观察意图相同的表达
-   归并，意图或购买语境不同则拆分；异议对象不吞并应对话术。
-6. 下列边界是硬约束：
-   - 每个不同 productCombination/产品组合形成独立 D3.3 策略，不得因同属组合营销而合并；
-   - D1.3 的用户操作顺序形成 BUSINESS_PROCESS；处方限量、同功效药限制、目录限制、发票条件等
-     可独立查询的约束形成 POLICY_RULE_SET，不得塞进一个“通用流程与规则”对象；
-   - 同一规则主题可聚合多条约束，但处方规则与发票规则因消费问题和更新依据不同必须拆分。
-   - “可能缺货，建议等待后重试”等面向客户情境的处置建议不是正式政策规则，应归 D3.3 判断规则；
-     只有来源明确表达规定、条件、允许或禁止的业务约束才归 D1.3 POLICY_RULE_SET。
-   - 稳定的客户优先级、状态枚举及其完整值域属于 D2.1 PROFILE_DIMENSION；值域判定和迁移属于
-     D3.3 DECISION_RULE。两者可以关联共存，但不得再把同一套枚举重复包装为 D3.2 通用技巧。
-     资料只枚举优先级类别而没有规定每类后续动作时，仍是 D2.1 维度，禁止补造触发时机和销售动作
-     后改写为 D3.3 策略。
-   - 初次状态判定与后续复播/重评迁移的触发时机、更新生命周期不同，必须形成两个 D3.3 规则；
-     不得因共同使用同一状态值域而合并。
-   - 销售通话中基于客户异议、授权选择或沟通反馈的条件分支属于 D3.3 DECISION_RULE；D1.3
-     BUSINESS_PROCESS 只承载投保、核保、理赔、服务交付等业务办理流程，不承载会话应对分支。
-   - 身份披露、免责说明、沟通行为、投诉上报等合规义务即使包含执行时机或动作，也属于 D3.4；
-     单个上报/屏蔽动作不能单独包装成 D1.3 流程，应并入完整禁呼流程或对应合规规则。
-   - 同一材料段落内，运行时行为限制与违规后的监管处罚因消费方和更新依据不同应拆为两个 D3.4
-     对象；禁止为凑“一段一个对象”而合并不同检查点。
-   - 只有“客户原话参考”而没有来源支持的根本顾虑、处理要素或标准回应时，不足以形成 D4.2
-     正式异议对象；应保留为未决素材，禁止模型补造心理原因和化解动作。
-   - 资料只说“按照范本/标准话术回应”但没有提供范本文字时，不得形成 D4.1 STANDARD_SCRIPT；
-     只能保留为流程要求或未决素材，禁止根据法规常识自行创作话术。
-   - 单一培训材料中的谚语、经验性“往往/可能”或讲师判断，只能形成术语解释或待验证信号；
-     没有跨样本证据、明确触发条件与可执行动作时，不得规划为 D2.4 客户反应规律或 D3.3 行动规则。
-7. D1.1 的 versionScope 只有在每条来源主张都明确写出“全版本/两个版本通用/所有版本”时才能
-   使用全版本。未写版本的营销话术事实不得上推为全版本，也不能把全能版的180元、80%赔付或
-   慢病药目录套到尊享版；应补入明确版本对象或列为未决。
-8. 每条主张必须至少进入一个 plan，或在 unresolvedItems 中逐条列明 claimId 与原因；不得静默丢失。
+3. objectType 只选择 KnowledgeObject 的字段、身份和校验合同，不是模块下的新层级；步骤、条目、
+   表达变体和评分档位在共享身份与生命周期时留在对象内部。
+4. D1.1 保存供给事实、清单、比较和由事实支撑的价值；D1.2 保存获得、使用或交付供给的业务规则
+   与完整流程。销售会话的条件动作不属于履约流程。
+5. D2.1 保存稳定画像结构和决策角色；D2.2 保存需求、动机和有证据的行为信号。单次表达不能直接
+   升格为稳定画像、心理结论或反应规律。
+6. D3.1 保存场景与旅程骨架；D3.2 保存通用方法和条件化策略；D3.3 只保存有正式依据的销售行为
+   约束。方法、策略、完整回应和事实保持独立，通过关系关联。
+7. D4.1 规范客户问题、异议和交互意图；D4.2 保存标准回答、话术和解释；D4.3 保存案例和引用正式
+   知识的赋能资产。客户表达不能混入销售回应，回应中的事实必须引用D1。
+8. D5.1 保存评价模型和评分规则；D5.2 保存验证知识、识别、检索或评价机制的基准。单次评分和
+   未经评审的运行结果不成为规范知识。
+9. 每条主张必须至少进入一个 plan，或在 unresolvedItems 中逐条列明 claimId 与原因；不得静默丢失。
    同一主张只有在确实支撑不同下游职责时才可进入多个计划。
-9. 一个计划只有一个主模块。identityHints 只写决定“是否同一对象”的稳定业务要素，不写摘要、
+10. 一个计划只有一个主模块。identityHints 只写决定“是否同一对象”的稳定业务要素，不写摘要、
    claimId、锚点、模块码或任意技术字段。
-10. 只返回输出形态列出的最小字段，不返回 domain、objectBoundary、classificationBasis、content、
+11. 只返回输出形态列出的最小字段，不返回 domain、objectBoundary、classificationBasis、content、
    entityMentions、relations 或解释文字；这些由程序根据已发布合同注入，避免重复规则和输出截断。
    只输出合法 JSON，不输出隐藏推理过程。
 
-当前 D1-D5 / 22个模块规划合同：
+当前 D1-D5 / 12个候选模块规划合同：
 {render_planning_contracts_for_prompt()}
 
 为避免大型资料输出截断，objectPlans 必须使用紧凑数组，每项依次为
 [planId,title,module,objectType,identityHints,sourceClaimIds]，禁止改回字段重复的对象形态。
 输出形态：
 {{
-  "objectPlans": [["P1","业务可读标题","D4.1","STANDARD_SCRIPT",
+  "objectPlans": [["P1","业务可读标题","D4.2","STANDARD_SCRIPT",
     {{"communicationGoal":"目标","method":"方法","applicability":"范围"}},["CL1"]]],
   "weakSignals": [{{
     "claimId":"CL9",
-    "module":"D2.4",
+    "module":"D2.2",
     "reason":"CL9：仅为待验证信号的具体原因",
     "evidence":["真实anchorId"]
   }}],
@@ -251,26 +226,26 @@ def build_content_realization_request(
 3. 需要保留某条主张的完整原文字段时输出 {{"$verbatimFromClaim":"主张ID"}}，系统会用已核验
    sourceText 替换；只需引用具体禁用表达、术语或短句时输出
    {{"$exactQuoteFromClaim":"主张ID"}}。主张 attributes 已提供精确结构字段时输出
-   {{"$attributeFromClaim":{{"claimId":"主张ID","attribute":"responseContext"}}}}；例如 D4.2
+   {{"$attributeFromClaim":{{"claimId":"主张ID","attribute":"responseContext"}}}}；例如 D4.1
    expressions 取 expression，resolutionElements 取 responseContext，禁止用同一个完整主张宏
    混入两者。
    不得把长话术压缩成几十字摘要，也不得用完整 sourceText
    代替一个短语列表项。
 4. 不用常识补写来源未提供的事实。合同允许为空的字段可显式给空数组；其余缺失必须忠实说明
    unresolved，而不是编造。
-   D1.3 的 preconditions 只收录资料明确写出的进入条件；“用户需拥有权益”“患者有购药需求”
-   这类从流程目的推导的常识不是来源事实，必须删除并输出空数组。exceptions 只能保留资料明确给出的
-   condition 和 handling；不得把“接受医生调整”等自然反应补成处理动作。
+   D1.2 流程的 preconditions 只收录资料明确写出的进入条件；从流程目的推导的常识不是来源事实，
+   必须删除并输出空数组。exceptions 只能保留资料明确给出的条件和处理，不得补造自然反应。
 5. 资料中的培训谚语、讲师观点和经验性判断必须保留来源立场。TERM 的每个 terms 条目中，
    standardExplanation 可准确转述资料主张，sourceStance 必须说明它是何种来源观点，
    usageBoundary 必须写明不能由此推断什么；不得把“往往/可能”改写成客观必然规律。
-   CUSTOMER_OBJECTION 的 rootConcernHypotheses 也只能来自资料明确表达的原因、顾虑或研究结论；
+   D4.1 CUSTOMER_OBJECTION 的 rootConcernHypotheses 也只能来自资料明确表达的原因、顾虑或研究结论；
    仅凭一句客户异议不得推演“担心涨价、害怕麻烦、希望锁定权益”等心理原因。没有依据时必须输出
    空数组；客户原话 expressions 不得混入销售回复。
 6. entityMentions 只记录会参与对象身份、过滤或关系查询的稳定业务实体；不得只输出字符串。每项必须
    严格为 {{"mentionId":"P1-M1","text":"原文实体名","proposedType":"PRODUCT",
    "referenceRole":"ABOUT_PRODUCT","sourceRef":"主张中的真实anchorId"}}。不确定类型时不输出。
-7. relations 只记录本批明确且有证据的关系，每项必须严格为
+7. relations 只记录本批明确且有证据的关系，relationType 只能是 ABOUT、APPLIES_TO、
+   SUPPORTS、ADDRESSES、GUIDES、CONSTRAINED_BY、EVALUATED_BY、EXEMPLIFIED_BY；每项必须严格为
    {{"relationKind":"entity|object","relationType":"关系类型","sourceRef":"P1或P1-M1",
    "targetRef":"P2或P2-M1","evidence":["真实anchorId"]}}。无法同时满足引用和证据时不输出。
 8. sourceClaimIds 只是本任务可用的证据范围，不代表已经写入正文。必须用 claimUsage 逐条声明正文
@@ -283,10 +258,9 @@ def build_content_realization_request(
    不能用 $.facts[0]、$.items 之类父级对象一次覆盖多项内容。来源没有支持的步骤、适用场景、
    限制、心理原因或行动建议必须删除或按合同留空，不得为了填满合同而推演。
    以下字段属于正式化门禁，任何非空叶子缺少精确 claimUsage 都会保留为调试候选、但禁止形成正式
-   KnowledgeObject：D1.1 的 facts、limitations；D1.3 的 preconditions、rulesOrSteps 正文、
-   exceptions；D3.3 的 triggerConditions、
-   decisionLogic、actions；D4.1 的 script；D4.2 的 expressions、resolutionElements；
-   D4.2 若有 rootConcernHypotheses，其每个字段也必须追溯；D4.3 的 question、answer。
+   KnowledgeObject：D1.1 的 facts、limitations；D1.2 的 preconditions、rulesOrSteps 正文、
+   exceptions；D3.2 的 triggerConditions、decisionLogic、actions；D4.2 的 script 和问答；
+   D4.1 的 expressions、resolutionElements 及非空 rootConcernHypotheses。
    不要用 summary 或笼统解释代替这些字段的逐项追溯。
 9. 计划内没有真实写入正文的主张必须进入 omittedClaims，逐条给出 claimId 与具体业务原因；
    不能既出现在 claimUsage 又出现在 omittedClaims，不能为了覆盖率虚报已消费。
@@ -339,12 +313,12 @@ def build_plan_coverage_repair_request(
    不能为了提高覆盖率创建重复对象。
 3. 主张具有独立消费职责、身份或更新生命周期时才新建 objectPlans。新计划 ID 使用 R1、R2……，
    只输出规划字段，不输出 content、domain、边界、分类依据、实体或关系。
-4. 完整话术与方法/策略职责不同；FAQ 的遗漏条目补入已有 QA_PAIR；可跨客群复用的方法原则归 D3.2，
-   带明确客群、产品组合或条件动作的策略归 D3.3。
+4. 完整话术与方法/策略职责不同；FAQ 的遗漏条目补入已有 QA_PAIR；方法和策略归 D3.2，
+   完整回应归 D4.2。
 5. moduleHints 已被清空，因为发现阶段提示不是分类结论。必须依据主张语义和当前规则重新裁决。
 6. 不得补造来源没有的事实、心理原因、流程步骤或话术。只输出合法 JSON。
 
-当前 D1-D5 / 22个模块规划合同：
+当前 D1-D5 / 12个候选模块规划合同：
 {render_planning_contracts_for_prompt()}
 
 为避免输出截断，objectPlans 必须使用紧凑数组，每项依次为

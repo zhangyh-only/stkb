@@ -1,0 +1,186 @@
+version = "d1-d5-v0.8"
+status = "sample_validation"
+source = "docs/research/STKB-通用销售知识规则体系与识别机制重审建议.md"
+
+[scope_definitions]
+core = "12个候选知识内容模块共同构成跨行业销售知识核心；模块数量仍需多行业样本验证。"
+optional = "可选性下沉到对象合同和适用范围，不再为少数对象单独保留模块。"
+
+[[domains]]
+code = "D1"
+name = "供给与事实"
+question = "卖什么，事实和使用规则是什么"
+meaning = "管理产品、服务和方案的可核验事实、价值依据、业务规则和履约流程。"
+boundary = "不负责解释客户为什么购买，也不保存销售动作和表达成品。"
+
+[[domains]]
+code = "D2"
+name = "买方与决策"
+question = "卖给谁，客户为什么行动"
+meaning = "管理稳定买方结构、决策角色、需求、动机和有证据的行为信号。"
+boundary = "不把单个客户状态或一次对话推断直接提升为通用画像或规律。"
+
+[[domains]]
+code = "D3"
+name = "销售行动与约束"
+question = "在什么场景下应该怎么做"
+meaning = "管理销售场景与旅程、方法与策略以及销售行为约束。"
+boundary = "不保存某次会话运行状态，也不保存完整回应文本和评价结果。"
+
+[[domains]]
+code = "D4"
+name = "互动与内容"
+question = "客户怎么表达，销售怎么回应"
+meaning = "管理客户表达与交互意图、回应内容、案例和赋能资产。"
+boundary = "不复制底层事实真值，不把未经核验的生成内容直接发布为正式话术。"
+
+[[domains]]
+code = "D5"
+name = "评价与治理"
+question = "怎样判断做得好不好"
+meaning = "管理能力与评分规则，以及用于验证知识和识别机制的基准。"
+boundary = "单次会话分数、模型判断和运行日志属于运行结果，不作为规范知识。"
+
+[[modules]]
+domain = "D1"
+code = "D1.1"
+name = "供给事实与价值"
+scope = "core"
+meaning = "管理供给事实、参考清单、比较快照和由事实支撑的客户价值。"
+object_types = ["PRODUCT_FACT", "PRODUCT_VERSION_FACT", "PRODUCT_COMPONENT_FACT", "LIST_FACT", "LIST_ITEM_FACT", "ELIGIBILITY_FACT", "COMPETITOR_FACT", "COMPARISON_SNAPSHOT", "SELLING_POINT"]
+core_objects = ["供给事实", "参考清单", "比较快照", "价值主张"]
+boundary = "以供给主体、事实主题、版本或时点归并；价值必须引用事实，清单成员默认是对象内部条目。"
+sources = ["产品与方案说明", "价格与服务目录", "官方清单", "可核验竞品资料"]
+consumers = ["知识问答", "推荐", "策略和话术", "角色扮演", "评价"]
+
+[[modules]]
+domain = "D1"
+code = "D1.2"
+name = "供给规则与履约流程"
+scope = "core"
+meaning = "管理获得、使用或交付供给时适用的业务规则和完整流程。"
+object_types = ["POLICY_RULE_SET", "BUSINESS_PROCESS", "PROCESS_STEP"]
+core_objects = ["业务规则", "履约流程"]
+boundary = "规则约束供给使用，流程描述完成业务结果的步骤；销售会话策略和销售合规另行管理。"
+sources = ["合同与政策", "服务手册", "SOP", "资格和价格规则"]
+consumers = ["规则问答", "资格判断", "办理引导", "场景装配"]
+
+[[modules]]
+domain = "D2"
+code = "D2.1"
+name = "买方模型与决策角色"
+scope = "core"
+meaning = "管理稳定画像维度、买方画像、决策角色和影响关系。"
+object_types = ["PROFILE_DIMENSION", "PROFILE_DIMENSION_VALUE", "CUSTOMER_PROFILE", "PROFILE_BACKGROUND_FACT", "DECISION_ROLE", "INFLUENCE_RELATION", "ROLE_CONCERN"]
+core_objects = ["画像维度", "买方画像", "决策角色"]
+boundary = "只保存可跨单次会话复用的稳定结构；当前客户状态和一次行为推断不进入本模块。"
+sources = ["客户研究", "访谈与调研", "分群定义", "组织采购资料"]
+consumers = ["客户识别", "角色扮演", "策略过滤", "场景装配"]
+
+[[modules]]
+domain = "D2"
+code = "D2.2"
+name = "需求、动机与行为信号"
+scope = "core"
+meaning = "管理客户问题、期望结果、痛点、动机和有证据的可观察信号。"
+object_types = ["CUSTOMER_NEED", "PAIN_POINT", "PURCHASE_MOTIVATION", "URGENCY_RULE", "PERSUASION_TRIGGER", "TRUST_TRIGGER", "REJECTION_TRIGGER", "RESPONSE_PATTERN"]
+core_objects = ["客户需求", "购买动机", "行为信号"]
+boundary = "信号是观察证据，不等同于需求、心理结论或销售策略；单次反应只能作为案例证据。"
+sources = ["VOC", "客户访谈", "调研", "对话记录", "案例"]
+consumers = ["对话分析", "需求识别", "推荐", "策略路由", "AI客户"]
+
+[[modules]]
+domain = "D3"
+code = "D3.1"
+name = "销售场景与旅程"
+scope = "core"
+meaning = "管理稳定销售场景、阶段、转移条件和完成边界。"
+object_types = ["SALES_SCENARIO", "SALES_STAGE", "STAGE_TRANSITION_RULE", "STAGE_COMPLETION_MARKER"]
+core_objects = ["销售场景", "销售旅程"]
+boundary = "保存稳定流程骨架；某次会话当前阶段属于运行状态，条件化动作属于D3.2。"
+sources = ["销售流程", "场景设计", "培训规范", "质检标准"]
+consumers = ["陪练编排", "阶段检测", "分阶段评价", "策略装配"]
+
+[[modules]]
+domain = "D3"
+code = "D3.2"
+name = "销售方法与策略"
+scope = "core"
+meaning = "管理通用销售方法、条件化策略、判断规则和下一步动作。"
+object_types = ["SALES_TECHNIQUE", "METHOD_STEP", "APPLICABILITY_CONDITION", "SALES_STRATEGY", "DECISION_RULE", "NEXT_BEST_ACTION", "CLARIFYING_QUESTION"]
+core_objects = ["销售方法", "销售策略"]
+boundary = "方法按作用机制归并，策略按目标和触发情境归并；场景骨架、完整话术和产品事实不进入。"
+sources = ["销售方法论", "训练材料", "优秀案例", "质检反馈"]
+consumers = ["销售助手", "陪练决策", "教学", "话术选择", "改进建议"]
+
+[[modules]]
+domain = "D3"
+code = "D3.3"
+name = "销售约束与合规"
+scope = "core"
+meaning = "管理销售表达和行为的必须、禁止、限制、风险模式及允许做法。"
+object_types = ["COMPLIANCE_RULE", "PROHIBITED_EXPRESSION", "RISK_PATTERN", "COMPLIANT_REWRITE_GUIDE"]
+core_objects = ["销售约束", "合规规则"]
+boundary = "必须具有法规、制度、合同或授权依据；一般业务规则归D1.2。"
+sources = ["法规与监管文件", "公司制度", "合同条款", "稽核案例"]
+consumers = ["生成约束", "实时提示", "评分扣分", "审核解释"]
+
+[[modules]]
+domain = "D4"
+code = "D4.1"
+name = "客户表达与交互意图"
+scope = "core"
+meaning = "管理客户问题、异议、请求和术语表达的规范意图与表达变体。"
+object_types = ["CUSTOMER_OBJECTION", "ROOT_CONCERN_HYPOTHESIS", "RESOLUTION_ELEMENT", "TERM"]
+core_objects = ["交互意图", "客户异议"]
+boundary = "规范客户说了什么；心理根因必须有来源，完整回应和事实答案归D4.2。"
+sources = ["真实对话", "异议资料", "FAQ问法", "客户研究"]
+consumers = ["查询理解", "对话分析", "AI客户", "回应检索"]
+
+[[modules]]
+domain = "D4"
+code = "D4.2"
+name = "回应与对话内容"
+scope = "core"
+meaning = "管理标准回答、话术、解释、回应结构和可发布表达变体。"
+object_types = ["STANDARD_SCRIPT", "SCRIPT_VARIANT", "QA_PAIR", "STANDARD_EXPLANATION"]
+core_objects = ["回应指南", "标准话术"]
+boundary = "回应必须引用事实、策略和必要合规约束；不复制底层事实，不保存客户意图本身。"
+sources = ["标准话术", "FAQ答案", "培训材料", "核验案例"]
+consumers = ["助手生成", "实时建议", "角色扮演", "话术评价"]
+
+[[modules]]
+domain = "D4"
+code = "D4.3"
+name = "案例与赋能资产"
+scope = "core"
+meaning = "管理完整销售案例和引用正式知识的物料、话术卡、微课等交付资产。"
+object_types = ["SALES_CASE", "KEY_EVENT", "CASE_OUTCOME", "SUCCESS_FAILURE_CAUSE", "LESSON_LEARNED", "SALES_MATERIAL", "SCRIPT_CARD", "MICRO_LESSON_CARD"]
+core_objects = ["销售案例", "赋能资产"]
+boundary = "案例保存事件链和外推限制，资产保存引用和交付信息；原始文件和单案例通用化结论不进入。"
+sources = ["复盘和教学案例", "PPT", "海报", "课程", "销售卡片"]
+consumers = ["案例教学", "场景包", "训练补强", "文件阅读"]
+
+[[modules]]
+domain = "D5"
+code = "D5.1"
+name = "评价模型与评分规则"
+scope = "core"
+meaning = "管理能力维度、行为锚点、检测规则、评分逻辑和宽容边界。"
+object_types = ["CHECK_UNIT", "TRIGGER_CONDITION", "COMPETENCY_DIMENSION", "BEHAVIOR_ANCHOR", "PROFICIENCY_LEVEL", "EVALUATION_METRIC", "SCORING_RULE", "EVIDENCE_REQUIREMENT", "TOLERANCE_RULE"]
+core_objects = ["评价模型", "评价规则"]
+boundary = "规范如何观察和评分；产品价值归D1.1，单次分数和运行判断不进入。"
+sources = ["能力模型", "质检表", "评分标准", "岗位要求"]
+consumers = ["实时评价", "总体评价", "能力诊断", "改进建议"]
+
+[[modules]]
+domain = "D5"
+code = "D5.2"
+name = "基准与回归治理"
+scope = "core"
+meaning = "管理用于验证知识、识别、检索和评价机制的稳定样本与检查标准。"
+object_types = ["EVALUATION_BENCHMARK", "GOLDEN_SAMPLE", "REGRESSION_PROBE", "ACCEPTANCE_CHECKLIST"]
+core_objects = ["评价基准", "黄金样本", "回归探针"]
+boundary = "绑定验证目标和目标版本；未经评审的生产运行结果不能自动成为Gold。"
+sources = ["人工标注", "回归用例", "验收记录", "测试报告"]
+consumers = ["规则回归", "方案比较", "客户验收", "机制验证"]

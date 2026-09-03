@@ -148,11 +148,13 @@ class NoEvaluationRepository(InMemoryRepository):
         raise IdentificationRecordNotFound(document_package_id)
 
 
-def _api_contract_content(module: str, summary: str) -> dict[str, object]:
+def _api_contract_content(
+    module: str, summary: str, object_type: str = "PRODUCT_FACT"
+) -> dict[str, object]:
     contract = CONTENT_CONTRACT_BY_MODULE[module]
     content: dict[str, object] = {
         field: f"测试字段 {field}"
-        for field in contract.required_fields
+        for field in contract.required_fields_by_type[object_type]
     }
     content["summary"] = summary
     content["contractDetail"] = "用于验证内容合同的结构化测试详情。" * 20
@@ -216,17 +218,17 @@ def test_api_runs_identification_and_reads_the_saved_result(
     assert materials_response.json()[0]["sourceFileName"] == "sample.pdf"
     assert materials_response.json()[0]["documentPackageId"] == "DP-API"
     assert catalog_response.status_code == 200
-    assert len(catalog_response.json()["modules"]) == 22
-    assert catalog_response.json()["version"] == "d1-d5-v0.7"
+    assert len(catalog_response.json()["modules"]) == 12
+    assert catalog_response.json()["version"] == "d1-d5-v0.8"
     assert catalog_response.json()["status"] == "sample_validation"
     assert len(catalog_response.json()["fingerprint"]) == 64
     assert catalog_response.json()["source"].endswith(
-        "STKB-D1-D5知识对象与业务图模型映射矩阵.md"
+        "STKB-通用销售知识规则体系与识别机制重审建议.md"
     )
     assert catalog_response.json()["modules"][0]["meaning"]
     assert catalog_response.json()["modules"][0]["boundary"]
     assert len(catalog_response.json()["domains"]) == 5
-    assert catalog_response.json()["domains"][0]["question"] == "卖什么"
+    assert catalog_response.json()["domains"][0]["question"] == "卖什么，事实和使用规则是什么"
     assert set(catalog_response.json()["scopeDefinitions"]) == {"core", "optional"}
     assert catalog_response.json()["contentContractVersion"] == (
         "object-content-contracts-v1.3"
@@ -235,18 +237,21 @@ def test_api_runs_identification_and_reads_the_saved_result(
         "object-identity-contracts-v0.3"
     )
     assert catalog_response.json()["modules"][0]["contentContract"][
-        "requiredFields"
+        "requiredFieldsByType"
     ]
-    d43 = next(
+    assert catalog_response.json()["modules"][0]["contentContract"][
+        "minimumContentCharsByType"
+    ]["SELLING_POINT"] == 200
+    d41 = next(
         module
         for module in catalog_response.json()["modules"]
-        if module["code"] == "D4.3"
+        if module["code"] == "D4.1"
     )
-    assert d43["contentContract"]["requiredFieldsByType"]["TERM"] == [
+    assert d41["contentContract"]["requiredFieldsByType"]["TERM"] == [
         "terms",
         "applicability",
     ]
-    assert d43["contentContract"]["itemFieldsByType"]["TERM"] == [
+    assert d41["contentContract"]["itemFieldsByType"]["TERM"] == [
         "termText",
         "standardExplanation",
         "sourceStance",
@@ -257,7 +262,7 @@ def test_api_runs_identification_and_reads_the_saved_result(
     ]
     assert run_response.status_code == 200
     assert run_response.json()["status"] == "completed"
-    assert run_response.json()["modelConfiguration"]["documentMaxChars"] == 3500
+    assert run_response.json()["modelConfiguration"]["documentMaxChars"] == 16000
     assert run_response.json()["candidates"][0]["candidateId"] == "P1"
     assert formation_response.status_code == 200
     assert formation_response.json()["status"] == "completed"

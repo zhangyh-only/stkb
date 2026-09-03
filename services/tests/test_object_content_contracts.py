@@ -14,7 +14,7 @@ def test_content_contracts_cover_every_module_and_object_type() -> None:
     for module in KNOWLEDGE_MODULES:
         contract = CONTENT_CONTRACT_BY_MODULE[module.code]
         assert set(contract.object_types) == set(module.object_types)
-        assert contract.required_fields
+        assert contract.required_fields_by_type
         assert contract.minimum_content_chars >= 120
         assert contract.inclusion and contract.exclusion
         assert contract.positive_example and contract.negative_example
@@ -22,7 +22,7 @@ def test_content_contracts_cover_every_module_and_object_type() -> None:
 
 def test_summary_only_content_fails_quality_gate() -> None:
     errors = validate_candidate_content(
-        "D4.1",
+        "D4.2",
         "STANDARD_SCRIPT",
         {"summary": "包含多种标准话术。"},
     )
@@ -54,7 +54,7 @@ def test_complete_type_specific_content_passes_quality_gate() -> None:
         ],
     }
 
-    assert validate_candidate_content("D4.1", "STANDARD_SCRIPT", content) == []
+    assert validate_candidate_content("D4.2", "STANDARD_SCRIPT", content) == []
 
 
 def test_explicitly_allowed_empty_fields_do_not_force_model_invention() -> None:
@@ -66,7 +66,7 @@ def test_explicitly_allowed_empty_fields_do_not_force_model_invention() -> None:
         "complianceConstraints": [],
     }
 
-    assert validate_candidate_content("D4.1", "STANDARD_SCRIPT", content) == []
+    assert validate_candidate_content("D4.2", "STANDARD_SCRIPT", content) == []
 
 
 def test_d13_allows_empty_preconditions_when_source_does_not_define_them() -> None:
@@ -80,7 +80,7 @@ def test_d13_allows_empty_preconditions_when_source_does_not_define_them() -> No
         "contractDetail": "规则来自原始资料，资料未定义额外进入条件。" * 20,
     }
 
-    assert validate_candidate_content("D1.3", "POLICY_RULE_SET", content) == []
+    assert validate_candidate_content("D1.2", "POLICY_RULE_SET", content) == []
 
 
 def test_validates_stable_field_shapes_for_formal_content() -> None:
@@ -109,14 +109,14 @@ def test_standard_script_rejects_nested_wrapper_after_normalization_stage() -> N
         "detail": "补充文字不能掩盖 script 字段类型不符合正式合同。" * 20,
     }
 
-    errors = validate_candidate_content("D4.1", "STANDARD_SCRIPT", content)
+    errors = validate_candidate_content("D4.2", "STANDARD_SCRIPT", content)
 
     assert "content fields must be non-empty strings: script" in errors
 
 
 def test_term_cannot_use_qa_pair_content_shape() -> None:
     errors = validate_candidate_content(
-        "D4.3",
+        "D4.1",
         "TERM",
         {
             "items": [{"question": "什么是嫌货", "answer": "提出异议的客户"}],
@@ -131,7 +131,7 @@ def test_term_cannot_use_qa_pair_content_shape() -> None:
 
 def test_term_requires_explanation_for_each_term_item() -> None:
     errors = validate_candidate_content(
-        "D4.3",
+        "D4.1",
         "TERM",
         {
             "terms": [{"termText": "嫌货才是买货人"}],
@@ -167,7 +167,7 @@ def test_term_accepts_complete_nested_items() -> None:
         ),
     }
 
-    assert validate_candidate_content("D4.3", "TERM", content) == []
+    assert validate_candidate_content("D4.1", "TERM", content) == []
 
 
 def test_objection_allows_empty_root_hypotheses_without_invention() -> None:
@@ -191,7 +191,7 @@ def test_objection_allows_empty_root_hypotheses_without_invention() -> None:
         * 3,
     }
 
-    assert validate_candidate_content("D4.2", "CUSTOMER_OBJECTION", content) == []
+    assert validate_candidate_content("D4.1", "CUSTOMER_OBJECTION", content) == []
 
 
 def test_objection_rejects_unstable_resolution_element_shape() -> None:
@@ -213,7 +213,7 @@ def test_objection_rejects_unstable_resolution_element_shape() -> None:
         * 5,
     }
 
-    errors = validate_candidate_content("D4.2", "CUSTOMER_OBJECTION", content)
+    errors = validate_candidate_content("D4.1", "CUSTOMER_OBJECTION", content)
 
     assert (
         "resolutionElements item 1 missing string fields: element, detail"
@@ -236,6 +236,6 @@ def test_objection_resolution_detail_cannot_repeat_customer_expression() -> None
         "sourceDetail": "用于确认客户原话不能被当作化解要素正文重复写入。" * 8,
     }
 
-    errors = validate_candidate_content("D4.2", "CUSTOMER_OBJECTION", content)
+    errors = validate_candidate_content("D4.1", "CUSTOMER_OBJECTION", content)
 
     assert any("repeats the customer expression" in error for error in errors)

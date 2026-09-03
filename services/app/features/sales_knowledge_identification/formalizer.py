@@ -13,6 +13,7 @@ from .models import (
     CandidateKnowledgeObject,
     DocumentPackage,
     FormalKnowledgeObject,
+    FormalKnowledgeRelationship,
     IdentificationResult,
     KnowledgeFormationResult,
     KnowledgeFormationStage,
@@ -21,6 +22,53 @@ from .models import (
     KnowledgeObjectSourceTrace,
     ResolvedBusinessEntity,
 )
+
+CONTENT_FIELD_LABELS = {
+    "subject": "知识主体",
+    "facts": "事实内容",
+    "applicability": "适用范围",
+    "limitations": "限制与边界",
+    "purpose": "业务目的",
+    "preconditions": "前置条件",
+    "rulesOrSteps": "规则或步骤",
+    "exceptions": "例外情况",
+    "strategyName": "策略名称",
+    "triggerConditions": "触发条件",
+    "decisionLogic": "判断逻辑",
+    "actions": "建议动作",
+    "communicationGoal": "沟通目标",
+    "script": "建议表达",
+    "factReferences": "事实依据",
+    "complianceConstraints": "合规边界",
+    "objectionTheme": "异议主题",
+    "expressions": "客户表达",
+    "context": "适用情境",
+    "rootConcernHypotheses": "有依据的顾虑假设",
+    "resolutionElements": "回应要点",
+    "items": "知识条目",
+    "terms": "术语条目",
+}
+
+FORMAL_RELATION_TYPES = {
+    "ABOUT",
+    "APPLIES_TO",
+    "SUPPORTS",
+    "ADDRESSES",
+    "GUIDES",
+    "CONSTRAINED_BY",
+    "EVALUATED_BY",
+    "EXEMPLIFIED_BY",
+}
+INVERSE_RELATION_LABELS = {
+    "ABOUT": "HAS_KNOWLEDGE",
+    "APPLIES_TO": "HAS_APPLICABLE_KNOWLEDGE",
+    "SUPPORTS": "SUPPORTED_BY",
+    "ADDRESSES": "ADDRESSED_BY",
+    "GUIDES": "GUIDED_BY",
+    "CONSTRAINED_BY": "CONSTRAINS",
+    "EVALUATED_BY": "EVALUATES",
+    "EXEMPLIFIED_BY": "EXEMPLIFIES",
+}
 
 
 @dataclass(frozen=True)
@@ -141,6 +189,19 @@ class KnowledgeObjectFormationService:
             )
             for object_id, candidates in groups.items()
         ]
+        object_by_candidate = {
+            candidate_id: item.knowledge_object_id
+            for item in knowledge_objects
+            for candidate_id in item.source_candidate_ids
+        }
+        relationships = self._resolve_relationships(
+            eligible_candidates,
+            object_by_candidate,
+            entity_by_mention,
+            {item.knowledge_object_id: item.revision for item in knowledge_objects},
+            identification.run_id,
+            document_package.document_package_id,
+        )
         created_count = sum(item.action == "created" for item in knowledge_objects)
         updated_count = sum(item.action == "updated" for item in knowledge_objects)
         reused_count = sum(item.action == "reused" for item in knowledge_objects)
@@ -152,13 +213,14 @@ class KnowledgeObjectFormationService:
             for item in knowledge_objects:
                 if item.action == "created" or not item.file_sha256:
                     self._write_accepted_object(
-                        item, document_package.document_package_id
+                        item, document_package.document_package_id, relationships
                     )
         return KnowledgeFormationResult(
             run_id=identification.run_id,
             document_package_id=document_package.document_package_id,
             entities=entities,
             knowledge_objects=knowledge_objects,
+            relationships=relationships,
             stages=[
                 KnowledgeFormationStage(
                     key="entity_resolution",
@@ -202,6 +264,61 @@ class KnowledgeObjectFormationService:
             quality_blocked_count=len(quality_blocked_candidate_ids),
             formal_knowledge_files=sum(bool(item.file_sha256) for item in knowledge_objects),
         )
+
+    @staticmethod
+    def _resolve_relationships(
+        candidates: list[CandidateKnowledgeObject],
+        object_by_candidate: dict[str, str],
+        entity_by_mention: dict[tuple[str, str], str],
+        revision_by_object: dict[str, int],
+        run_id: str,
+        document_package_id: str,
+    ) -> list[FormalKnowledgeRelationship]:
+        refs: dict[str, tuple[str, str]] = {
+            candidate_id: (object_id, "knowledge_object")
+            for candidate_id, object_id in object_by_candidate.items()
+        }
+        for candidate in candidates:
+            for mention in candidate.entity_mentions:
+                refs[mention.mention_id] = (
+                    entity_by_mention[(candidate.candidate_id, mention.mention_id)],
+                    "business_entity",
+                )
+        relationships: dict[str, FormalKnowledgeRelationship] = {}
+        for candidate in candidates:
+            for relation in candidate.relations:
+                source = refs.get(relation.source_ref)
+                target = refs.get(relation.target_ref)
+                if (
+                    source is None
+                    or target is None
+                    or relation.relation_type not in FORMAL_RELATION_TYPES
+                ):
+                    continue
+                identity = "|".join(
+                    (relation.relation_type, source[0], target[0])
+                )
+                relationship_id = (
+                    "KR-" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20].upper()
+                )
+                relationships[relationship_id] = FormalKnowledgeRelationship(
+                    relationship_id=relationship_id,
+                    relation_type=relation.relation_type,
+                    source_ref=source[0],
+                    source_kind=source[1],
+                    source_revision=revision_by_object.get(source[0]),
+                    target_ref=target[0],
+                    target_kind=target[1],
+                    target_revision=revision_by_object.get(target[0]),
+                    inverse_label=INVERSE_RELATION_LABELS[relation.relation_type],
+                    evidence=relation.evidence,
+                    provenance={
+                        "runId": run_id,
+                        "documentPackageId": document_package_id,
+                        "candidateId": candidate.candidate_id,
+                    },
+                )
+        return list(relationships.values())
 
     def _resolve_entities(
         self,
@@ -363,7 +480,10 @@ class KnowledgeObjectFormationService:
         )
 
     def _write_accepted_object(
-        self, item: FormalKnowledgeObject, document_package_id: str
+        self,
+        item: FormalKnowledgeObject,
+        document_package_id: str,
+        relationships: list[FormalKnowledgeRelationship],
     ) -> None:
         markdown = self._render_markdown(
             object_id=item.knowledge_object_id,
@@ -379,6 +499,12 @@ class KnowledgeObjectFormationService:
             evidence=item.evidence,
             document_package_id=document_package_id,
             source_traces=item.source_traces,
+            relationships=[
+                relationship
+                for relationship in relationships
+                if item.knowledge_object_id
+                in {relationship.source_ref, relationship.target_ref}
+            ],
         )
         item.file_sha256 = hashlib.sha256(markdown.encode("utf-8")).hexdigest()
         self._write_atomically(Path(item.file_path), markdown)
@@ -413,11 +539,15 @@ class KnowledgeObjectFormationService:
 
     @staticmethod
     def _identity_key(candidate: CandidateKnowledgeObject) -> str:
-        errors = validate_identity_hints(candidate.module, candidate.identity_hints)
+        errors = validate_identity_hints(
+            candidate.module, candidate.identity_hints, candidate.object_type
+        )
         if errors:
             raise ValueError("; ".join(errors))
         canonical = json.dumps(
-            canonical_identity(candidate.module, candidate.identity_hints),
+            canonical_identity(
+                candidate.module, candidate.identity_hints, candidate.object_type
+            ),
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
@@ -557,19 +687,31 @@ class KnowledgeObjectFormationService:
         evidence: list[str],
         document_package_id: str,
         source_traces: list[KnowledgeObjectSourceTrace],
+        relationships: list[FormalKnowledgeRelationship],
     ) -> str:
-        metadata = {
+        metadata: dict[str, str | int | list[str]] = {
             "knowledgeObjectId": object_id,
             "revision": revision,
             "domain": domain,
             "module": module,
             "objectType": object_type,
             "identityKey": identity_key,
-            "sourceLineageKeys": ",".join(source_lineage_keys),
+            "sourceLineageKeys": source_lineage_keys,
             "sourceDocumentPackage": document_package_id,
         }
         lines = ["---"]
-        lines.extend(f"{key}: {value}" for key, value in metadata.items())
+        for key, value in metadata.items():
+            if isinstance(value, list):
+                lines.append(f"{key}:")
+                lines.extend(
+                    f"  - {json.dumps(item, ensure_ascii=False)}" for item in value
+                )
+            else:
+                lines.append(
+                    f"{key}: {json.dumps(value, ensure_ascii=False)}"
+                    if isinstance(value, str)
+                    else f"{key}: {value}"
+                )
         lines.extend(
             [
                 "---",
@@ -578,14 +720,19 @@ class KnowledgeObjectFormationService:
                 "",
                 "## 规范内容",
                 "",
-                "```json",
-                json.dumps(content, ensure_ascii=False, indent=2),
-                "```",
-                "",
-                "## 业务实体引用",
-                "",
             ]
         )
+        lines.extend(_render_content_markdown(content))
+        lines.extend(["", "## 关联知识", ""])
+        if relationships:
+            lines.extend(
+                f"- `{item.source_ref}` — **{item.relation_type}** → "
+                f"`{item.target_ref}`（证据：{', '.join(item.evidence)}）"
+                for item in relationships
+            )
+        else:
+            lines.append("- 无")
+        lines.extend(["", "## 业务实体引用", ""])
         if entity_references:
             lines.extend(
                 f"- `{item.entity_id}` / `{item.reference_role}` / "
@@ -630,3 +777,57 @@ class KnowledgeObjectFormationService:
         temporary = target.with_suffix(".tmp")
         temporary.write_text(content, encoding="utf-8")
         temporary.replace(target)
+
+
+def _render_content_markdown(content: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
+    for field, value in content.items():
+        label = CONTENT_FIELD_LABELS.get(field, field)
+        lines.extend([f"### {label}", ""])
+        lines.extend(_render_markdown_value(value))
+        lines.append("")
+    if not lines:
+        return ["- 未提供规范内容"]
+    return lines[:-1]
+
+
+def _render_markdown_value(value: Any) -> list[str]:
+    if value in (None, "", [], {}):
+        return ["- 未提供"]
+    if isinstance(value, bool):
+        return ["是" if value else "否"]
+    if isinstance(value, (str, int, float)):
+        return [str(value)]
+    if isinstance(value, list):
+        lines: list[str] = []
+        for index, item in enumerate(value, start=1):
+            if isinstance(item, dict):
+                lines.append(f"#### 条目 {index}")
+                lines.append("")
+                lines.extend(_render_mapping_items(item))
+            else:
+                lines.append(f"- {_scalar_markdown(item)}")
+        return lines
+    if isinstance(value, dict):
+        return _render_mapping_items(value)
+    return [str(value)]
+
+
+def _render_mapping_items(value: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
+    for field, item in value.items():
+        label = CONTENT_FIELD_LABELS.get(field, field)
+        if isinstance(item, (dict, list)) and item not in ({}, []):
+            lines.extend([f"- **{label}**", ""])
+            lines.extend(f"  {line}" if line else "" for line in _render_markdown_value(item))
+        else:
+            lines.append(f"- **{label}**：{_scalar_markdown(item)}")
+    return lines
+
+
+def _scalar_markdown(value: Any) -> str:
+    if value in (None, "", [], {}):
+        return "未提供"
+    if isinstance(value, bool):
+        return "是" if value else "否"
+    return str(value)

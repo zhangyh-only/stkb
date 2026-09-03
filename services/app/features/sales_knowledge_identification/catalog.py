@@ -6,8 +6,8 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Literal
 
-RULE_PACKAGE_PATH = Path(__file__).with_name("rules") / "d1-d5-v0.7.toml"
-EXPECTED_MODULE_COUNT = 22
+RULE_PACKAGE_PATH = Path(__file__).with_name("rules") / "d1-d5-v0.8.toml"
+EXPECTED_MODULE_COUNT = 12
 EXPECTED_DOMAINS = {"D1", "D2", "D3", "D4", "D5"}
 
 
@@ -107,6 +107,9 @@ def _validate_rule_package(
         raise RuntimeError("knowledge rule package contains duplicate module codes")
     if {module.domain for module in modules} != EXPECTED_DOMAINS:
         raise RuntimeError("knowledge rule package must cover D1-D5")
+    object_types = [item for module in modules for item in module.object_types]
+    if len(object_types) != len(set(object_types)):
+        raise RuntimeError("object type contract may belong to only one module")
     for module in modules:
         if not module.code.startswith(f"{module.domain}."):
             raise RuntimeError(f"module {module.code} does not belong to {module.domain}")
@@ -133,6 +136,11 @@ def _validate_rule_package(
     KNOWLEDGE_MODULES,
 ) = _load_rule_package()
 MODULE_BY_CODE = {module.code: module for module in KNOWLEDGE_MODULES}
+MODULE_BY_OBJECT_TYPE = {
+    object_type: module
+    for module in KNOWLEDGE_MODULES
+    for object_type in module.object_types
+}
 DOMAIN_BY_CODE = {domain.code: domain for domain in KNOWLEDGE_DOMAINS}
 
 

@@ -9,6 +9,7 @@ from app.features.sales_knowledge_identification.models import (
     DocumentPackage,
     EntityMention,
     IdentificationResult,
+    ProposedRelation,
     SourceAnchor,
 )
 
@@ -100,7 +101,66 @@ def test_formalizer_creates_stable_entity_object_and_markdown(tmp_path: Path) ->
     assert knowledge_object.entity_references[0].entity_id == result.entities[0].entity_id
     file_path = tmp_path / knowledge_object.file_path
     assert file_path.is_file()
-    assert "# 药享保在线问诊服务事实" in file_path.read_text(encoding="utf-8")
+    markdown = file_path.read_text(encoding="utf-8")
+    assert "# 药享保在线问诊服务事实" in markdown
+    assert "## 规范内容" in markdown
+    assert "### summary" in markdown
+    assert "```json" not in markdown
+
+
+def test_formalizer_promotes_supported_candidate_relation_to_stable_refs(
+    tmp_path: Path,
+) -> None:
+    identification = _identification()
+    first = identification.candidates[0]
+    second = first.model_copy(
+        deep=True,
+        update={
+            "candidate_id": "C2",
+            "title": "药享保服务限制",
+            "identity_hints": {
+                **first.identity_hints,
+                "factTheme": "服务限制",
+            },
+        },
+    )
+    first.relations = [
+        ProposedRelation(
+            relation_kind="object",
+            relation_type="SUPPORTS",
+            source_ref="C1",
+            target_ref="C2",
+            evidence=["DP-FORMAL#section-1"],
+        )
+    ]
+    identification.candidates.append(second)
+
+    result = KnowledgeObjectFormationService(project_root=tmp_path).form(
+        document_package=_package(),
+        identification=identification,
+        existing_entities=set(),
+        existing_objects={},
+    )
+
+    assert len(result.relationships) == 1
+    relationship = result.relationships[0]
+    assert relationship.relationship_id.startswith("KR-")
+    assert relationship.relation_type == "SUPPORTS"
+    assert relationship.inverse_label == "SUPPORTED_BY"
+    assert relationship.source_revision == 1
+    assert relationship.target_revision == 1
+    assert relationship.provenance["runId"] == identification.run_id
+    assert {relationship.source_ref, relationship.target_ref} == {
+        item.knowledge_object_id for item in result.knowledge_objects
+    }
+    source_object = next(
+        item
+        for item in result.knowledge_objects
+        if item.knowledge_object_id == relationship.source_ref
+    )
+    markdown = (tmp_path / source_object.file_path).read_text(encoding="utf-8")
+    assert "## 关联知识" in markdown
+    assert "**SUPPORTS**" in markdown
 
 
 def test_formalizer_reuses_unchanged_object_and_requires_review_for_changed_content(

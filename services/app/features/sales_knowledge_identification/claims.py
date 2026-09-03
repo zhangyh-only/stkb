@@ -208,7 +208,7 @@ def supplement_structured_table_claims(
                             "strategyDescription": answer,
                         },
                         "module_hints": list(
-                            dict.fromkeys([*current.module_hints, "D3.3"])
+                            dict.fromkeys([*current.module_hints, "D3.2"])
                         ),
                         "evidence": strategy_evidence,
                     }
@@ -222,19 +222,19 @@ def supplement_structured_table_claims(
                         statement=f"资料明确的销售策略：{answer}",
                         subject=question or answer,
                         attributes={"strategyDescription": answer},
-                        module_hints=["D3.3"],
+                        module_hints=["D3.2"],
                         evidence=strategy_evidence,
                     )
                 )
         duties: list[tuple[str, str, str, str]] = []
         if question and answer and any(label in active_group for label in ("FAQ", "问答")):
-            duties.append(("qa", "D4.3", answer, "C列"))
+            duties.append(("qa", "D4.2", answer, "C列"))
         if question and script and "异议" in active_group:
             # 同一行既是“客户异议”证据，也是可直接消费的标准问答。
             # 两种知识对象职责不同，重叠使用同一来源是明确允许的。
-            duties.append(("objection", "D4.2", script, "D列"))
+            duties.append(("objection", "D4.1", script, "D列"))
             if _looks_like_information_question(question):
-                duties.append(("qa", "D4.3", script, "D列"))
+                duties.append(("qa", "D4.2", script, "D列"))
         for claim_kind, module_hint, response, response_selector in duties:
             matching_indexes = [
                 index
@@ -340,7 +340,7 @@ def supplement_explicit_internal_term_claims(
                         "standardDefinition": definition,
                         "sourceStance": "来源资料明确的内部定义",
                     },
-                    module_hints=["D4.3"],
+                    module_hints=["D4.1"],
                     evidence=[
                         ClaimEvidence(
                             anchor_id=anchor.anchor_id,

@@ -421,6 +421,91 @@ class PsycopgIdentificationRepository:
                             item.object_type,
                         ),
                     )
+            connection.execute(
+                """
+                UPDATE knowledge_relationship_sources
+                SET active = FALSE
+                WHERE document_package_id = %s AND active = TRUE
+                """,
+                (formation.document_package_id,),
+            )
+            for relationship in formation.relationships:
+                connection.execute(
+                    """
+                    INSERT INTO knowledge_relationships (
+                        relationship_id, workspace_id, relation_type,
+                        source_ref, source_kind, source_revision,
+                        target_ref, target_kind, target_revision,
+                        direction, inverse_label, scope, effective_period,
+                        evidence, provenance
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s
+                    )
+                    ON CONFLICT (relationship_id) DO UPDATE SET
+                        relation_type = EXCLUDED.relation_type,
+                        source_ref = EXCLUDED.source_ref,
+                        source_kind = EXCLUDED.source_kind,
+                        source_revision = EXCLUDED.source_revision,
+                        target_ref = EXCLUDED.target_ref,
+                        target_kind = EXCLUDED.target_kind,
+                        target_revision = EXCLUDED.target_revision,
+                        direction = EXCLUDED.direction,
+                        inverse_label = EXCLUDED.inverse_label,
+                        scope = EXCLUDED.scope,
+                        effective_period = EXCLUDED.effective_period,
+                        evidence = EXCLUDED.evidence,
+                        provenance = EXCLUDED.provenance,
+                        status = 'active',
+                        updated_at = NOW()
+                    """,
+                    (
+                        relationship.relationship_id,
+                        workspace_id,
+                        relationship.relation_type,
+                        relationship.source_ref,
+                        relationship.source_kind,
+                        relationship.source_revision,
+                        relationship.target_ref,
+                        relationship.target_kind,
+                        relationship.target_revision,
+                        relationship.direction,
+                        relationship.inverse_label,
+                        Jsonb(relationship.scope),
+                        Jsonb(relationship.effective_period),
+                        Jsonb(relationship.evidence),
+                        Jsonb(relationship.provenance),
+                    ),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO knowledge_relationship_sources (
+                        relationship_id, document_package_id, run_id, evidence, active
+                    ) VALUES (%s, %s, %s, %s, TRUE)
+                    ON CONFLICT (relationship_id, document_package_id, run_id)
+                    DO UPDATE SET evidence = EXCLUDED.evidence, active = TRUE
+                    """,
+                    (
+                        relationship.relationship_id,
+                        formation.document_package_id,
+                        formation.run_id,
+                        Jsonb(relationship.evidence),
+                    ),
+                )
+            connection.execute(
+                """
+                UPDATE knowledge_relationships relationship
+                SET status = 'inactive', updated_at = NOW()
+                WHERE relationship.workspace_id = %s
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM knowledge_relationship_sources source
+                      WHERE source.relationship_id = relationship.relationship_id
+                        AND source.active = TRUE
+                  )
+                """,
+                (workspace_id,),
+            )
             if superseded_object_ids:
                 connection.execute(
                     """

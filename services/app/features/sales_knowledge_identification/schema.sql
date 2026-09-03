@@ -142,3 +142,52 @@ CREATE TABLE IF NOT EXISTS knowledge_build_results (
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_objects_module
     ON knowledge_objects(workspace_id, domain, module, object_type);
+
+CREATE TABLE IF NOT EXISTS knowledge_relationships (
+    relationship_id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    relation_type TEXT NOT NULL,
+    source_ref TEXT NOT NULL,
+    source_kind TEXT NOT NULL,
+    source_revision INTEGER,
+    target_ref TEXT NOT NULL,
+    target_kind TEXT NOT NULL,
+    target_revision INTEGER,
+    direction TEXT NOT NULL DEFAULT 'forward',
+    inverse_label TEXT NOT NULL,
+    scope JSONB NOT NULL DEFAULT '{}'::jsonb,
+    effective_period JSONB NOT NULL DEFAULT '{}'::jsonb,
+    evidence JSONB NOT NULL,
+    provenance JSONB NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE knowledge_relationships
+    ADD COLUMN IF NOT EXISTS source_revision INTEGER,
+    ADD COLUMN IF NOT EXISTS target_revision INTEGER,
+    ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT 'forward',
+    ADD COLUMN IF NOT EXISTS inverse_label TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS scope JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS effective_period JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS provenance JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_relationships_source
+    ON knowledge_relationships(workspace_id, source_ref, relation_type);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_relationships_target
+    ON knowledge_relationships(workspace_id, target_ref, relation_type);
+
+CREATE TABLE IF NOT EXISTS knowledge_relationship_sources (
+    relationship_id TEXT NOT NULL REFERENCES knowledge_relationships(relationship_id),
+    document_package_id TEXT NOT NULL REFERENCES document_packages(document_package_id),
+    run_id UUID NOT NULL,
+    evidence JSONB NOT NULL,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (relationship_id, document_package_id, run_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_relationship_sources_active_package
+    ON knowledge_relationship_sources(document_package_id, active);

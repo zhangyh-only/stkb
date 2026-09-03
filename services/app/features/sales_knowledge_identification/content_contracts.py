@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .catalog import KNOWLEDGE_MODULES
+
 CONTRACTS_PATH = (
     Path(__file__).with_name("rules") / "object-content-contracts-v1.3.toml"
 )
@@ -172,17 +174,71 @@ def _load_contracts() -> tuple[str, tuple[ObjectContentContract, ...]]:
     return payload["version"], contracts
 
 
-CONTENT_CONTRACT_VERSION, OBJECT_CONTENT_CONTRACTS = _load_contracts()
+CONTENT_CONTRACT_VERSION, SOURCE_CONTENT_CONTRACTS = _load_contracts()
+CONTENT_CONTRACT_BY_OBJECT_TYPE = {
+    object_type: contract
+    for contract in SOURCE_CONTENT_CONTRACTS
+    for object_type in contract.object_types
+}
+
+
+def _module_contract(module_code: str, object_types: tuple[str, ...]) -> ObjectContentContract:
+    source_contracts = [CONTENT_CONTRACT_BY_OBJECT_TYPE[item] for item in object_types]
+    return ObjectContentContract(
+        module=module_code,
+        object_types=object_types,
+        required_fields=(),
+        required_fields_by_type={
+            object_type: CONTENT_CONTRACT_BY_OBJECT_TYPE[
+                object_type
+            ].required_fields_by_type.get(
+                object_type,
+                CONTENT_CONTRACT_BY_OBJECT_TYPE[object_type].required_fields,
+            )
+            for object_type in object_types
+        },
+        item_fields_by_type={
+            object_type: fields
+            for object_type in object_types
+            if (
+                fields := CONTENT_CONTRACT_BY_OBJECT_TYPE[
+                    object_type
+                ].item_fields_by_type.get(object_type)
+            )
+        },
+        allow_empty_fields=tuple(
+            dict.fromkeys(
+                field
+                for contract in source_contracts
+                for field in contract.allow_empty_fields
+            )
+        ),
+        minimum_content_chars=min(
+            contract.minimum_content_chars for contract in source_contracts
+        ),
+        granularity="按 objectType 合同确定 KnowledgeObject 边界；objectType 不是知识层级。",
+        inclusion="符合本模块业务职责，且满足对应 objectType 的字段与证据合同。",
+        exclusion="仅有摘要、运行状态，或应由相邻模块负责的内容。",
+        positive_example="内容按对象合同完整表达，并逐字段绑定来源证据。",
+        negative_example="只输出分类名称、summary 或没有证据的推断。",
+    )
+
+
+OBJECT_CONTENT_CONTRACTS = tuple(
+    _module_contract(module.code, module.object_types)
+    for module in KNOWLEDGE_MODULES
+)
 CONTENT_CONTRACT_BY_MODULE = {item.module: item for item in OBJECT_CONTENT_CONTRACTS}
 
 
 def validate_candidate_content(module: str, object_type: str, content: dict[str, Any]) -> list[str]:
-    contract = CONTENT_CONTRACT_BY_MODULE.get(module)
+    contract = CONTENT_CONTRACT_BY_OBJECT_TYPE.get(object_type)
     if contract is None:
-        return [f"content contract is missing for module {module}"]
+        return [f"content contract is missing for object type {object_type}"]
     errors: list[str] = []
-    if object_type not in contract.object_types:
-        errors.append(f"object type {object_type} is not covered by content contract {module}")
+    module_contract = CONTENT_CONTRACT_BY_MODULE.get(module)
+    if module_contract is None or object_type not in module_contract.object_types:
+        errors.append(f"object type {object_type} is not allowed for module {module}")
     required_fields = contract.required_fields_by_type.get(
         object_type, contract.required_fields
     )
@@ -346,11 +402,16 @@ def render_content_contracts_for_prompt(
                         if item.item_fields_by_type
                         else []
                     ),
-                    (
-                        "- 可显式为空的字段："
-                        + (", ".join(item.allow_empty_fields) or "无")
+                    "- 分对象合同可空字段："
+                    + "；".join(
+                        _render_allow_empty_fields(object_type)
+                        for object_type in item.object_types
                     ),
-                    f"- 最小有效内容量：序列化后 {item.minimum_content_chars} 字符",
+                    "- 分对象合同最小内容量："
+                    + "；".join(
+                        f"{object_type}={CONTENT_CONTRACT_BY_OBJECT_TYPE[object_type].minimum_content_chars}字符"
+                        for object_type in item.object_types
+                    ),
                     f"- 对象粒度：{item.granularity}",
                     f"- 纳入：{item.inclusion}",
                     f"- 排除：{item.exclusion}",
@@ -360,3 +421,8 @@ def render_content_contracts_for_prompt(
             )
         )
     return "\n\n".join(sections)
+
+
+def _render_allow_empty_fields(object_type: str) -> str:
+    fields = CONTENT_CONTRACT_BY_OBJECT_TYPE[object_type].allow_empty_fields
+    return f"{object_type}=[{', '.join(fields) or '无'}]"
