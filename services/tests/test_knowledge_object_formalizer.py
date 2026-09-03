@@ -487,6 +487,48 @@ def test_formalizer_keeps_quality_failed_candidate_out_of_formal_knowledge(
     assert not list(tmp_path.rglob("*.md"))
 
 
+def test_formalizer_does_not_publish_when_release_gate_is_blocked(
+    tmp_path: Path,
+) -> None:
+    result = KnowledgeObjectFormationService(project_root=tmp_path).form(
+        document_package=_package(),
+        identification=_identification(),
+        existing_entities=set(),
+        existing_objects={},
+        release_blockers=["Gold尚未批准"],
+    )
+
+    assert result.status == "review_required"
+    assert result.release_blockers == ["Gold尚未批准"]
+    assert result.formal_knowledge_files == 0
+    assert not list(tmp_path.rglob("*.md"))
+
+
+def test_formalizer_blocks_untyped_merge_for_same_identity_candidates(
+    tmp_path: Path,
+) -> None:
+    identification = _identification()
+    second = identification.candidates[0].model_copy(
+        deep=True,
+        update={
+            "candidate_id": "C2",
+            "content": {"summary": "同身份的另一份正文"},
+        },
+    )
+    identification.candidates.append(second)
+
+    result = KnowledgeObjectFormationService(project_root=tmp_path).form(
+        document_package=_package(),
+        identification=identification,
+        existing_entities=set(),
+        existing_objects={},
+    )
+
+    assert result.status == "review_required"
+    assert result.release_blockers == ["有 1 个同身份候选缺少类型化合并规则"]
+    assert not list(tmp_path.rglob("*.md"))
+
+
 def test_core_equivalence_ignores_script_metadata_and_qa_order_drift() -> None:
     service = KnowledgeObjectFormationService(project_root=Path("."))
 

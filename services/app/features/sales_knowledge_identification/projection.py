@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
-from pathlib import Path
 from time import perf_counter
 from typing import Any
 
@@ -12,6 +12,7 @@ from neo4j import GraphDatabase
 from psycopg.rows import dict_row
 
 from .models import (
+    FormalKnowledgeObject,
     KnowledgeFormationResult,
     KnowledgeFormationStage,
     KnowledgeStorageEvidence,
@@ -28,7 +29,6 @@ class KnowledgeProjectionService:
     def __init__(
         self,
         *,
-        project_root: Path,
         postgres_dsn: str,
         neo4j_uri: str,
         neo4j_user: str,
@@ -42,7 +42,6 @@ class KnowledgeProjectionService:
     ) -> None:
         if embedding_dimension != 1024:
             raise ValueError("the current pgvector schema requires 1024 dimensions")
-        self.project_root = project_root.resolve()
         self.postgres_dsn = postgres_dsn
         self.neo4j_uri = neo4j_uri
         self.neo4j_auth = (neo4j_user, neo4j_password)
@@ -62,16 +61,19 @@ class KnowledgeProjectionService:
         stages: list[KnowledgeFormationStage] = []
         vector_records = 0
         vector_record_data: list[dict[str, Any]] = []
+        units: list[dict[str, Any]] = []
         embedding_tokens = 0
         vector_started = perf_counter()
         try:
-            texts = [
-                self._formal_markdown(item.file_path)
+            units = [
+                unit
                 for item in formation.knowledge_objects
+                for unit in self._retrieval_units(item)
             ]
+            texts = [unit["retrievalText"] for unit in units]
             embeddings, embedding_tokens = self._embed(texts)
             vector_records = self._write_vectors(
-                workspace_id, formation, texts, embeddings
+                workspace_id, formation, units, embeddings
             )
             vector_record_data = self._read_vector_records(
                 formation.document_package_id
@@ -142,6 +144,7 @@ class KnowledgeProjectionService:
             evidence=KnowledgeStorageEvidence(
                 postgres_objects=len(formation.knowledge_objects),
                 formal_files=formation.formal_knowledge_files,
+                internal_items=sum(unit["contentPath"] != "$" for unit in units),
                 pgvector_records=vector_records,
                 neo4j_knowledge_objects=graph_counts[0],
                 neo4j_entities=graph_counts[1],
@@ -170,10 +173,62 @@ class KnowledgeProjectionService:
             stages=stages,
         )
 
-    def _formal_markdown(self, file_path: str) -> str:
-        path = (self.project_root / file_path).resolve()
-        path.relative_to(self.project_root)
-        return path.read_text(encoding="utf-8")
+    @staticmethod
+    def _retrieval_units(item: FormalKnowledgeObject) -> list[dict[str, Any]]:
+        item_fields = {
+            "PRODUCT_VERSION_FACT": "facts",
+            "LIST_FACT": "entryStructure",
+            "SELLING_POINT": "observableChecks",
+            "SALES_STRATEGY": "actions",
+            "QA_PAIR": "items",
+            "TERM": "terms",
+        }
+        field = item_fields.get(item.object_type)
+        values = item.content.get(field) if field else None
+        if not isinstance(values, list) or not values:
+            text = f"{item.title}\n{json.dumps(item.content, ensure_ascii=False)}"
+            return [
+                {
+                    "retrievalUnitId": f"RU-{item.knowledge_object_id}-R{item.revision}-ROOT",
+                    "itemId": None,
+                    "contentPath": "$",
+                    "retrievalText": text,
+                    "object": item,
+                }
+            ]
+        units = []
+        for index, value in enumerate(values):
+            serialized = json.dumps(value, ensure_ascii=False, sort_keys=True)
+            explicit_id = (
+                next(
+                    (
+                        value.get(key)
+                        for key in ("itemId", "claimRef", "stepId", "ruleId")
+                        if isinstance(value, dict) and value.get(key)
+                    ),
+                    None,
+                )
+                if isinstance(value, dict)
+                else None
+            )
+            item_id = str(explicit_id or hashlib.sha256(serialized.encode()).hexdigest()[:12])
+            units.append(
+                {
+                    "retrievalUnitId": (
+                        f"RU-{item.knowledge_object_id}-R{item.revision}-{item_id}"
+                    ),
+                    "itemId": item_id,
+                    "contentPath": f"$.{field}[{index}]",
+                    "retrievalText": (
+                        f"{item.title}\n问题：{value.get('question')}\n"
+                        f"答案：{value.get('answer')}"
+                        if item.object_type == "QA_PAIR" and isinstance(value, dict)
+                        else f"{item.title}\n{field}: {serialized}"
+                    ),
+                    "object": item,
+                }
+            )
+        return units
 
     def _embed(self, texts: list[str]) -> tuple[list[list[float]], int]:
         embeddings: list[list[float]] = []
@@ -207,7 +262,7 @@ class KnowledgeProjectionService:
         self,
         workspace_id: str,
         formation: KnowledgeFormationResult,
-        texts: list[str],
+        units: list[dict[str, Any]],
         embeddings: list[list[float]],
     ) -> int:
         with psycopg.connect(self.postgres_dsn) as connection:
@@ -218,22 +273,24 @@ class KnowledgeProjectionService:
                 """,
                 (formation.document_package_id,),
             )
-            for item, text, embedding in zip(
-                formation.knowledge_objects, texts, embeddings, strict=True
-            ):
+            for unit, embedding in zip(units, embeddings, strict=True):
+                item = unit["object"]
                 connection.execute(
                     """
                     INSERT INTO knowledge_retrieval_units (
                         retrieval_unit_id, workspace_id, document_package_id,
                         knowledge_object_id, revision, domain, module, object_type,
-                        title, retrieval_text, source_file_sha256, embedding_model,
+                        title, item_id, content_path, retrieval_text,
+                        source_file_sha256, embedding_model,
                         embedding_dimension, embedding, active
                     ) VALUES (
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s::vector, TRUE
+                        %s, %s, %s::vector, TRUE
                     )
                     ON CONFLICT (retrieval_unit_id) DO UPDATE SET
                         title = EXCLUDED.title,
+                        item_id = EXCLUDED.item_id,
+                        content_path = EXCLUDED.content_path,
                         retrieval_text = EXCLUDED.retrieval_text,
                         source_file_sha256 = EXCLUDED.source_file_sha256,
                         embedding_model = EXCLUDED.embedding_model,
@@ -243,7 +300,7 @@ class KnowledgeProjectionService:
                         updated_at = NOW()
                     """,
                     (
-                        f"RU-{item.knowledge_object_id}-R{item.revision}",
+                        unit["retrievalUnitId"],
                         workspace_id,
                         formation.document_package_id,
                         item.knowledge_object_id,
@@ -252,14 +309,16 @@ class KnowledgeProjectionService:
                         item.module,
                         item.object_type,
                         item.title,
-                        text,
-                        hashlib.sha256(text.encode()).hexdigest(),
+                        unit["itemId"],
+                        unit["contentPath"],
+                        unit["retrievalText"],
+                        item.file_sha256,
                         self.embedding_model,
                         self.embedding_dimension,
                         "[" + ",".join(str(value) for value in embedding) + "]",
                     ),
                 )
-        return len(formation.knowledge_objects)
+        return len(units)
 
     def _write_graph(
         self, workspace_id: str, formation: KnowledgeFormationResult
@@ -395,7 +454,8 @@ class KnowledgeProjectionService:
             rows = connection.execute(
                 """
                 SELECT retrieval_unit_id, knowledge_object_id, revision,
-                       embedding_model, embedding_dimension, active,
+                       item_id, content_path, embedding_model,
+                       embedding_dimension, active,
                        LEFT(retrieval_text, 160) AS text_preview
                 FROM knowledge_retrieval_units
                 WHERE document_package_id = %s AND active = TRUE

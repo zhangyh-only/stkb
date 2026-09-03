@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from app.features.sales_knowledge_identification.models import (
     FormalKnowledgeObject,
     KnowledgeFormationResult,
@@ -46,9 +44,6 @@ def _formation() -> KnowledgeFormationResult:
 
 def test_projection_reports_each_store_independently() -> None:
     class PartiallyFailingProjection(KnowledgeProjectionService):
-        def _formal_markdown(self, file_path: str) -> str:
-            return "# 测试知识"
-
         def _embed(self, texts: list[str]) -> tuple[list[list[float]], int]:
             return [[0.0] * 1024], 3
 
@@ -67,7 +62,6 @@ def test_projection_reports_each_store_independently() -> None:
             return [], []
 
     service = PartiallyFailingProjection(
-        project_root=Path("."),
         postgres_dsn="postgresql://unused",
         neo4j_uri="bolt://unused",
         neo4j_user="unused",
@@ -89,3 +83,60 @@ def test_projection_reports_each_store_independently() -> None:
     assert result.evidence.neo4j_entity_references == 2
     assert result.evidence.neo4j_knowledge_relationships == 3
     assert result.evidence.errors == ["pgvector: vector unavailable"]
+
+
+def test_retrieval_units_are_derived_from_internal_qa_items() -> None:
+    item = _formation().knowledge_objects[0].model_copy(
+        update={
+            "object_type": "QA_PAIR",
+            "content": {
+                "items": [
+                    {"question": "问题一", "answer": "答案一", "claimRef": "CL1"},
+                    {"question": "问题二", "answer": "答案二", "claimRef": "CL2"},
+                ]
+            },
+        }
+    )
+
+    units = KnowledgeProjectionService._retrieval_units(item)
+
+    assert [unit["itemId"] for unit in units] == ["CL1", "CL2"]
+    assert [unit["contentPath"] for unit in units] == [
+        "$.items[0]",
+        "$.items[1]",
+    ]
+    assert all("identityKey" not in unit["retrievalText"] for unit in units)
+    assert units[0]["retrievalText"].index("问题一") < units[0]["retrievalText"].index(
+        "答案一"
+    )
+
+
+def test_process_is_one_retrieval_unit_instead_of_isolated_steps() -> None:
+    item = _formation().knowledge_objects[0].model_copy(
+        update={
+            "object_type": "BUSINESS_PROCESS",
+            "content": {"rulesOrSteps": ["第一步", "第二步", "第三步"]},
+        }
+    )
+
+    units = KnowledgeProjectionService._retrieval_units(item)
+
+    assert len(units) == 1
+    assert units[0]["contentPath"] == "$"
+    assert "第一步" in units[0]["retrievalText"]
+    assert "第三步" in units[0]["retrievalText"]
+
+
+def test_policy_rule_set_is_one_retrieval_unit_with_related_rules() -> None:
+    item = _formation().knowledge_objects[0].model_copy(
+        update={
+            "object_type": "POLICY_RULE_SET",
+            "content": {"rulesOrSteps": ["处方保留72小时", "待付款订单可以继续支付"]},
+        }
+    )
+
+    units = KnowledgeProjectionService._retrieval_units(item)
+
+    assert len(units) == 1
+    assert "处方保留72小时" in units[0]["retrievalText"]
+    assert "待付款订单可以继续支付" in units[0]["retrievalText"]

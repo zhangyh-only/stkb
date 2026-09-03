@@ -5,6 +5,8 @@ import statistics
 from pathlib import Path
 from typing import Any
 
+from .content_contracts import CONTENT_CONTRACT_VERSION
+from .identity_contracts import IDENTITY_CONTRACT_VERSION
 from .models import (
     GoldGroupEvaluation,
     IdentificationQualityReport,
@@ -17,6 +19,21 @@ def evaluate_against_gold(
     gold_path: Path,
 ) -> IdentificationQualityReport:
     gold = json.loads(gold_path.read_text(encoding="utf-8"))
+    compatibility_issues = []
+    if gold.get("catalogVersion") not in (None, result.catalog_version):
+        compatibility_issues.append(
+            f"catalogVersion: {gold.get('catalogVersion')} != {result.catalog_version}"
+        )
+    if gold.get("contentContractVersion") not in (None, CONTENT_CONTRACT_VERSION):
+        compatibility_issues.append(
+            "contentContractVersion: "
+            f"{gold.get('contentContractVersion')} != {CONTENT_CONTRACT_VERSION}"
+        )
+    if gold.get("identityContractVersion") not in (None, IDENTITY_CONTRACT_VERSION):
+        compatibility_issues.append(
+            "identityContractVersion: "
+            f"{gold.get('identityContractVersion')} != {IDENTITY_CONTRACT_VERSION}"
+        )
     group_results = [_evaluate_group(item, result) for item in gold["expectedObjectGroups"]]
     expected_total = sum(item.expected_count for item in group_results)
     matched_total = sum(item.matched_count for item in group_results)
@@ -55,11 +72,15 @@ def evaluate_against_gold(
         candidate.attributed_content_leaf_count for candidate in result.candidates
     )
     overall_status = "pass" if groups_met == len(group_results) else "fail"
+    if compatibility_issues:
+        overall_status = "review"
     if gold.get("status") != "approved" and overall_status == "pass":
         overall_status = "review"
     return IdentificationQualityReport(
         gold_version=gold_path.name,
         gold_status=gold.get("status", "unknown"),
+        gold_compatible=not compatibility_issues,
+        compatibility_issues=compatibility_issues,
         overall_status=overall_status,
         expected_object_count=expected_total,
         matched_expected_count=matched_total,
@@ -89,8 +110,31 @@ def evaluate_against_gold(
         if content_lengths
         else 0,
         groups=group_results,
-        findings=findings,
+        findings=[*compatibility_issues, *findings],
     )
+
+
+def knowledge_release_blockers(result: IdentificationResult) -> list[str]:
+    report = result.quality_report
+    if report is None:
+        return ["缺少与当前合同兼容的质量基准"]
+    blockers = []
+    if report.gold_status != "approved":
+        blockers.append(f"Gold状态为 {report.gold_status}，尚未人工批准")
+    if not report.gold_compatible:
+        blockers.append("Gold与当前规则或合同版本不兼容")
+    if report.overall_status != "pass":
+        blockers.append(f"Gold总体结果为 {report.overall_status}")
+    if result.rejected_atomic_claims:
+        blockers.append(f"有 {len(result.rejected_atomic_claims)} 条来源主张被拒绝")
+    critical_unresolved = [item for item in result.unresolved_items if item.claim_id]
+    if critical_unresolved:
+        blockers.append(f"有 {len(critical_unresolved)} 条知识主张尚未处理")
+    if report.content_attribution_rate < 1:
+        blockers.append(
+            f"正文归因率 {report.content_attribution_rate:.2%}，未达到 100%"
+        )
+    return blockers
 
 
 def find_gold_path(

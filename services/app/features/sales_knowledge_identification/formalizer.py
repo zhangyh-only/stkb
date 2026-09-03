@@ -136,9 +136,11 @@ class KnowledgeObjectFormationService:
         existing_objects: dict[str, ExistingKnowledgeObjectState],
         existing_lineages: dict[str, str] | None = None,
         existing_document_object_ids: set[str] | None = None,
+        release_blockers: list[str] | None = None,
     ) -> KnowledgeFormationResult:
         existing_lineages = existing_lineages or {}
         existing_document_object_ids = existing_document_object_ids or set()
+        release_blockers = release_blockers or []
         quality_blocked_candidate_ids = [
             candidate.candidate_id
             for candidate in identification.candidates
@@ -188,6 +190,22 @@ class KnowledgeObjectFormationService:
             groups[object_id].append(candidate)
             identity_keys[object_id] = identity_key
             lineage_keys[object_id].add(lineage_key)
+
+        ambiguous_merge_count = sum(
+            len(candidates) > 1
+            and len(
+                {
+                    json.dumps(candidate.content, ensure_ascii=False, sort_keys=True)
+                    for candidate in candidates
+                }
+            )
+            > 1
+            for candidates in groups.values()
+        )
+        if ambiguous_merge_count:
+            release_blockers.append(
+                f"有 {ambiguous_merge_count} 个同身份候选缺少类型化合并规则"
+            )
 
         knowledge_objects = [
             self._form_object(
@@ -242,7 +260,9 @@ class KnowledgeObjectFormationService:
         review_required_count = sum(
             item.action == "review_required" for item in knowledge_objects
         )
-        requires_review = bool(review_required_count or quality_blocked_candidate_ids)
+        requires_review = bool(
+            review_required_count or quality_blocked_candidate_ids or release_blockers
+        )
         if not requires_review:
             for item in knowledge_objects:
                 if item.action == "created" or not item.file_sha256:
@@ -283,7 +303,12 @@ class KnowledgeObjectFormationService:
                     detail=(
                         f"有 {review_required_count} 项正文或身份集合变化，"
                         f"{len(quality_blocked_candidate_ids)} 个候选未通过追溯门槛；"
-                        "评审前不改写正式知识"
+                        + (
+                            "；".join(release_blockers) + "；"
+                            if release_blockers
+                            else ""
+                        )
+                        + "评审前不改写正式知识"
                         if requires_review
                         else f"写入或校验 {len(knowledge_objects)} 份正式 Markdown"
                     ),
@@ -298,6 +323,7 @@ class KnowledgeObjectFormationService:
             quality_blocked_candidate_ids=quality_blocked_candidate_ids,
             quality_blocked_count=len(quality_blocked_candidate_ids),
             formal_knowledge_files=sum(bool(item.file_sha256) for item in knowledge_objects),
+            release_blockers=release_blockers,
         )
 
     @staticmethod

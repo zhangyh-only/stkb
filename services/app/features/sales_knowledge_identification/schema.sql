@@ -189,6 +189,8 @@ CREATE TABLE IF NOT EXISTS knowledge_retrieval_units (
     module TEXT NOT NULL,
     object_type TEXT NOT NULL,
     title TEXT NOT NULL,
+    item_id TEXT,
+    content_path TEXT NOT NULL DEFAULT '$',
     retrieval_text TEXT NOT NULL,
     source_file_sha256 TEXT NOT NULL,
     embedding_model TEXT NOT NULL,
@@ -198,6 +200,10 @@ CREATE TABLE IF NOT EXISTS knowledge_retrieval_units (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE knowledge_retrieval_units
+    ADD COLUMN IF NOT EXISTS item_id TEXT,
+    ADD COLUMN IF NOT EXISTS content_path TEXT NOT NULL DEFAULT '$';
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_retrieval_units_active
     ON knowledge_retrieval_units(workspace_id, document_package_id, active);

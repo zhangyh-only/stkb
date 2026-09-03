@@ -1,0 +1,124 @@
+{
+  "status": "proxy_draft",
+  "catalogVersion": "d1-d5-v0.9",
+  "contentContractVersion": "object-content-contracts-v1.4",
+  "identityContractVersion": "object-identity-contracts-v0.4",
+  "documentPackageId": "DP-YXB-TRAINING-20260821",
+  "reviewFocus": "同一维护单元形成集合型KnowledgeObject，步骤、问答、卖点、规则行、版本行和策略分支作为内部item",
+  "expectedObjectGroups": [
+    {
+      "key": "product-version-matrix",
+      "expectedCount": 1,
+      "module": "D1.1",
+      "objectTypes": ["PRODUCT_VERSION_FACT"],
+      "evidence": ["DP-YXB-TRAINING-20260821#page-11"]
+    },
+    {
+      "key": "policy-and-channel-background",
+      "expectedCount": 1,
+      "module": "D1.1",
+      "objectTypes": ["PRODUCT_FACT"],
+      "evidence": ["DP-YXB-TRAINING-20260821#page-4"]
+    },
+    {
+      "key": "competitor-snapshot",
+      "expectedCount": 1,
+      "module": "D1.1",
+      "objectTypes": ["COMPETITOR_FACT", "COMPARISON_SNAPSHOT"],
+      "evidence": ["DP-YXB-TRAINING-20260821#page-6"]
+    },
+    {
+      "key": "sales-force-value-set",
+      "expectedCount": 1,
+      "module": "D1.1",
+      "objectTypes": ["SELLING_POINT"],
+      "evidence": ["DP-YXB-TRAINING-20260821#page-7"]
+    },
+    {
+      "key": "customer-value-proposition-set",
+      "expectedCount": 1,
+      "module": "D1.1",
+      "objectTypes": ["SELLING_POINT"],
+      "evidence": [
+        "DP-YXB-TRAINING-20260821#page-14",
+        "DP-YXB-TRAINING-20260821#page-15",
+        "DP-YXB-TRAINING-20260821#page-16"
+      ],
+      "requireAllEvidence": true
+    },
+    {
+      "key": "service-processes",
+      "expectedCount": 2,
+      "module": "D1.2",
+      "objectTypes": ["BUSINESS_PROCESS"],
+      "evidence": [
+        "DP-YXB-TRAINING-20260821#page-19",
+        "DP-YXB-TRAINING-20260821#page-20"
+      ],
+      "requireAllEvidence": true
+    },
+    {
+      "key": "service-rule-sets",
+      "expectedCount": 3,
+      "module": "D1.2",
+      "objectTypes": ["POLICY_RULE_SET"],
+      "evidence": [
+        "DP-YXB-TRAINING-20260821#page-18",
+        "DP-YXB-TRAINING-20260821#page-20",
+        "DP-YXB-TRAINING-20260821#page-24"
+      ],
+      "requireAllEvidence": true
+    },
+    {
+      "key": "service-provider-profile",
+      "expectedCount": 1,
+      "module": "D1.1",
+      "objectTypes": ["PRODUCT_COMPONENT_FACT"],
+      "evidence": [
+        "DP-YXB-TRAINING-20260821#page-22",
+        "DP-YXB-TRAINING-20260821#page-23"
+      ],
+      "requireAllEvidence": true
+    },
+    {
+      "key": "faq-set",
+      "expectedCount": 1,
+      "module": "D4.2",
+      "objectTypes": ["QA_PAIR"],
+      "requiredItemCount": 8,
+      "evidence": ["DP-YXB-TRAINING-20260821#page-25"]
+    },
+    {
+      "key": "product-term-set",
+      "expectedCount": 1,
+      "module": "D4.1",
+      "objectTypes": ["TERM"],
+      "evidence": ["DP-YXB-TRAINING-20260821#page-4"]
+    },
+    {
+      "key": "bundle-strategy-set",
+      "expectedCount": 1,
+      "module": "D3.2",
+      "objectTypes": ["SALES_STRATEGY"],
+      "evidence": ["DP-YXB-TRAINING-20260821#page-26"]
+    },
+    {
+      "key": "incomplete-list-source",
+      "expectedCount": 0,
+      "minimumExpectedCount": 0,
+      "maximumExpectedCount": 0,
+      "module": "D1.1",
+      "objectTypes": ["LIST_FACT"],
+      "requiredUnresolvedEvidence": [
+        "DP-YXB-TRAINING-20260821#page-10",
+        "DP-YXB-TRAINING-20260821#page-13"
+      ]
+    }
+  ],
+  "prohibitedPatterns": [
+    "把步骤、问答条目、版本行、卖点条目或策略分支直接升级成KnowledgeObject",
+    "把摘要性药品数量和示例误写成可查询的完整药品或疾病清单",
+    "把不同完成目标的在线问诊流程和在线药房流程合成一个无分支说明",
+    "使用当前、最新等无明确时点的市场或竞品身份"
+  ]
+}

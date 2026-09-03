@@ -322,6 +322,8 @@ class GoldGroupEvaluation(ApiModel):
 class IdentificationQualityReport(ApiModel):
     gold_version: str
     gold_status: str
+    gold_compatible: bool = True
+    compatibility_issues: list[str] = Field(default_factory=list)
     overall_status: Literal["pass", "fail", "review"]
     expected_object_count: int
     matched_expected_count: int
@@ -467,6 +469,7 @@ class KnowledgeFormationStage(ApiModel):
 class KnowledgeStorageEvidence(ApiModel):
     postgres_objects: int = 0
     formal_files: int = 0
+    internal_items: int = 0
     pgvector_records: int = 0
     neo4j_knowledge_objects: int = 0
     neo4j_entities: int = 0
@@ -502,6 +505,7 @@ class KnowledgeFormationResult(ApiModel):
     quality_blocked_candidate_ids: list[str] = Field(default_factory=list)
     quality_blocked_count: int = 0
     formal_knowledge_files: int
+    release_blockers: list[str] = Field(default_factory=list)
     storage_evidence: KnowledgeStorageEvidence = Field(
         default_factory=KnowledgeStorageEvidence
     )

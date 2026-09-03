@@ -4,6 +4,7 @@ from app.features.sales_knowledge_identification.models import IdentificationRes
 from app.features.sales_knowledge_identification.quality import (
     evaluate_against_gold,
     find_gold_path,
+    knowledge_release_blockers,
 )
 
 
@@ -45,6 +46,100 @@ def test_find_gold_path_prefers_reviewable_sample_over_stale_workspace_copy(
     )
 
     assert found == sample_gold
+
+
+def test_quality_report_marks_stale_catalog_gold_incompatible(tmp_path) -> None:
+    gold_path = tmp_path / "gold-v0.1.json"
+    gold_path.write_text(
+        json.dumps(
+            {
+                "status": "proxy_draft",
+                "catalogVersion": "d1-d5-v0.8",
+                "expectedObjectGroups": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = IdentificationResult.model_validate(
+        {
+            "documentPackageId": "DP-QUALITY",
+            "provider": "test",
+            "model": "test",
+            "promptVersion": "test",
+            "schemaVersion": "test",
+            "catalogVersion": "d1-d5-v0.9",
+            "catalogFingerprint": "test",
+                "rawModelOutput": "{}",
+                "modelCalls": [],
+                "processingStages": [],
+                "candidates": [],
+                "rejectedCandidates": [],
+                "weakSignals": [],
+                "unresolvedItems": [],
+                "coverageByModule": {},
+            "callCount": 0,
+            "promptTokens": 0,
+            "completionTokens": 0,
+        }
+    )
+
+    report = evaluate_against_gold(result, gold_path)
+
+    assert report.gold_compatible is False
+    assert report.overall_status == "review"
+    assert report.compatibility_issues == [
+        "catalogVersion: d1-d5-v0.8 != d1-d5-v0.9"
+    ]
+
+
+def test_release_gate_blocks_unapproved_or_incomplete_quality() -> None:
+    result = IdentificationResult.model_validate(
+        {
+            "documentPackageId": "DP-QUALITY",
+            "provider": "test",
+            "model": "test",
+            "promptVersion": "test",
+            "schemaVersion": "test",
+            "catalogVersion": "d1-d5-v0.9",
+            "catalogFingerprint": "test",
+            "rawModelOutput": "{}",
+            "modelCalls": [],
+            "processingStages": [],
+            "candidates": [],
+            "rejectedCandidates": [],
+            "weakSignals": [],
+            "unresolvedItems": [],
+            "coverageByModule": {},
+            "callCount": 0,
+            "promptTokens": 0,
+            "completionTokens": 0,
+            "qualityReport": {
+                "goldVersion": "gold-v0.2.json",
+                "goldStatus": "proxy_draft",
+                "overallStatus": "review",
+                "expectedObjectCount": 0,
+                "matchedExpectedCount": 0,
+                "objectRecallProxy": 0,
+                "groupsMet": 0,
+                "groupCount": 0,
+                "summaryOnlyCount": 0,
+                "evidenceBackedRate": 1,
+                "claimConsumptionRate": 1,
+                "contentAttributionRate": 0.8,
+                "medianContentChars": 0,
+                "groups": [],
+                "findings": [],
+            },
+        }
+    )
+
+    blockers = knowledge_release_blockers(result)
+
+    assert blockers == [
+        "Gold状态为 proxy_draft，尚未人工批准",
+        "Gold总体结果为 review",
+        "正文归因率 80.00%，未达到 100%",
+    ]
 
 
 def test_quality_report_detects_group_recall_and_over_split(tmp_path) -> None:

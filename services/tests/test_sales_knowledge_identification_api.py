@@ -245,6 +245,7 @@ def test_api_runs_identification_and_reads_the_saved_result(
         lambda: StubProjectionService()
     )
     monkeypatch.setattr(identification_api, "get_model_gateway", lambda: ApiStubGateway())
+    monkeypatch.setattr(identification_api, "knowledge_release_blockers", lambda _: [])
     client = TestClient(app)
 
     try:

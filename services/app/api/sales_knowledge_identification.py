@@ -48,6 +48,7 @@ from app.features.sales_knowledge_identification.projection import (
 from app.features.sales_knowledge_identification.quality import (
     evaluate_against_gold,
     find_gold_path,
+    knowledge_release_blockers,
 )
 from app.features.sales_knowledge_identification.repository import (
     IdentificationRecordNotFound,
@@ -97,7 +98,8 @@ def identification_catalog() -> dict[str, object]:
                 "name": module.name,
                 "scope": module.scope,
                 "meaning": module.meaning,
-                "objectTypes": module.object_types,
+                "objectTypes": module.canonical_object_types,
+                "itemTypes": module.item_types,
                 "coreObjects": module.core_objects,
                 "boundary": module.boundary,
                 "sources": module.sources,
@@ -112,7 +114,7 @@ def identification_catalog() -> dict[str, object]:
                     ].item_fields_by_type,
                     "fieldShapesByType": {
                         object_type: CONTENT_SHAPES_BY_OBJECT_TYPE[object_type]
-                        for object_type in module.object_types
+                        for object_type in module.canonical_object_types
                         if object_type in CONTENT_SHAPES_BY_OBJECT_TYPE
                     },
                     "allowEmptyFields": CONTENT_CONTRACT_BY_MODULE[
@@ -122,7 +124,7 @@ def identification_catalog() -> dict[str, object]:
                         object_type: CONTENT_CONTRACT_BY_OBJECT_TYPE[
                             object_type
                         ].allow_empty_fields
-                        for object_type in module.object_types
+                        for object_type in module.canonical_object_types
                     },
                     "minimumContentChars": CONTENT_CONTRACT_BY_MODULE[
                         module.code
@@ -131,7 +133,7 @@ def identification_catalog() -> dict[str, object]:
                         object_type: CONTENT_CONTRACT_BY_OBJECT_TYPE[
                             object_type
                         ].minimum_content_chars
-                        for object_type in module.object_types
+                        for object_type in module.canonical_object_types
                     },
                     "granularity": CONTENT_CONTRACT_BY_MODULE[module.code].granularity,
                     "inclusion": CONTENT_CONTRACT_BY_MODULE[module.code].inclusion,
@@ -217,7 +219,6 @@ def get_knowledge_projection_service() -> KnowledgeProjectionService:
             f"embedding API key environment variable is missing: {settings.llm_api_key_env}"
         )
     return KnowledgeProjectionService(
-        project_root=PROJECT_ROOT,
         postgres_dsn=settings.postgres_dsn,
         neo4j_uri=settings.neo4j_uri,
         neo4j_user=settings.neo4j_user,
@@ -356,6 +357,7 @@ def form_knowledge_objects(
         existing_objects=repository.get_existing_object_states(object_ids),
         existing_lineages=existing_lineages,
         existing_document_object_ids=existing_document_object_ids,
+        release_blockers=knowledge_release_blockers(identification),
     )
     repository.save_knowledge_formation(
         workspace_id=package.workspace_id,
