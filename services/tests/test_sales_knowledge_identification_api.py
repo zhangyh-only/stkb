@@ -7,6 +7,7 @@ from app.api import sales_knowledge_identification as identification_api
 from app.api.sales_knowledge_identification import (
     get_identification_repository,
     get_knowledge_formation_service,
+    get_knowledge_projection_service,
 )
 from app.features.sales_knowledge_identification.content_contracts import (
     CONTENT_CONTRACT_BY_MODULE,
@@ -16,10 +17,12 @@ from app.features.sales_knowledge_identification.formalizer import (
 )
 from app.features.sales_knowledge_identification.models import (
     DocumentPackage,
+    KnowledgeStorageEvidence,
     ModelCompletion,
     SourceAnchor,
     SourceMaterial,
 )
+from app.features.sales_knowledge_identification.projection import ProjectionOutcome
 from app.features.sales_knowledge_identification.repository import (
     IdentificationRecordNotFound,
 )
@@ -77,6 +80,9 @@ class InMemoryRepository:
         return {}
 
     def save_knowledge_formation(self, *, workspace_id: str, formation) -> None:  # type: ignore[no-untyped-def]
+        self.formations[formation.run_id] = formation.model_dump(mode="json", by_alias=True)
+
+    def save_knowledge_build_result(self, formation) -> None:  # type: ignore[no-untyped-def]
         self.formations[formation.run_id] = formation.model_dump(mode="json", by_alias=True)
 
     def get_knowledge_formation(self, run_id: str) -> dict[str, object]:
@@ -180,6 +186,21 @@ class ApiStubGateway:
         )
 
 
+class StubProjectionService:
+    def project(self, *, workspace_id: str, formation) -> ProjectionOutcome:  # type: ignore[no-untyped-def]
+        return ProjectionOutcome(
+            evidence=KnowledgeStorageEvidence(
+                postgres_objects=len(formation.knowledge_objects),
+                formal_files=formation.formal_knowledge_files,
+                pgvector_records=len(formation.knowledge_objects),
+                neo4j_knowledge_objects=len(formation.knowledge_objects),
+                neo4j_relationships=len(formation.knowledge_objects),
+                embedding_model="test-embedding",
+            ),
+            stages=[],
+        )
+
+
 class NoEvaluationRepository(InMemoryRepository):
     def get_evaluation_report(self, document_package_id: str) -> str:
         raise IdentificationRecordNotFound(document_package_id)
@@ -219,6 +240,9 @@ def test_api_runs_identification_and_reads_the_saved_result(
     app.dependency_overrides[get_identification_repository] = lambda: repository
     app.dependency_overrides[get_knowledge_formation_service] = lambda: (
         KnowledgeObjectFormationService(project_root=tmp_path)
+    )
+    app.dependency_overrides[get_knowledge_projection_service] = (
+        lambda: StubProjectionService()
     )
     monkeypatch.setattr(identification_api, "get_model_gateway", lambda: ApiStubGateway())
     client = TestClient(app)
@@ -304,6 +328,7 @@ def test_api_runs_identification_and_reads_the_saved_result(
     assert formation_response.status_code == 200
     assert formation_response.json()["status"] == "completed"
     assert formation_response.json()["createdCount"] == 1
+    assert formation_response.json()["storageEvidence"]["pgvectorRecords"] == 1
     assert formation_response.json()["knowledgeObjects"][0]["knowledgeObjectId"].startswith(
         "KO-"
     )

@@ -536,6 +536,10 @@ class PsycopgIdentificationRepository:
                 )
             self._save_knowledge_build_result(connection, formation)
 
+    def save_knowledge_build_result(self, formation: KnowledgeFormationResult) -> None:
+        with psycopg.connect(self.postgres_dsn) as connection:
+            self._save_knowledge_build_result(connection, formation)
+
     @staticmethod
     def _save_knowledge_build_result(
         connection: psycopg.Connection[Any], formation: KnowledgeFormationResult

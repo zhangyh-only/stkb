@@ -179,6 +179,32 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_relationships_source
 CREATE INDEX IF NOT EXISTS idx_knowledge_relationships_target
     ON knowledge_relationships(workspace_id, target_ref, relation_type);
 
+CREATE TABLE IF NOT EXISTS knowledge_retrieval_units (
+    retrieval_unit_id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    document_package_id TEXT NOT NULL REFERENCES document_packages(document_package_id),
+    knowledge_object_id TEXT NOT NULL REFERENCES knowledge_objects(knowledge_object_id),
+    revision INTEGER NOT NULL,
+    domain TEXT NOT NULL,
+    module TEXT NOT NULL,
+    object_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    retrieval_text TEXT NOT NULL,
+    source_file_sha256 TEXT NOT NULL,
+    embedding_model TEXT NOT NULL,
+    embedding_dimension INTEGER NOT NULL,
+    embedding vector(1024) NOT NULL,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_retrieval_units_active
+    ON knowledge_retrieval_units(workspace_id, document_package_id, active);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_retrieval_units_embedding
+    ON knowledge_retrieval_units USING hnsw (embedding vector_cosine_ops);
+
 CREATE TABLE IF NOT EXISTS knowledge_relationship_sources (
     relationship_id TEXT NOT NULL REFERENCES knowledge_relationships(relationship_id),
     document_package_id TEXT NOT NULL REFERENCES document_packages(document_package_id),

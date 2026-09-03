@@ -451,10 +451,34 @@ class FormalKnowledgeRelationship(ApiModel):
 
 
 class KnowledgeFormationStage(ApiModel):
-    key: Literal["entity_resolution", "knowledge_merge", "formal_write"]
+    key: Literal[
+        "entity_resolution",
+        "knowledge_merge",
+        "formal_write",
+        "pgvector_projection",
+        "neo4j_projection",
+    ]
     name: str
     status: Literal["completed", "pending", "failed"]
     detail: str
+    duration_ms: int = 0
+
+
+class KnowledgeStorageEvidence(ApiModel):
+    postgres_objects: int = 0
+    formal_files: int = 0
+    pgvector_records: int = 0
+    neo4j_knowledge_objects: int = 0
+    neo4j_entities: int = 0
+    neo4j_relationships: int = 0
+    neo4j_document_links: int = 0
+    neo4j_entity_references: int = 0
+    neo4j_knowledge_relationships: int = 0
+    embedding_model: str = ""
+    embedding_tokens: int = 0
+    vector_duration_ms: int = 0
+    graph_duration_ms: int = 0
+    errors: list[str] = Field(default_factory=list)
 
 
 class KnowledgeFormationResult(ApiModel):
@@ -474,3 +498,6 @@ class KnowledgeFormationResult(ApiModel):
     quality_blocked_candidate_ids: list[str] = Field(default_factory=list)
     quality_blocked_count: int = 0
     formal_knowledge_files: int
+    storage_evidence: KnowledgeStorageEvidence = Field(
+        default_factory=KnowledgeStorageEvidence
+    )

@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     llm_enable_thinking: bool = False
     llm_document_max_chars: int = Field(default=16000, ge=500, le=200000)
     llm_max_concurrency: int = Field(default=3, ge=1, le=8)
+    dashscope_workspace_id: str = ""
+    embedding_model: str = "text-embedding-v4"
+    embedding_dimension: int = Field(default=1024, ge=64, le=2560)
+    embedding_batch_size: int = Field(default=10, ge=1, le=20)
+    embedding_timeout_seconds: int = Field(default=60, ge=5, le=600)
     identification_debug_retention_hours: int = Field(default=168, ge=1, le=2160)
 
     @field_validator("knowledge_file_root")
@@ -66,6 +71,15 @@ class Settings(BaseSettings):
     @property
     def neo4j_uri(self) -> str:
         return f"bolt://{self.neo4j_host}:{self.neo4j_bolt_port}"
+
+    @property
+    def embedding_base_url(self) -> str:
+        if self.dashscope_workspace_id:
+            return (
+                f"https://{self.dashscope_workspace_id}.cn-beijing.maas.aliyuncs.com"
+                "/compatible-mode/v1"
+            )
+        return self.llm_base_url
 
     @property
     def cors_origin_list(self) -> list[str]:

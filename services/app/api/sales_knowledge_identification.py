@@ -42,6 +42,9 @@ from app.features.sales_knowledge_identification.models import (
     SourceMaterial,
     to_camel,
 )
+from app.features.sales_knowledge_identification.projection import (
+    KnowledgeProjectionService,
+)
 from app.features.sales_knowledge_identification.quality import (
     evaluate_against_gold,
     find_gold_path,
@@ -205,6 +208,29 @@ def get_knowledge_formation_service() -> KnowledgeObjectFormationService:
     return KnowledgeObjectFormationService(project_root=PROJECT_ROOT)
 
 
+@lru_cache
+def get_knowledge_projection_service() -> KnowledgeProjectionService:
+    settings = get_settings()
+    api_key = settings.llm_api_key
+    if not api_key:
+        raise RuntimeError(
+            f"embedding API key environment variable is missing: {settings.llm_api_key_env}"
+        )
+    return KnowledgeProjectionService(
+        project_root=PROJECT_ROOT,
+        postgres_dsn=settings.postgres_dsn,
+        neo4j_uri=settings.neo4j_uri,
+        neo4j_user=settings.neo4j_user,
+        neo4j_password=settings.neo4j_password,
+        embedding_base_url=settings.embedding_base_url,
+        embedding_api_key=api_key,
+        embedding_model=settings.embedding_model,
+        embedding_dimension=settings.embedding_dimension,
+        embedding_batch_size=settings.embedding_batch_size,
+        embedding_timeout_seconds=settings.embedding_timeout_seconds,
+    )
+
+
 @router.get(
     "/source-materials",
     response_model=list[SourceMaterial],
@@ -298,6 +324,9 @@ def form_knowledge_objects(
     service: Annotated[
         KnowledgeObjectFormationService, Depends(get_knowledge_formation_service)
     ],
+    projection_service: Annotated[
+        KnowledgeProjectionService, Depends(get_knowledge_projection_service)
+    ],
 ) -> KnowledgeFormationResult:
     try:
         identification = IdentificationResult.model_validate(repository.get_run(run_id))
@@ -332,6 +361,19 @@ def form_knowledge_objects(
         workspace_id=package.workspace_id,
         formation=formation,
     )
+    if formation.status == "completed":
+        projection = projection_service.project(
+            workspace_id=package.workspace_id,
+            formation=formation,
+        )
+        formation = formation.model_copy(
+            update={
+                "status": "failed" if projection.evidence.errors else "completed",
+                "stages": [*formation.stages, *projection.stages],
+                "storage_evidence": projection.evidence,
+            }
+        )
+        repository.save_knowledge_build_result(formation)
     return formation
 
 
