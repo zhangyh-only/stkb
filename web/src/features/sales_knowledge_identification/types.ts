@@ -374,6 +374,7 @@ export type KnowledgeFormationStage = {
 export type KnowledgeStorageEvidence = {
   postgresObjects: number
   formalFiles: number
+  internalItems: number
   pgvectorRecords: number
   neo4jKnowledgeObjects: number
   neo4jEntities: number
@@ -409,6 +410,7 @@ export type KnowledgeFormationResult = {
   qualityBlockedCandidateIds: string[]
   qualityBlockedCount: number
   formalKnowledgeFiles: number
+  releaseBlockers: string[]
   storageEvidence: KnowledgeStorageEvidence
 }
 
@@ -420,6 +422,7 @@ export type KnowledgeModule = {
   scope: 'core' | 'optional'
   meaning: string
   objectTypes: string[]
+  itemTypes: string[]
   coreObjects: string[]
   boundary: string
   sources: string[]

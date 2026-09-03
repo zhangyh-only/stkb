@@ -797,6 +797,13 @@ a { color: inherit; text-decoration: none; }
 .build-outcome button { padding: 9px 13px; color: #244b38; background: #fff; border: 0; border-radius: 7px; font-weight: 650; }
 .knowledge-result-view, .rules-library-view, .run-evidence-view { min-height: 620px; }
 .knowledge-result-view { display: grid; gap: 12px; }
+.release-blockers { display: grid; gap: 5px; padding: 13px 16px; color: #7b321f; background: #fff1ed; border: 1px solid #e8b7aa; border-radius: 10px; }
+.release-blockers strong { font-size: 13px; }
+.release-blockers span { font-size: 11px; }
+.knowledge-levels { display: flex; gap: 8px; }
+.knowledge-levels span { padding: 6px 9px; color: #536159; background: #edf2ef; border-radius: 6px; font-size: 10px; }
+.knowledge-levels b { color: #24543d; }
+.rules-library-view > .knowledge-levels { margin-bottom: 12px; }
 .storage-proof { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; overflow: hidden; background: #dce4de; border: 1px solid #dce4de; border-radius: 10px; }
 .storage-proof article { display: grid; gap: 4px; padding: 13px 16px; background: #f7faf8; }
 .storage-proof span { color: #688071; font-size: 9px; font-weight: 700; letter-spacing: .08em; }
