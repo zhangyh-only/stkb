@@ -1,6 +1,10 @@
 import json
 
-from app.features.sales_knowledge_identification.models import IdentificationResult
+from app.features.sales_knowledge_identification.models import (
+    DocumentPackage,
+    IdentificationResult,
+    SourceAnchor,
+)
 from app.features.sales_knowledge_identification.quality import (
     evaluate_against_gold,
     find_gold_path,
@@ -90,6 +94,63 @@ def test_quality_report_marks_stale_catalog_gold_incompatible(tmp_path) -> None:
     assert report.compatibility_issues == [
         "catalogVersion: d1-d5-v0.8 != d1-d5-v0.9"
     ]
+
+
+def test_quality_report_binds_gold_to_source_package_hashes(tmp_path) -> None:
+    gold_path = tmp_path / "gold-v0.3.json"
+    gold_path.write_text(
+        json.dumps(
+            {
+                "status": "approved",
+                "sourceSha256": "wrong",
+                "fullMarkdownSha256": "markdown-sha",
+                "anchorCount": 1,
+                "expectedObjectGroups": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = IdentificationResult.model_validate(
+        {
+            "documentPackageId": "DP-QUALITY",
+            "provider": "test",
+            "model": "test",
+            "promptVersion": "test",
+            "schemaVersion": "test",
+            "catalogVersion": "test",
+            "catalogFingerprint": "test",
+            "rawModelOutput": "{}",
+            "modelCalls": [],
+            "processingStages": [],
+            "candidates": [],
+            "rejectedCandidates": [],
+            "weakSignals": [],
+            "unresolvedItems": [],
+            "coverageByModule": {},
+            "callCount": 0,
+            "promptTokens": 0,
+            "completionTokens": 0,
+        }
+    )
+    package = DocumentPackage(
+        document_package_id="DP-QUALITY",
+        workspace_id="WS-TEST",
+        source_file_name="sample.pptx",
+        source_sha256="source-sha",
+        full_markdown_path="workspace/documents/DP-QUALITY/full.md",
+        full_markdown_sha256="markdown-sha",
+        full_markdown="正文",
+        processing_method="agent_assisted",
+        status="available",
+        anchors=[SourceAnchor(anchor_id="A1", kind="page", page=1)],
+        quality_issues=[],
+    )
+
+    report = evaluate_against_gold(result, gold_path, document_package=package)
+
+    assert report.gold_compatible is False
+    assert report.source_sha256 == "source-sha"
+    assert report.full_markdown_sha256 == "markdown-sha"
 
 
 def test_release_gate_blocks_unapproved_or_incomplete_quality() -> None:
@@ -221,7 +282,7 @@ def test_quality_report_detects_group_recall_and_over_split(tmp_path) -> None:
     report = evaluate_against_gold(result, gold_path)
 
     assert report.overall_status == "fail"
-    assert report.object_recall_proxy == 0.6667
+    assert report.object_recall_proxy == 0.0
     assert report.claim_consumption_rate == 0.75
     assert report.claim_accounting_rate == 1.0
     assert report.content_attribution_rate == 0.0
@@ -449,6 +510,572 @@ def test_legacy_quality_report_defaults_new_trace_metrics() -> None:
     assert result.quality_report is not None
     assert result.quality_report.claim_accounting_rate == 0
     assert result.quality_report.content_attribution_rate == 0
+
+
+def test_quality_report_rejects_undeclared_and_negative_candidates(tmp_path) -> None:
+    gold_path = tmp_path / "gold-v0.3.json"
+    gold_path.write_text(
+        json.dumps(
+            {
+                "status": "approved",
+                "expectedObjectGroups": [
+                    {
+                        "key": "facts",
+                        "expectedCount": 1,
+                        "module": "D1.1",
+                        "objectTypes": ["PRODUCT_FACT"],
+                        "evidence": ["A1"],
+                    }
+                ],
+                "negativeObjectGroups": [
+                    {
+                        "key": "bundle-strategy",
+                        "module": "D3.2",
+                        "objectTypes": ["SALES_STRATEGY"],
+                        "evidence": ["A2"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = IdentificationResult.model_validate(
+        {
+            "documentPackageId": "DP-QUALITY",
+            "provider": "test",
+            "model": "test",
+            "promptVersion": "test",
+            "schemaVersion": "test",
+            "catalogVersion": "test",
+            "catalogFingerprint": "test",
+            "rawModelOutput": "{}",
+            "modelCalls": [],
+            "processingStages": [],
+            "atomicClaims": [_claim("CL1", "A1"), _claim("CL2", "A2")],
+            "candidates": [
+                _candidate("C1", "D1.1", "PRODUCT_FACT", ["CL1"], ["A1"]),
+                _candidate("C2", "D3.2", "SALES_STRATEGY", ["CL2"], ["A2"]),
+            ],
+            "rejectedCandidates": [],
+            "weakSignals": [],
+            "unresolvedItems": [],
+            "coverageByModule": {},
+            "callCount": 0,
+            "promptTokens": 0,
+            "completionTokens": 0,
+        }
+    )
+
+    report = evaluate_against_gold(result, gold_path)
+
+    assert report.overall_status == "fail"
+    assert report.forbidden_candidate_ids == ["C2"]
+    assert report.unexpected_candidate_ids == []
+    assert report.groups[-1].status == "negative_hit"
+
+
+def test_quality_report_treats_authority_deferred_groups_as_unresolved_only(
+    tmp_path,
+) -> None:
+    gold_path = tmp_path / "gold-v0.3.json"
+    gold_path.write_text(
+        json.dumps(
+            {
+                "status": "approved",
+                "expectedObjectGroups": [],
+                "deferredEvidenceGroups": [
+                    {
+                        "key": "policy-background",
+                        "module": "D1.1",
+                        "objectTypes": ["PRODUCT_FACT"],
+                        "evidence": ["A1"],
+                        "requiredAuthoritativeSource": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = IdentificationResult.model_validate(
+        {
+            "documentPackageId": "DP-QUALITY",
+            "provider": "test",
+            "model": "test",
+            "promptVersion": "test",
+            "schemaVersion": "test",
+            "catalogVersion": "test",
+            "catalogFingerprint": "test",
+            "rawModelOutput": "{}",
+            "modelCalls": [],
+            "processingStages": [],
+            "atomicClaims": [_claim("CL1", "A1")],
+            "candidates": [
+                _candidate("C1", "D1.1", "PRODUCT_FACT", ["CL1"], ["A1"])
+            ],
+            "rejectedCandidates": [],
+            "weakSignals": [],
+            "unresolvedItems": [],
+            "coverageByModule": {},
+            "callCount": 0,
+            "promptTokens": 0,
+            "completionTokens": 0,
+        }
+    )
+
+    report = evaluate_against_gold(result, gold_path)
+
+    assert report.overall_status == "fail"
+    assert report.forbidden_candidate_ids == ["C1"]
+    assert report.groups[0].missing_unresolved_evidence == ["A1"]
+
+
+def test_quality_report_checks_gold_identity_hints(tmp_path) -> None:
+    gold_path = tmp_path / "gold-v0.3.json"
+    gold_path.write_text(
+        json.dumps(
+            {
+                "status": "approved",
+                "expectedObjectGroups": [
+                    {
+                        "key": "facts",
+                        "expectedCount": 1,
+                        "module": "D1.1",
+                        "objectTypes": ["PRODUCT_FACT"],
+                        "evidence": ["A1"],
+                        "identityHints": {"subject": "权威产品"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = IdentificationResult.model_validate(
+        {
+            "documentPackageId": "DP-QUALITY",
+            "provider": "test",
+            "model": "test",
+            "promptVersion": "test",
+            "schemaVersion": "test",
+            "catalogVersion": "test",
+            "catalogFingerprint": "test",
+            "rawModelOutput": "{}",
+            "modelCalls": [],
+            "processingStages": [],
+            "atomicClaims": [_claim("CL1", "A1")],
+            "candidates": [
+                _candidate("C1", "D1.1", "PRODUCT_FACT", ["CL1"], ["A1"])
+            ],
+            "rejectedCandidates": [],
+            "weakSignals": [],
+            "unresolvedItems": [],
+            "coverageByModule": {},
+            "callCount": 0,
+            "promptTokens": 0,
+            "completionTokens": 0,
+        }
+    )
+
+    report = evaluate_against_gold(result, gold_path)
+
+    assert report.overall_status == "fail"
+    assert report.groups[0].status == "identity_failed"
+    assert report.groups[0].identity_mismatches == [
+        "C1: subject期望'权威产品'实际'C1'"
+    ]
+    assert report.unexpected_candidate_ids == ["C1"]
+
+
+def test_quality_report_separates_supported_source_fields_from_derived_fields(
+    tmp_path,
+) -> None:
+    gold_path = tmp_path / "gold-v0.3.json"
+    gold_path.write_text(
+        json.dumps(
+            {
+                "status": "approved",
+                "requireFieldEvidence": True,
+                "expectedObjectGroups": [
+                    {
+                        "key": "version",
+                        "expectedCount": 1,
+                        "module": "D1.1",
+                        "objectTypes": ["PRODUCT_VERSION_FACT"],
+                        "evidence": ["A1"],
+                        "derivedContentPaths": [
+                            "$.applicability.product",
+                            "$.applicability.version",
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = IdentificationResult.model_validate(
+        {
+            "documentPackageId": "DP-QUALITY",
+            "provider": "test",
+            "model": "test",
+            "promptVersion": "test",
+            "schemaVersion": "test",
+            "catalogVersion": "test",
+            "catalogFingerprint": "test",
+            "rawModelOutput": "{}",
+            "modelCalls": [],
+            "processingStages": [],
+            "atomicClaims": [
+                    {
+                        **_claim("A1", "权威产品"),
+                        "claimId": "CL1",
+                        "statement": "权威产品事实",
+                        "subject": "权威产品",
+                        "evidence": [
+                            {
+                                "anchorId": "A1",
+                                "exactQuote": "权威产品事实",
+                                "sourceText": "权威产品事实",
+                            }
+                        ],
+                }
+            ],
+            "candidates": [
+                {
+                    **_candidate(
+                        "C1", "D1.1", "PRODUCT_VERSION_FACT", ["CL1"], ["A1"]
+                    ),
+                    "identityHints": {
+                        "subject": "权威产品",
+                        "versionScope": "V1",
+                        "factTheme": "事实",
+                    },
+                    "content": {
+                        "subject": "权威产品",
+                        "facts": [{"description": "权威产品事实"}],
+                        "applicability": {"product": "权威产品", "version": "V1"},
+                        "limitations": [],
+                    },
+                    "claimUsage": [
+                        {
+                            "claimId": "CL1",
+                            "role": "primary",
+                            "contentPaths": ["$.subject", "$.facts[0].description"],
+                            "explanation": "来源字段",
+                        }
+                    ],
+                }
+            ],
+            "rejectedCandidates": [],
+            "weakSignals": [],
+            "unresolvedItems": [],
+            "coverageByModule": {},
+            "callCount": 0,
+            "promptTokens": 0,
+            "completionTokens": 0,
+        }
+    )
+
+    report = evaluate_against_gold(result, gold_path)
+
+    assert report.overall_status == "pass"
+    assert report.source_content_leaf_count == 2
+    assert report.attributed_source_content_leaf_count == 2
+    assert report.source_content_attribution_rate == 1
+    assert report.system_derived_content_leaf_count == 2
+
+
+def test_quality_report_classifies_allowed_noise_rejection_as_non_blocking(tmp_path) -> None:
+    gold_path = tmp_path / "gold-v0.3.json"
+    gold_path.write_text(
+        json.dumps(
+            {
+                "status": "approved",
+                "expectedObjectGroups": [],
+                "allowedRejectedClaimIds": ["NOISE-1"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = IdentificationResult.model_validate(
+        {
+            "documentPackageId": "DP-QUALITY",
+            "provider": "test",
+            "model": "test",
+            "promptVersion": "test",
+            "schemaVersion": "test",
+            "catalogVersion": "test",
+            "catalogFingerprint": "test",
+            "rawModelOutput": "{}",
+            "modelCalls": [],
+            "processingStages": [],
+            "atomicClaims": [],
+            "rejectedAtomicClaims": [
+                {
+                    "claimId": "NOISE-1",
+                    "reasons": ["内容不构成销售知识"],
+                    "rawClaim": {"claimId": "NOISE-1", "claimKind": "fact"},
+                }
+            ],
+            "candidates": [],
+            "rejectedCandidates": [],
+            "weakSignals": [],
+            "unresolvedItems": [],
+            "coverageByModule": {},
+            "callCount": 0,
+            "promptTokens": 0,
+            "completionTokens": 0,
+        }
+    )
+    report = evaluate_against_gold(result, gold_path)
+    result = result.model_copy(update={"quality_report": report})
+
+    blockers = knowledge_release_blockers(result)
+
+    assert report.rejected_noise_count == 1
+    assert report.rejected_knowledge_count == 0
+    assert not any("来源主张被拒绝" in item for item in blockers)
+
+
+def test_one_candidate_cannot_satisfy_two_gold_objects(tmp_path) -> None:
+    gold_path = tmp_path / "gold-v0.3.json"
+    gold_path.write_text(
+        json.dumps(
+            {
+                "status": "approved",
+                "expectedObjectGroups": [
+                    {
+                        "key": "flow-a",
+                        "expectedCount": 1,
+                        "module": "D1.2",
+                        "objectTypes": ["BUSINESS_PROCESS"],
+                        "evidence": ["A1"],
+                    },
+                    {
+                        "key": "flow-b",
+                        "expectedCount": 1,
+                        "module": "D1.2",
+                        "objectTypes": ["BUSINESS_PROCESS"],
+                        "evidence": ["A2"],
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = IdentificationResult.model_validate(
+        {
+            "documentPackageId": "DP-QUALITY",
+            "provider": "test",
+            "model": "test",
+            "promptVersion": "test",
+            "schemaVersion": "test",
+            "catalogVersion": "test",
+            "catalogFingerprint": "test",
+            "rawModelOutput": "{}",
+            "modelCalls": [],
+            "processingStages": [],
+            "atomicClaims": [_claim("CL1", "A1"), _claim("CL2", "A2")],
+            "candidates": [
+                _candidate(
+                    "C1", "D1.2", "BUSINESS_PROCESS", ["CL1", "CL2"], ["A1", "A2"]
+                )
+            ],
+            "rejectedCandidates": [],
+            "weakSignals": [],
+            "unresolvedItems": [],
+            "coverageByModule": {},
+            "callCount": 0,
+            "promptTokens": 0,
+            "completionTokens": 0,
+        }
+    )
+
+    report = evaluate_against_gold(result, gold_path)
+
+    assert report.object_recall_proxy == 0
+    assert [group.ambiguous_candidate_ids for group in report.groups] == [
+        ["C1"],
+        ["C1"],
+    ]
+
+
+def test_identity_rules_reject_nonempty_but_wrong_identity(tmp_path) -> None:
+    gold_path = tmp_path / "gold-v0.3.json"
+    gold_path.write_text(
+        json.dumps(
+            {
+                "status": "approved",
+                "expectedObjectGroups": [
+                    {
+                        "key": "faq",
+                        "expectedCount": 1,
+                        "module": "D4.2",
+                        "objectTypes": ["QA_PAIR"],
+                        "identityRules": {
+                            "subject": {"containsAll": ["药享保"]}
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = IdentificationResult.model_validate(
+        {
+            "documentPackageId": "DP-QUALITY",
+            "provider": "test",
+            "model": "test",
+            "promptVersion": "test",
+            "schemaVersion": "test",
+            "catalogVersion": "test",
+            "catalogFingerprint": "test",
+            "rawModelOutput": "{}",
+            "modelCalls": [],
+            "processingStages": [],
+            "candidates": [
+                _candidate("C1", "D4.2", "QA_PAIR", ["CL1"], ["A1"])
+            ],
+            "rejectedCandidates": [],
+            "weakSignals": [],
+            "unresolvedItems": [],
+            "coverageByModule": {},
+            "callCount": 0,
+            "promptTokens": 0,
+            "completionTokens": 0,
+        }
+    )
+
+    report = evaluate_against_gold(result, gold_path)
+
+    assert report.groups[0].status == "identity_failed"
+    assert report.groups[0].matched_count == 0
+
+
+def test_model_attributes_cannot_self_prove_content_field(tmp_path) -> None:
+    gold_path = tmp_path / "gold-v0.3.json"
+    gold_path.write_text(
+        json.dumps(
+            {
+                "status": "approved",
+                "requireFieldEvidence": True,
+                "expectedObjectGroups": [
+                    {
+                        "key": "fact",
+                        "expectedCount": 1,
+                        "module": "D1.1",
+                        "objectTypes": ["PRODUCT_FACT"],
+                        "evidence": ["A1"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    candidate = _candidate("C1", "D1.1", "PRODUCT_FACT", ["CL1"], ["A1"])
+    candidate["content"] = {"invented": "不存在于原文的值"}
+    candidate["claimUsage"] = [
+        {
+            "claimId": "CL1",
+            "role": "primary",
+            "contentPaths": ["$.invented"],
+            "explanation": "模型声称已支持",
+        }
+    ]
+    claim = _claim("CL1", "A1")
+    claim["attributes"] = {"invented": "不存在于原文的值"}
+    result = IdentificationResult.model_validate(
+        {
+            "documentPackageId": "DP-QUALITY",
+            "provider": "test",
+            "model": "test",
+            "promptVersion": "test",
+            "schemaVersion": "test",
+            "catalogVersion": "test",
+            "catalogFingerprint": "test",
+            "rawModelOutput": "{}",
+            "modelCalls": [],
+            "processingStages": [],
+            "atomicClaims": [claim],
+            "candidates": [candidate],
+            "rejectedCandidates": [],
+            "weakSignals": [],
+            "unresolvedItems": [],
+            "coverageByModule": {},
+            "callCount": 0,
+            "promptTokens": 0,
+            "completionTokens": 0,
+        }
+    )
+
+    report = evaluate_against_gold(result, gold_path)
+
+    assert report.overall_status == "fail"
+    assert report.source_content_attribution_rate == 0
+
+
+def test_non_blocking_unresolved_uses_claim_kind_not_whole_anchor(tmp_path) -> None:
+    gold_path = tmp_path / "gold-v0.3.json"
+    gold_path.write_text(
+        json.dumps(
+            {
+                "status": "approved",
+                "expectedObjectGroups": [],
+                "negativeObjectGroups": [
+                    {
+                        "key": "partial-list",
+                        "module": "D1.1",
+                        "objectTypes": ["LIST_FACT"],
+                        "evidence": ["A1"],
+                        "requiredUnresolvedEvidence": ["A1"],
+                        "claimKinds": ["list"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    fact_claim = _claim("CL2", "A1")
+    list_claim = {**_claim("CL1", "A1"), "claimKind": "list"}
+    result = IdentificationResult.model_validate(
+        {
+            "documentPackageId": "DP-QUALITY",
+            "provider": "test",
+            "model": "test",
+            "promptVersion": "test",
+            "schemaVersion": "test",
+            "catalogVersion": "test",
+            "catalogFingerprint": "test",
+            "rawModelOutput": "{}",
+            "modelCalls": [],
+            "processingStages": [],
+            "atomicClaims": [list_claim, fact_claim],
+            "candidates": [],
+            "rejectedCandidates": [],
+            "weakSignals": [],
+            "unresolvedItems": [
+                {
+                    "claimId": "CL1",
+                    "description": "清单不完整",
+                    "reason": "等待完整清单",
+                    "evidence": ["A1"],
+                },
+                {
+                    "claimId": "CL2",
+                    "description": "事实遗漏",
+                    "reason": "仍需处理",
+                    "evidence": ["A1"],
+                },
+            ],
+            "coverageByModule": {},
+            "callCount": 0,
+            "promptTokens": 0,
+            "completionTokens": 0,
+        }
+    )
+    report = evaluate_against_gold(result, gold_path)
+    result = result.model_copy(update={"quality_report": report})
+
+    assert report.non_blocking_unresolved_claim_ids == ["CL1"]
+    assert "有 1 条知识主张尚未处理" in knowledge_release_blockers(result)
 
 
 def _claim(claim_id: str, anchor: str) -> dict[str, object]:

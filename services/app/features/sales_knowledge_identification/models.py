@@ -304,23 +304,36 @@ class GoldGroupEvaluation(ApiModel):
     predicted_count: int
     matched_count: int
     status: Literal[
-        "met", "missed", "under_split_or_recall", "over_split", "contract_failed"
+        "met",
+        "missed",
+        "under_split_or_recall",
+        "over_split",
+        "contract_failed",
+        "identity_failed",
+        "negative_hit",
     ]
     predicted_candidate_ids: list[str]
     required_item_count: int | None = None
     predicted_item_count: int | None = None
     required_content_fields: list[str] = Field(default_factory=list)
     missing_content_fields: list[str] = Field(default_factory=list)
+    missing_content_terms: list[str] = Field(default_factory=list)
     required_item_fields: list[str] = Field(default_factory=list)
     missing_item_fields: list[str] = Field(default_factory=list)
+    missing_item_keys: list[str] = Field(default_factory=list)
     required_unresolved_evidence: list[str] = Field(default_factory=list)
     missing_unresolved_evidence: list[str] = Field(default_factory=list)
     require_all_evidence: bool = False
     missing_expected_evidence: list[str] = Field(default_factory=list)
+    required_identity_hints: dict[str, Any] = Field(default_factory=dict)
+    missing_identity_hints: list[str] = Field(default_factory=list)
+    identity_mismatches: list[str] = Field(default_factory=list)
+    ambiguous_candidate_ids: list[str] = Field(default_factory=list)
 
 
 class IdentificationQualityReport(ApiModel):
     gold_version: str
+    gold_sha256: str = ""
     gold_status: str
     gold_compatible: bool = True
     compatibility_issues: list[str] = Field(default_factory=list)
@@ -335,9 +348,21 @@ class IdentificationQualityReport(ApiModel):
     claim_consumption_rate: float
     claim_accounting_rate: float = 0.0
     content_attribution_rate: float = 0.0
+    source_content_leaf_count: int = 0
+    attributed_source_content_leaf_count: int = 0
+    source_content_attribution_rate: float = 0.0
+    system_derived_content_leaf_count: int = 0
     median_content_chars: int
     groups: list[GoldGroupEvaluation]
     findings: list[str]
+    unexpected_candidate_ids: list[str] = Field(default_factory=list)
+    forbidden_candidate_ids: list[str] = Field(default_factory=list)
+    rejected_noise_count: int = 0
+    rejected_knowledge_count: int = 0
+    non_blocking_unresolved_evidence: list[str] = Field(default_factory=list)
+    non_blocking_unresolved_claim_ids: list[str] = Field(default_factory=list)
+    source_sha256: str = ""
+    full_markdown_sha256: str = ""
 
 
 class IdentificationResult(ApiModel):

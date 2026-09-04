@@ -308,7 +308,11 @@ def run_identification(
     )
     if gold_path is not None and result.status == "completed":
         result = result.model_copy(
-            update={"quality_report": evaluate_against_gold(result, gold_path)}
+            update={
+                "quality_report": evaluate_against_gold(
+                    result, gold_path, document_package=package
+                )
+            }
         )
     serialized = result.model_dump(mode="json", by_alias=True)
     repository.save_run(serialized)
