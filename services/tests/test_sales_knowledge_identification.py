@@ -51,6 +51,7 @@ from app.features.sales_knowledge_identification.service import (
     _group_claims_for_planning,
     _merge_repair_plans,
     _normalize_content_shape,
+    _numbered_highlights,
     _object_granularity_metrics,
     _plan_satisfies_primary_claim_role,
     _prune_unattributed_d33_inferences,
@@ -651,6 +652,54 @@ def test_unknown_version_product_fact_stays_unresolved() -> None:
     assert unresolved[0][0]["claimId"] == "CL1"
 
 
+def test_incomplete_reference_list_stays_unresolved() -> None:
+    raw_claim = _claim(
+        "DP-LIST#page-1",
+        "呼吸内科：感冒、发热等",
+        kind="list",
+        claim_id="CL1",
+    )
+    raw_claim["attributes"] = {
+        "listName": "疾病清单",
+        "versionScope": "当前版本",
+        "applicability": "产品保障范围",
+    }
+    raw_claim["evidence"][0]["sourceText"] = (
+        "呼吸内科：感冒、发热等\n*疾病清单详见保险条款"
+    )
+    claim = AtomicClaim.model_validate(raw_claim)
+    results = [
+        (
+            "planning-1",
+            [claim],
+            {
+                "objectPlans": [
+                    [
+                        "P1",
+                        "疾病清单",
+                        "D1.1",
+                        "LIST_FACT",
+                        {
+                            "listName": "疾病清单",
+                            "versionScope": "当前版本",
+                            "applicability": "产品保障范围",
+                        },
+                        ["CL1"],
+                    ]
+                ]
+            },
+            None,
+            [],
+        )
+    ]
+
+    plans, rejected, _weak, unresolved = _validate_object_plans(results, [claim])
+
+    assert plans == []
+    assert "omitted members" in rejected[0].reasons[0]
+    assert unresolved[0][0]["claimId"] == "CL1"
+
+
 def test_objection_identity_uses_observable_customer_expression() -> None:
     raw_claim = _claim(
         "DP-OBJECTION#row-1",
@@ -729,7 +778,15 @@ def test_script_plan_drops_supporting_claims_from_unrelated_source_rows() -> Non
 
 def test_strategy_plan_keeps_same_anchor_script_as_supporting_evidence() -> None:
     strategy_claim = AtomicClaim.model_validate(
-        _claim("DP-STRATEGY#row-1", "产品引入策略", kind="strategy", claim_id="CL1")
+        {
+            **_claim(
+                "DP-STRATEGY#row-1",
+                "面向优质客户时介绍产品",
+                kind="strategy",
+                claim_id="CL1",
+            ),
+            "attributes": {"condition": "优质客户", "action": "介绍产品"},
+        }
     )
     script_claim = AtomicClaim.model_validate(
         _claim("DP-STRATEGY#row-1", "面向优质客户", kind="script", claim_id="CL2")
@@ -848,7 +905,7 @@ def test_template_reference_does_not_become_standard_script_plan() -> None:
     assert _ensure_explicit_script_plans([], [claim]) == []
 
 
-def test_explicit_internal_identifier_definition_gets_term_duty() -> None:
+def test_single_internal_identifier_stays_inside_its_source_context() -> None:
     package = _package(
         "DP-TERM",
         "<!-- source-anchor: DP-TERM#rule-1 -->\n1010的电话是质检的，内部使用。",
@@ -861,15 +918,27 @@ def test_explicit_internal_identifier_definition_gets_term_duty() -> None:
     assert len(claims) == 1
     assert claims[0].subject == "1010电话"
     assert claims[0].evidence[0].exact_quote == "1010的电话是质检的"
-    assert len(plans) == 1
-    assert plans[0].module == "D4.1"
-    assert plans[0].object_type == "TERM"
+    assert plans == []
 
 
 def test_term_guard_groups_one_document_glossary_across_anchors() -> None:
     claims = [
         AtomicClaim.model_validate(
-            _claim(f"DP-TERM-GROUP#section-{index}", term, kind="term", claim_id=f"CL{index}")
+            {
+                **_claim(
+                    f"DP-TERM-GROUP#section-{index}",
+                    term,
+                    kind="term",
+                    claim_id=f"CL{index}",
+                ),
+                "evidence": [
+                    {
+                        "anchorId": f"DP-TERM-GROUP#section-{index}",
+                        "exactQuote": term,
+                        "sourceText": f"## 术语定义\n{term}",
+                    }
+                ],
+            }
         )
         for index, term in enumerate(("商机", "有效线索"), start=1)
     ]
@@ -1572,6 +1641,116 @@ def test_planning_rejects_service_guidance_as_sales_decision_rule() -> None:
     )
 
 
+def test_planning_rejects_sales_force_value_as_strategy() -> None:
+    raw_claim = _claim(
+        "DP-ENABLEMENT#page-1",
+        "助力获客、增强客户粘性、二次开发",
+        kind="strategy",
+    )
+    raw_claim["attributes"] = {
+        "strategyGoal": "助力获客与二次开发",
+        "triggerContext": "销售队伍赋能",
+        "applicability": "代理人销售场景",
+    }
+    gateway = TwoStageGateway(
+        [raw_claim],
+        {
+            "candidates": [_candidate("D3.2", "SALES_STRATEGY", ["CL1"])],
+            "weakSignals": [],
+            "unresolvedItems": [],
+        },
+    )
+
+    result = SalesKnowledgeIdentificationService(gateway=gateway).identify(
+        _package("DP-ENABLEMENT", "# 示例\n\n助力获客、增强客户粘性、二次开发。")
+    )
+
+    assert result.candidates == []
+    assert any(
+        "sales-force value statements are not a strategy" in reason
+        for reason in result.rejected_object_plans[0].reasons
+    )
+
+
+@pytest.mark.parametrize(
+    ("kind", "object_type", "attributes", "reason"),
+    [
+        (
+            "comparison",
+            "COMPARISON_SNAPSHOT",
+            {
+                "subjects": ["产品A", "产品B"],
+                "dimensionSet": ["价格"],
+                "effectiveTime": "培训材料发布时",
+            },
+            "explicit effective date",
+        ),
+        (
+            "customer_signal",
+            "CUSTOMER_NEED",
+            {
+                "subject": "消费者",
+                "needTheme": "购药偏好",
+                "context": "趋势页",
+            },
+            "research source metadata",
+        ),
+    ],
+)
+def test_planning_rejects_unverifiable_snapshot_or_customer_signal(
+    kind, object_type, attributes, reason
+) -> None:
+    raw_claim = _claim("DP-WEAK#page-1", "培训材料观点", kind=kind)
+    raw_claim["attributes"] = attributes
+    candidate = _candidate("D1.1", object_type, ["CL1"])
+    candidate["identityHints"] = attributes
+    gateway = TwoStageGateway(
+        [raw_claim],
+        {
+            "candidates": [candidate],
+            "weakSignals": [],
+            "unresolvedItems": [],
+        },
+    )
+
+    result = SalesKnowledgeIdentificationService(gateway=gateway).identify(
+        _package("DP-WEAK", "# 培训材料\n\n培训材料观点。")
+    )
+
+    assert result.candidates == []
+    assert any(
+        reason in item_reason
+        for item in result.rejected_object_plans
+        for item_reason in item.reasons
+    )
+
+
+def test_planning_rejects_product_page_terms_as_top_level_glossary() -> None:
+    raw_claim = _claim("DP-PRODUCT#page-1", "原研药定义", kind="term")
+    raw_claim["attributes"] = {
+        "subject": "原研药",
+        "applicability": "产品说明",
+    }
+    gateway = TwoStageGateway(
+        [raw_claim],
+        {
+            "candidates": [_candidate("D4.1", "TERM", ["CL1"])],
+            "weakSignals": [],
+            "unresolvedItems": [],
+        },
+    )
+
+    result = SalesKnowledgeIdentificationService(gateway=gateway).identify(
+        _package("DP-PRODUCT", "# 产品说明\n\n原研药定义。")
+    )
+
+    assert result.candidates == []
+    assert any(
+        "dedicated multi-term glossary" in reason
+        for reason in result.rejected_object_plans[0].reasons
+    )
+
+
 def test_planning_rejects_standard_script_when_source_only_mentions_template() -> None:
     gateway = TwoStageGateway(
         [_claim("DP-TEMPLATE#page-1", "必须按照范本说", kind="rule")],
@@ -1998,7 +2177,9 @@ def test_identification_batches_mixed_object_contracts_in_one_realization_call()
         for request in gateway.requests
         if "内容编制器" in request.system_prompt
     ]
-    assert all('"sourceText"' not in request.user_prompt for request in realization_requests)
+    assert sum(
+        request.user_prompt.count('"sourceText"') for request in realization_requests
+    ) == 2
     assert "### D1.1 内容合同" in realization_prompts[0]
     assert "### D4.2 内容合同" in realization_prompts[0]
     assert [call.call_id for call in result.model_calls] == [
@@ -2858,7 +3039,34 @@ def test_granularity_gate_merges_same_product_version_fact_fragments() -> None:
     }
 
 
-def test_granularity_gate_merges_policy_rules_for_same_business_subject() -> None:
+def test_granularity_gate_normalizes_same_product_version_comparison() -> None:
+    plan = CandidateObjectPlan(
+        plan_id="P1",
+        title="药享保尊享版与全能版对比矩阵",
+        domain="D1",
+        module="D1.1",
+        object_type="COMPARISON_SNAPSHOT",
+        object_boundary="同一产品版本共同维护",
+        classification_basis="来源是同一产品的版本表",
+        identity_hints={
+            "subjects": ["药享保尊享版", "药享保全能版"],
+            "dimensionSet": ["保费", "年保额"],
+            "effectiveTime": "2026-08-21",
+        },
+        source_claim_ids=["CL1"],
+    )
+
+    normalized = _enforce_plan_granularity([plan], [])
+
+    assert normalized[0].object_type == "PRODUCT_VERSION_FACT"
+    assert normalized[0].identity_hints == {
+        "subject": "药享保",
+        "versionScope": "尊享版/全能版",
+        "factTheme": "产品版本综合事实",
+    }
+
+
+def test_granularity_gate_keeps_policy_rules_with_distinct_purposes() -> None:
     claims = [
         AtomicClaim.model_validate(
             _claim("DP-POLICY#row-1", "处方不超过5种药品", kind="rule", claim_id="CL1")
@@ -2894,14 +3102,208 @@ def test_granularity_gate_merges_policy_rules_for_same_business_subject() -> Non
 
     merged = _enforce_plan_granularity(plans, claims)
 
-    assert len(merged) == 1
-    assert merged[0].title == "线上问诊处方规则集"
-    assert merged[0].identity_hints == {
-        "purpose": "规范线上问诊处方",
-        "subject": "线上问诊处方",
-        "scope": "来源资料明确的规则范围",
-    }
-    assert merged[0].source_claim_ids == ["CL1", "CL2"]
+    assert len(merged) == 2
+    assert [plan.source_claim_ids for plan in merged] == [["CL1"], ["CL2"]]
+
+
+def test_granularity_gate_splits_distinct_flows_combined_by_model() -> None:
+    claims = [
+        AtomicClaim.model_validate(
+            {
+                **_claim(
+                    "DP-FLOW#page-1", "在线问诊流程", kind="process", claim_id="CL1"
+                ),
+                "attributes": {
+                    "purpose": "完成在线问诊购药",
+                    "subject": "药享保在线问诊",
+                    "scope": "在线问诊入口",
+                },
+            }
+        ),
+        AtomicClaim.model_validate(
+            {
+                **_claim(
+                    "DP-FLOW#page-2", "在线药房流程", kind="process", claim_id="CL2"
+                ),
+                "attributes": {
+                    "purpose": "完成在线药房购药",
+                    "subject": "药享保在线药房",
+                    "scope": "在线药房入口",
+                },
+            }
+        ),
+    ]
+    plan = CandidateObjectPlan(
+        plan_id="P1",
+        title="合并流程",
+        domain="D1",
+        module="D1.2",
+        object_type="BUSINESS_PROCESS",
+        object_boundary="模型错误合并",
+        classification_basis="业务流程",
+        identity_hints={
+            "purpose": "完成购药",
+            "subject": "药享保",
+            "scope": "全部入口",
+        },
+        source_claim_ids=["CL1", "CL2"],
+    )
+
+    split = _enforce_plan_granularity([plan], claims)
+
+    assert [item.source_claim_ids for item in split] == [["CL1"], ["CL2"]]
+    assert [item.identity_hints["purpose"] for item in split] == [
+        "完成在线问诊购药",
+        "完成在线药房购药",
+    ]
+
+
+def test_granularity_gate_merges_numbered_value_and_provider_sections() -> None:
+    value_claims = []
+    value_plans = []
+    for index in (1, 2):
+        claim = AtomicClaim.model_validate(
+            {
+                **_claim(
+                    f"DP-VALUE#page-{index}",
+                    f"亮点{index}内容",
+                    kind="value_proposition",
+                    claim_id=f"V{index}",
+                ),
+                "evidence": [
+                    {
+                        "anchorId": f"DP-VALUE#page-{index}",
+                        "exactQuote": f"亮点{index}内容",
+                        "sourceText": f"## 产品亮点\n亮点{index}内容",
+                    }
+                ],
+            }
+        )
+        value_claims.append(claim)
+        value_plans.append(
+            CandidateObjectPlan(
+                plan_id=f"V{index}",
+                title=f"价值{index}",
+                domain="D1",
+                module="D1.1",
+                object_type="SELLING_POINT",
+                object_boundary="同一编号亮点组",
+                classification_basis="客户价值",
+                identity_hints={
+                    "customerValue": f"价值{index}",
+                    "factScope": "产品",
+                    "triggerContext": "未明确",
+                },
+                source_claim_ids=[f"V{index}"],
+            )
+        )
+    provider_claims = [
+        AtomicClaim.model_validate(
+            _claim(f"DP-PROVIDER#page-{index}", f"能力{index}", claim_id=f"P{index}")
+        )
+        for index in (1, 2)
+    ]
+    provider_plans = [
+        CandidateObjectPlan(
+            plan_id=f"P{index}",
+            title=f"服务商能力{index}",
+            domain="D1",
+            module="D1.1",
+            object_type="PRODUCT_COMPONENT_FACT",
+            object_boundary="同一服务商共同维护",
+            classification_basis="服务商能力",
+            identity_hints={
+                "subject": "圆心惠保",
+                "versionScope": "当前",
+                "factTheme": f"能力{index}",
+            },
+            source_claim_ids=[f"P{index}"],
+        )
+        for index in (1, 2)
+    ]
+
+    merged = _enforce_plan_granularity(
+        [*value_plans, *provider_plans],
+        [*value_claims, *provider_claims],
+    )
+
+    assert len(merged) == 2
+    assert merged[0].source_claim_ids == ["V1", "V2"]
+    assert merged[1].source_claim_ids == ["P1", "P2"]
+
+
+def test_numbered_highlights_ignore_section_header_and_keep_six_items() -> None:
+    source_text = """## 产品亮点
+两大行业首创：首创慢性病保障；首创在线药房自主购药理赔
+亮点1
+慢病药品保障
+亮点2
+在线药房自主购药
+亮点3
+首次购药100%报销
+亮点4
+权益商城补贴
+亮点5
+大牌好药
+亮点6
+30万+医生服务
+"""
+    claim = AtomicClaim.model_validate(
+        {
+            **_claim("DP-VALUE#page-1", "六个亮点", kind="value_proposition"),
+            "evidence": [
+                {
+                    "anchorId": "DP-VALUE#page-1",
+                    "exactQuote": "六个亮点",
+                    "sourceText": source_text,
+                }
+            ],
+        }
+    )
+
+    highlights = _numbered_highlights([claim])
+
+    assert [text for _claim_id, text in highlights] == [
+        "亮点1：慢病药品保障",
+        "亮点2：在线药房自主购药",
+        "亮点3：首次购药100%报销",
+        "亮点4：权益商城补贴",
+        "亮点5：大牌好药",
+        "亮点6：30万+医生服务",
+    ]
+
+
+def test_granularity_gate_adds_waiting_period_source_to_service_rule() -> None:
+    version_claim = AtomicClaim.model_validate(
+        _claim("DP-RULE#page-1", "疾病7天等待期", claim_id="CL1")
+    )
+    rule_claim = AtomicClaim.model_validate(
+        _claim(
+            "DP-RULE#page-2",
+            "保单生效且过等待期后可使用服务",
+            kind="rule",
+            claim_id="CL2",
+        )
+    )
+    plan = CandidateObjectPlan(
+        plan_id="P1",
+        title="服务访问规则",
+        domain="D1",
+        module="D1.2",
+        object_type="POLICY_RULE_SET",
+        object_boundary="服务访问共同维护",
+        classification_basis="服务规则",
+        identity_hints={
+            "purpose": "明确服务条件",
+            "subject": "药享保服务",
+            "scope": "保单有效期",
+        },
+        source_claim_ids=["CL2"],
+    )
+
+    enriched = _enforce_plan_granularity([plan], [version_claim, rule_claim])
+
+    assert enriched[0].source_claim_ids == ["CL2", "CL1"]
 
 
 def test_granularity_gate_merges_qa_plans_from_one_document_unit() -> None:

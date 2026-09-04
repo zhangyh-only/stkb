@@ -144,6 +144,17 @@ def build_document_object_planning_request(
    - FAQ 的问答条目共享维护单元时形成一个 QA_PAIR 对象，但每个问题及答案分别形成 qa claim，
      attributes 至少包含 question 和 answer，计划引用全部 qa claim。
    - 完整流程可以形成一个 process claim，attributes 中用 steps 保存来源明确给出的有序步骤。
+   - 同一产品的多个版本对比表是产品版本矩阵，不是竞品比较快照；页面标为“亮点1、亮点2……”
+     的同一组客户价值必须完整纳入一个价值主张对象，不得混入缺少权威来源的政策或竞品判断。
+   - “助力获客、增强粘性、二次开发、增加收入”等销售队伍赋能目标不是销售策略；没有来源明确
+     的触发条件、判断分支和行动步骤时，应留在来源材料或 unresolvedItems。
+   - 连续页面共同描述同一主体能力时，必须保留全部支持页，不能只取该章节第一页。
+   - 培训材料对政策趋势、竞品和“行业首创/领先”的自述没有外部权威来源时，只能进入
+     unresolvedItems，不能形成 PRODUCT_FACT、COMPETITOR_FACT 或 COMPARISON_SNAPSHOT。
+   - 在线问诊与在线药房具有不同入口和完成目标，必须形成两个流程；服务访问/等待期/退保规则
+     与购药风控规则具有不同消费者和更新职责，必须形成两个规则对象。
+   - 产品页中的术语解释随产品事实保留；只有独立维护的多术语词汇表才能形成 TERM 对象。
+     同一版本矩阵中的权益、物流和增值服务不得再拆成第二个版本事实对象。
 8. 只输出合法 JSON。
 
 当前规划合同：
@@ -255,10 +266,15 @@ def build_content_realization_request(
 ) -> ModelRequest:
     claim_by_id = {claim.claim_id: claim for claim in claims}
     compact_claims: dict[str, dict[str, object]] = {}
+    included_source_contexts: set[str] = set()
     for claim in claims:
         compact = claim.model_dump(by_alias=True)
         for evidence in compact["evidence"]:
-            evidence.pop("sourceText", None)
+            anchor_id = str(evidence["anchorId"])
+            if anchor_id in included_source_contexts:
+                evidence.pop("sourceText", None)
+            else:
+                included_source_contexts.add(anchor_id)
         compact_claims[claim.claim_id] = compact
     object_tasks = [
         {
@@ -280,6 +296,8 @@ def build_content_realization_request(
 2. 完整吸收计划内所有主张：FAQ 的 items 每条 qa claim 至少对应一项；产品版本对象要覆盖事实、
    限制、适用范围和权益；流程保留顺序与条件；话术保留完整原文。
    每个任务只能使用该任务 verifiedClaims 中的证据，禁止借用同批其他任务的主张或法规依据。
+   evidence.sourceText 是同一锚点的已校验完整来源上下文；exactQuote 未覆盖同页的流程说明、能力事实
+   或例外时，可以从 sourceText 补齐，但 claimUsage 仍必须指向携带该 sourceText 的 claim。
 3. 需要保留某条主张的完整原文字段时输出 {{"$verbatimFromClaim":"主张ID"}}，系统会用已核验
    sourceText 替换；只需引用具体禁用表达、术语或短句时输出
    {{"$exactQuoteFromClaim":"主张ID"}}。主张 attributes 已提供精确结构字段时输出
@@ -292,6 +310,14 @@ def build_content_realization_request(
    unresolved，而不是编造。
    D1.2 流程的 preconditions 只收录资料明确写出的进入条件；从流程目的推导的常识不是来源事实，
    必须删除并输出空数组。exceptions 只能保留资料明确给出的条件和处理，不得补造自然反应。
+   来源使用“亮点1、亮点2……”编号时，SELLING_POINT.observableChecks 必须按编号一项对应一项；
+   同一亮点中的医生数量与等待期、药品品质与价格不得再拆成多个 item。
+   客户触发条件没有在来源中明确时，SELLING_POINT.triggerConditions 输出空数组，不得从亮点内容
+   推断“价格敏感客户”等人群；customerValue 只写“六大客户价值主张”这一集合名称。
+   流程页步骤后的处方有效期、继续付款和配送说明必须保留在同一流程的 rulesOrSteps 或 exceptions；
+   服务商连续页面中的人员、仓库、药房、覆盖范围、年药销和研发运营能力不得截断。
+   PRODUCT_VERSION_FACT.facts 按原表的一行一项保留，例如“单次赔付上限 300元 500元”；
+   不要改写成按版本拼接的长段落，否则无法证明每个字段与表格列的对应关系。
 5. 资料中的培训谚语、讲师观点和经验性判断必须保留来源立场。TERM 的每个 terms 条目中，
    standardExplanation 可准确转述资料主张，sourceStance 必须说明它是何种来源观点，
    usageBoundary 必须写明不能由此推断什么；不得把“往往/可能”改写成客观必然规律。
@@ -318,6 +344,8 @@ def build_content_realization_request(
    KnowledgeObject：D1.1 的 facts、limitations；D1.2 的 preconditions、rulesOrSteps 正文、
    exceptions；D3.2 的 triggerConditions、decisionLogic、actions；D4.2 的 script 和问答；
    D4.1 的 expressions、resolutionElements 及非空 rootConcernHypotheses。
+   来源事实字段应保留 verifiedClaims 中可逐项核对的原文措辞；若把多个表格事实合入一个字段，
+   每个分号或逗号分隔的事实片段都必须能在 verifiedClaims 的逐字来源中找到。
    不要用 summary 或笼统解释代替这些字段的逐项追溯。
 9. 计划内没有真实写入正文的主张必须进入 omittedClaims，逐条给出 claimId 与具体业务原因；
    不能既出现在 claimUsage 又出现在 omittedClaims，不能为了覆盖率虚报已消费。

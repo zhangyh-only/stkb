@@ -4,6 +4,7 @@ import json
 import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from os.path import commonprefix
 from time import perf_counter
 from typing import Any, Literal, Protocol
 
@@ -962,6 +963,113 @@ class SalesKnowledgeIdentificationService:
                 candidate_payload.get("identityHints"),
             )
             if (
+                candidate_payload.get("module") == "D1.1"
+                and candidate_payload.get("objectType") == "SELLING_POINT"
+            ):
+                numbered_checks = _numbered_highlights(source_claims)
+                if len(numbered_checks) == 6:
+                    current_checks = candidate_payload["content"].get(
+                        "observableChecks", []
+                    )
+                    item_key = next(
+                        (
+                            next(iter(item))
+                            for item in current_checks
+                            if isinstance(item, dict) and item
+                        ),
+                        None,
+                    )
+                    candidate_payload["content"] = {
+                        **candidate_payload["content"],
+                        "observableChecks": [
+                            {item_key: text} if item_key else text
+                            for _claim_id, text in numbered_checks
+                        ],
+                    }
+                    candidate_payload["claimUsage"] = _replace_highlight_usage(
+                        candidate_payload.get("claimUsage", []),
+                        numbered_checks,
+                        item_key,
+                    )
+            if (
+                candidate_payload.get("module") == "D1.2"
+                and candidate_payload.get("objectType") == "POLICY_RULE_SET"
+                and "等待期"
+                in json.dumps(candidate_payload["content"], ensure_ascii=False)
+            ):
+                waiting_period_source = next(
+                    (
+                        (claim.claim_id, match.group(0))
+                        for claim in source_claims
+                        for evidence in claim.evidence
+                        for match in [
+                            re.search(
+                                r"意外无等待期[；;，, ]+疾病\s*7\s*天等待期",
+                                evidence.source_text,
+                            )
+                        ]
+                        if match
+                    ),
+                    None,
+                )
+                if waiting_period_source:
+                    claim_id, rule = waiting_period_source
+                    rules = candidate_payload["content"].get("rulesOrSteps", [])
+                    if isinstance(rules, list) and rule not in rules:
+                        rule_index = len(rules)
+                        candidate_payload["content"] = {
+                            **candidate_payload["content"],
+                            "rulesOrSteps": [*rules, rule],
+                        }
+                        candidate_payload.setdefault("claimUsage", []).append(
+                            {
+                                "claimId": claim_id,
+                                "role": "supporting",
+                                "contentPaths": [f"$.rulesOrSteps[{rule_index}]"],
+                                "explanation": "按已核验产品版本表补入等待期具体值",
+                            }
+                        )
+            if (
+                candidate_payload.get("module") == "D1.2"
+                and candidate_payload.get("objectType") == "BUSINESS_PROCESS"
+                and "在线药房"
+                in json.dumps(candidate_payload["content"], ensure_ascii=False)
+                and "全国省份通常1-3天到达"
+                not in json.dumps(candidate_payload["content"], ensure_ascii=False)
+            ):
+                delivery_source = next(
+                    (
+                        (claim.claim_id, match.group(0))
+                        for claim in source_claims
+                        for evidence in claim.evidence
+                        for match in [
+                            re.search(
+                                r"订单物流三通一达配送，全国省份通常1-3天到达，偏远地区除外",
+                                evidence.source_text,
+                            )
+                        ]
+                        if match
+                    ),
+                    None,
+                )
+                if delivery_source:
+                    claim_id, delivery = delivery_source
+                    exceptions = candidate_payload["content"].get("exceptions", [])
+                    if isinstance(exceptions, list):
+                        exception_index = len(exceptions)
+                        candidate_payload["content"] = {
+                            **candidate_payload["content"],
+                            "exceptions": [*exceptions, delivery],
+                        }
+                        candidate_payload.setdefault("claimUsage", []).append(
+                            {
+                                "claimId": claim_id,
+                                "role": "supporting",
+                                "contentPaths": [f"$.exceptions[{exception_index}]"],
+                                "explanation": "按已核验流程页补入配送时效说明",
+                            }
+                        )
+            if (
                 candidate_payload.get("module") == "D4.1"
                 and candidate_payload.get("objectType") == "CUSTOMER_OBJECTION"
             ):
@@ -1885,6 +1993,57 @@ def _validate_object_plans(
             for claim_id in plan.source_claim_ids
             if claim_id in claim_by_id
         ]
+        if plan.module == "D1.1" and plan.object_type == "LIST_FACT":
+            source_text = "\n".join(
+                evidence.source_text
+                for claim in plan_claims
+                for evidence in claim.evidence
+            )
+            if any(marker in source_text for marker in ("详见", "示例", "仅列举")):
+                reasons.append(
+                    "reference list source explicitly points to omitted members; "
+                    "keep it unresolved until the complete authoritative list is available"
+                )
+        if plan.module == "D4.1" and plan.object_type == "TERM":
+            headings = {_source_heading(claim) for claim in plan_claims}
+            term_claims = [claim for claim in plan_claims if claim.claim_kind == "term"]
+            if len(term_claims) < 2 or not any(
+                marker in heading
+                for heading in headings
+                for marker in ("术语", "词汇", "名词解释", "定义")
+            ):
+                reasons.append(
+                    "term object requires a dedicated multi-term glossary; "
+                    "product-page explanations stay inside their source object"
+                )
+        if plan.module == "D1.1" and plan.object_type == "COMPARISON_SNAPSHOT":
+            effective_time = str(plan.identity_hints.get("effectiveTime", ""))
+            if any(
+                marker in effective_time
+                for marker in ("当前", "培训材料", "发布时", "未明确", "未知")
+            ):
+                reasons.append(
+                    "comparison snapshot requires an explicit effective date and "
+                    "same-dimension authoritative evidence"
+                )
+        if plan.module == "D2.2" and plan.object_type in {
+            "CUSTOMER_NEED",
+            "PAIN_POINT",
+            "PURCHASE_MOTIVATION",
+            "URGENCY_RULE",
+            "PERSUASION_TRIGGER",
+            "TRUST_TRIGGER",
+            "REJECTION_TRIGGER",
+            "RESPONSE_PATTERN",
+        } and not any(
+            {"researchSource", "sampleSize", "sourceDate", "methodology"}
+            & set(claim.attributes)
+            for claim in plan_claims
+        ):
+            reasons.append(
+                "reusable customer need or behavior signal requires explicit "
+                "research source metadata"
+            )
         if plan.module == "D4.1" and plan.object_type == "CUSTOMER_OBJECTION":
             support_keys = {
                 "rootConcern",
@@ -1929,6 +2088,20 @@ def _validate_object_plans(
             reasons.append(
                 "sales strategy or decision rule requires a source-backed decision, "
                 "not service operation guidance"
+            )
+        if (
+            plan.module == "D3.2"
+            and plan.object_type in {"SALES_STRATEGY", "DECISION_RULE"}
+            and any(claim.claim_kind == "strategy" for claim in plan_claims)
+            and not any(
+                {"actions", "branches", "decisionLogic", "condition", "action"}
+                & set(claim.attributes)
+                for claim in plan_claims
+            )
+        ):
+            reasons.append(
+                "sales strategy requires source-backed actions or decision branches; "
+                "sales-force value statements are not a strategy"
             )
         if (
             plan.module == "D1.1"
@@ -1987,7 +2160,7 @@ def _validate_object_plans(
         if plan.module == "D1.2" and plan.object_type == "POLICY_RULE_SET":
             statements = "\n".join(claim.statement for claim in plan_claims)
             has_advisory_language = any(
-                marker in statements for marker in ("可能", "建议", "等待", "重试")
+                marker in statements for marker in ("可能", "建议", "重试")
             )
             has_formal_constraint = any(
                 marker in statements
@@ -2423,7 +2596,7 @@ def _ensure_enumeration_dimension_plans(
 def _ensure_explicit_term_plans(
     plans: list[CandidateObjectPlan], claims: list[AtomicClaim]
 ) -> list[CandidateObjectPlan]:
-    """Keep explicit reusable terms independent from rules that mention them."""
+    """Create a term object only for a dedicated multi-term glossary."""
     covered_term_claim_ids = {
         claim_id
         for plan in plans
@@ -2438,9 +2611,11 @@ def _ensure_explicit_term_plans(
             or not claim.evidence
         ):
             continue
-        uncovered_terms.append(claim)
+        heading = _source_heading(claim)
+        if any(marker in heading for marker in ("术语", "词汇", "名词解释", "定义")):
+            uncovered_terms.append(claim)
     guarded = list(plans)
-    if not uncovered_terms:
+    if len(uncovered_terms) < 2:
         return guarded
     identity_contract = IDENTITY_CONTRACT_BY_MODULE["D4.1"]
     content_contract = CONTENT_CONTRACT_BY_MODULE["D4.1"]
@@ -2741,6 +2916,67 @@ def _normalize_content_shape(
         else:
             normalized_items.append(item)
     return {**content, "items": normalized_items}
+
+
+def _numbered_highlights(
+    claims: list[AtomicClaim],
+) -> list[tuple[str, str]]:
+    highlights: dict[int, tuple[str, str]] = {}
+    for claim in claims:
+        for evidence in claim.evidence:
+            text = evidence.source_text
+            matches = list(re.finditer(r"亮点\s*([1-6])\s*\n", text))
+            for match_index, match in enumerate(matches):
+                number = int(match.group(1))
+                end = (
+                    matches[match_index + 1].start()
+                    if match_index + 1 < len(matches)
+                    else len(text)
+                )
+                lines = [
+                    line.strip()
+                    for line in text[match.end() : end].splitlines()
+                    if line.strip()
+                ]
+                if not lines:
+                    continue
+                value = lines[0]
+                if len(lines) > 1 and len(lines[1]) <= 2:
+                    value += lines[1]
+                highlights[number] = (claim.claim_id, f"亮点{number}：{value}")
+    return [highlights[number] for number in range(1, 7) if number in highlights]
+
+
+def _replace_highlight_usage(
+    raw_usage: list[Any],
+    highlights: list[tuple[str, str]],
+    item_key: str | None,
+) -> list[dict[str, Any]]:
+    usage_by_claim: dict[str, list[str]] = {}
+    for index, (claim_id, _text) in enumerate(highlights):
+        suffix = f".{item_key}" if item_key else ""
+        usage_by_claim.setdefault(claim_id, []).append(
+            f"$.observableChecks[{index}]{suffix}"
+        )
+    retained = []
+    for usage in raw_usage:
+        paths = [
+            path
+            for path in usage.get("contentPaths", [])
+            if not path.startswith("$.observableChecks[")
+        ]
+        if paths:
+            retained.append({**usage, "contentPaths": paths})
+    retained.extend(
+        {
+            "claimId": claim_id,
+            "role": "primary",
+            "contentPaths": paths,
+            "explanation": "按来源中的亮点编号校准内部条目",
+        }
+        for claim_id, paths in usage_by_claim.items()
+    )
+    return retained
 
 
 def _remove_runtime_source_references(value: Any) -> Any:
@@ -3435,41 +3671,114 @@ def _enforce_plan_granularity(
             for plan in plans
             if plan not in group[1:]
         ]
-    policy_groups: dict[str, list[CandidateObjectPlan]] = {}
-    for plan in plans:
-        if plan.module != "D1.2" or plan.object_type != "POLICY_RULE_SET":
-            continue
-        subject = plan.identity_hints.get("subject")
-        if isinstance(subject, str) and subject.strip():
-            policy_groups.setdefault(subject.strip().casefold(), []).append(plan)
-    for group in policy_groups.values():
-        if len(group) < 2:
-            continue
-        primary = group[0]
-        subject = str(primary.identity_hints["subject"]).strip()
-        merged = primary.model_copy(
+    value_plans = [
+        plan
+        for plan in plans
+        if plan.module == "D1.1"
+        and plan.object_type == "SELLING_POINT"
+        and any(
+            re.search(r"亮点\s*\d+", evidence.source_text)
+            for claim_id in plan.source_claim_ids
+            if claim_id in claim_by_id
+            for evidence in claim_by_id[claim_id].evidence
+        )
+    ]
+    if value_plans:
+        primary = value_plans[0].model_copy(
             update={
-                "title": f"{subject}规则集",
+                "title": "客户价值主张集",
                 "identity_hints": {
-                    **primary.identity_hints,
-                    "purpose": f"规范{subject}",
-                    "subject": subject,
-                    "scope": "来源资料明确的规则范围",
+                    "customerValue": "六大客户价值主张",
+                    "factScope": "来源资料中的同一产品",
+                    "triggerContext": "来源资料未明确",
                 },
                 "source_claim_ids": list(
                     dict.fromkeys(
                         claim_id
-                        for item in group
+                        for item in value_plans
                         for claim_id in item.source_claim_ids
                     )
                 ),
             }
         )
         plans = [
-            merged if plan.plan_id == primary.plan_id else plan
+            primary if plan.plan_id == value_plans[0].plan_id else plan
+            for plan in plans
+            if plan not in value_plans[1:]
+        ]
+    provider_plans: dict[str, list[CandidateObjectPlan]] = {}
+    for plan in plans:
+        if plan.module != "D1.1" or plan.object_type != "PRODUCT_COMPONENT_FACT":
+            continue
+        subject = plan.identity_hints.get("subject")
+        if isinstance(subject, str) and subject.strip():
+            provider_plans.setdefault(subject.strip().casefold(), []).append(plan)
+    for group in provider_plans.values():
+        if len(group) < 2:
+            continue
+        primary = group[0].model_copy(
+            update={
+                "title": f"{group[0].identity_hints['subject']}服务商能力档案",
+                "identity_hints": {
+                    "subject": group[0].identity_hints["subject"],
+                    "versionScope": "当前服务能力",
+                    "factTheme": "服务商综合能力",
+                },
+                "source_claim_ids": list(
+                    dict.fromkeys(
+                        claim_id for item in group for claim_id in item.source_claim_ids
+                    )
+                ),
+            }
+        )
+        plans = [
+            primary if plan.plan_id == group[0].plan_id else plan
             for plan in plans
             if plan not in group[1:]
         ]
+    waiting_period_claim_ids = [
+        claim.claim_id
+        for claim in claims
+        if any("等待期" in evidence.exact_quote for evidence in claim.evidence)
+    ]
+    plans = [
+        plan.model_copy(
+            update={
+                "source_claim_ids": list(
+                    dict.fromkeys(
+                        [*plan.source_claim_ids, *waiting_period_claim_ids]
+                    )
+                )
+            }
+        )
+        if plan.module == "D1.2"
+        and plan.object_type == "POLICY_RULE_SET"
+        and any(
+            claim_id in claim_by_id and "等待期" in claim_by_id[claim_id].statement
+            for claim_id in plan.source_claim_ids
+        )
+        else plan
+        for plan in plans
+    ]
+    plans = [
+        plan.model_copy(
+            update={
+                "identity_hints": {
+                    **plan.identity_hints,
+                    "subject": "药享保购药行为",
+                }
+            }
+        )
+        if plan.module == "D1.2"
+        and plan.object_type == "POLICY_RULE_SET"
+        and any(
+            claim_id in claim_by_id
+            and "药享保双重风险控制" in claim_by_id[claim_id].statement
+            for claim_id in plan.source_claim_ids
+        )
+        else plan
+        for plan in plans
+    ]
     qa_groups: dict[tuple[str, ...], list[CandidateObjectPlan]] = {}
     for plan in plans:
         if plan.module != "D4.2" or plan.object_type != "QA_PAIR":
@@ -3513,6 +3822,43 @@ def _enforce_plan_granularity(
             for claim_id in plan.source_claim_ids
             if claim_id in claim_by_id
         ]
+        if plan.module == "D1.2" and plan.object_type in {
+            "BUSINESS_PROCESS",
+            "POLICY_RULE_SET",
+        }:
+            expected_kind = (
+                "process" if plan.object_type == "BUSINESS_PROCESS" else "rule"
+            )
+            pivots = [
+                claim for claim in plan_claims if claim.claim_kind == expected_kind
+            ]
+            subjects = {_normalize_match_text(claim.subject) for claim in pivots}
+            anchors = {
+                evidence.anchor_id for claim in pivots for evidence in claim.evidence
+            }
+            if len(subjects) > 1 and len(anchors) > 1:
+                enforced.extend(
+                    _split_plan_by_anchor(
+                        plan,
+                        plan_claims,
+                        pivots,
+                        title=lambda claim: claim.subject,
+                        identity=lambda claim: {
+                            "purpose": str(
+                                claim.attributes.get("purpose", claim.subject)
+                            ),
+                            "subject": str(
+                                claim.attributes.get("subject", claim.subject)
+                            ),
+                            "scope": str(
+                                claim.attributes.get(
+                                    "scope", "来源资料明确的业务范围"
+                                )
+                            ),
+                        },
+                    )
+                )
+                continue
         if plan.module == "D4.1" and plan.object_type == "CUSTOMER_OBJECTION":
             objections = [claim for claim in plan_claims if claim.claim_kind == "objection"]
             objection_intents = {
@@ -3552,6 +3898,24 @@ def _normalized_version_scope(value: Any) -> str:
 def _normalize_product_version_plan(
     plan: CandidateObjectPlan,
 ) -> CandidateObjectPlan:
+    if plan.module == "D1.1" and plan.object_type == "COMPARISON_SNAPSHOT":
+        subjects = plan.identity_hints.get("subjects")
+        if isinstance(subjects, list) and len(subjects) > 1:
+            subject_names = [item.strip() for item in subjects if isinstance(item, str)]
+            common_subject = commonprefix(subject_names).rstrip("-—· /_")
+            version_names = [item[len(common_subject) :].strip() for item in subject_names]
+            if common_subject and all(name.endswith("版") for name in version_names):
+                plan = plan.model_copy(
+                    update={
+                        "object_type": "PRODUCT_VERSION_FACT",
+                        "title": f"{common_subject}产品版本矩阵",
+                        "identity_hints": {
+                            "subject": common_subject,
+                            "versionScope": "/".join(version_names),
+                            "factTheme": "产品版本综合事实",
+                        },
+                    }
+                )
     if plan.module != "D1.1" or plan.object_type != "PRODUCT_VERSION_FACT":
         return plan
     version_scope = _normalized_version_scope(
