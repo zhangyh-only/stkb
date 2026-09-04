@@ -1,0 +1,191 @@
+{
+  "status": "approved",
+  "catalogVersion": "d1-d5-v0.9",
+  "contentContractVersion": "object-content-contracts-v1.5",
+  "identityContractVersion": "object-identity-contracts-v0.4",
+  "documentPackageId": "DP-YXB-TRAINING-20260821",
+  "sourceSha256": "0618c7f1c447060dc49b5494d1e1d38c5e0834f8ba5780101457fe36f02d7fca",
+  "fullMarkdownSha256": "54609358c48f46678279b8086e4715b187ce3ee61b2cefcdf6431fed4c9c94d5",
+  "anchorCount": 25,
+  "requireFieldEvidence": true,
+  "expectedObjectGroups": [
+    {
+      "key": "product-version-matrix",
+      "expectedCount": 1,
+      "module": "D1.1",
+      "objectTypes": ["PRODUCT_VERSION_FACT"],
+      "evidence": ["DP-YXB-TRAINING-20260821#page-11"],
+      "requireAllEvidence": true,
+      "requiredContentFields": ["subject", "facts", "applicability", "limitations"],
+      "allowEmptyContentFields": ["limitations"],
+      "requiredContentTerms": ["原研药", "7-65周岁", "300元", "500元", "6000元", "10000元", "70%", "80%", "50%", "2000+种", "400+种", "47种", "100元/人", "180元/人"],
+      "identityRules": {
+        "subject": {"containsAll": ["药享保"]},
+        "versionScope": {"containsAll": ["尊享版", "全能版"]}
+      },
+      "derivedContentPaths": ["$.subject", "$.applicability.product", "$.applicability.version"]
+    },
+    {
+      "key": "customer-value-proposition-set",
+      "expectedCount": 1,
+      "module": "D1.1",
+      "objectTypes": ["SELLING_POINT"],
+      "evidence": ["DP-YXB-TRAINING-20260821#page-14", "DP-YXB-TRAINING-20260821#page-15", "DP-YXB-TRAINING-20260821#page-16"],
+      "requireAllEvidence": true,
+      "requiredContentFields": ["name", "customerValue", "factReferences", "triggerConditions", "observableChecks"],
+      "allowEmptyContentFields": ["triggerConditions"],
+      "requiredItemCount": 6,
+      "requiredItemField": "observableChecks",
+      "requiredItemKeys": ["400+种慢性病", "购药理赔双通道", "首次普药购药100%", "权益商城", "售价对标", "30万+在职医生"],
+      "identityRules": {
+        "customerValue": {"containsAll": ["六大", "客户价值主张"]}
+      },
+      "derivedContentPaths": ["$.name", "$.customerValue"]
+    },
+    {
+      "key": "online-consultation-direct-reimbursement-process",
+      "expectedCount": 1,
+      "module": "D1.2",
+      "objectTypes": ["BUSINESS_PROCESS"],
+      "evidence": ["DP-YXB-TRAINING-20260821#page-19"],
+      "requireAllEvidence": true,
+      "requiredContentFields": ["purpose", "preconditions", "rulesOrSteps", "exceptions"],
+      "allowEmptyContentFields": ["preconditions", "exceptions"],
+      "requiredContentTerms": ["填写病情描述", "问诊并开具处方", "签字授权理赔直付", "等待药品配送"],
+      "identityRules": {
+        "purpose": {"containsAny": ["问诊", "处方"]},
+        "subject": {"containsAll": ["在线问诊"]}
+      },
+      "derivedContentPaths": ["$.purpose"]
+    },
+    {
+      "key": "online-pharmacy-direct-reimbursement-process",
+      "expectedCount": 1,
+      "module": "D1.2",
+      "objectTypes": ["BUSINESS_PROCESS"],
+      "evidence": ["DP-YXB-TRAINING-20260821#page-20"],
+      "requireAllEvidence": true,
+      "requiredContentFields": ["purpose", "preconditions", "rulesOrSteps", "exceptions"],
+      "allowEmptyContentFields": ["preconditions", "exceptions"],
+      "requiredContentTerms": ["在线药房", "用户选购所需药品", "医生复诊审方", "处方保留72小时", "全国省份通常1-3天到达"],
+      "identityRules": {
+        "purpose": {"containsAny": ["药房", "选购", "选药"]},
+        "subject": {"containsAll": ["在线药房"]}
+      },
+      "derivedContentPaths": ["$.purpose", "$.exceptions[1].condition"]
+    },
+    {
+      "key": "service-access-waiting-period-cancellation-rules",
+      "expectedCount": 1,
+      "module": "D1.2",
+      "objectTypes": ["POLICY_RULE_SET"],
+      "evidence": ["DP-YXB-TRAINING-20260821#page-11", "DP-YXB-TRAINING-20260821#page-18"],
+      "requireAllEvidence": true,
+      "requiredContentFields": ["purpose", "preconditions", "rulesOrSteps", "exceptions"],
+      "allowEmptyContentFields": ["preconditions", "exceptions"],
+      "requiredContentTerms": ["意外无等待期", "疾病7天等待期", "保单不可退保", "不受保单等待期限制", "权益商城"],
+      "identityRules": {
+        "purpose": {"containsAny": ["服务", "等待期", "退保"]},
+        "subject": {"containsAll": ["药享保"]}
+      },
+      "derivedContentPaths": ["$.purpose"]
+    },
+    {
+      "key": "purchase-risk-control-rules",
+      "expectedCount": 1,
+      "module": "D1.2",
+      "objectTypes": ["POLICY_RULE_SET"],
+      "evidence": ["DP-YXB-TRAINING-20260821#page-24"],
+      "requireAllEvidence": true,
+      "requiredContentFields": ["purpose", "preconditions", "rulesOrSteps", "exceptions"],
+      "allowEmptyContentFields": ["preconditions", "exceptions"],
+      "requiredContentTerms": ["普通疾病用药量不超过7天", "慢病用药量不超过30天", "每笔订单不超过4种", "每种药品不超过1盒", "在途订单不超过2个"],
+      "identityRules": {
+        "purpose": {"containsAny": ["风控", "风险", "用药", "套利", "滥用", "黄牛"]},
+        "subject": {"containsAll": ["药享保"]}
+      },
+      "derivedContentPaths": ["$.purpose"]
+    },
+    {
+      "key": "service-provider-capability-profile",
+      "expectedCount": 1,
+      "module": "D1.1",
+      "objectTypes": ["PRODUCT_COMPONENT_FACT"],
+      "evidence": ["DP-YXB-TRAINING-20260821#page-22", "DP-YXB-TRAINING-20260821#page-23"],
+      "requireAllEvidence": true,
+      "requiredContentFields": ["subject", "facts", "applicability", "limitations"],
+      "allowEmptyContentFields": ["limitations"],
+      "requiredContentTerms": ["北京圆心惠保科技有限公司", "30万", "11家中心仓", "206家药房", "16省隔日达", "除港澳台地区", "90亿元", "研发团队共56人"],
+      "identityRules": {
+        "subject": {"containsAll": ["北京圆心惠保"]}
+      },
+      "derivedContentPaths": ["$.subject", "$.applicability.product", "$.applicability.version"]
+    },
+    {
+      "key": "faq-collection",
+      "expectedCount": 1,
+      "module": "D4.2",
+      "objectTypes": ["QA_PAIR"],
+      "evidence": ["DP-YXB-TRAINING-20260821#page-25"],
+      "requireAllEvidence": true,
+      "requiredItemCount": 8,
+      "requiredItemField": "items",
+      "requiredItemFields": ["question", "answer", "claimRef"],
+      "requiredItemKeys": ["如何使用线上问诊服务", "相比同类互联网问诊产品", "会不会比线下药房售价更高", "线上问诊开药是否会和线下有所差异", "想要多购买一些药", "同种功效的药品可以一起购买吗", "为什么有的药品医生搜索不到", "是否可以开具购药发票"],
+      "requiredContentFields": ["items", "factReferences", "applicability"],
+      "identityRules": {
+        "subject": {"containsAll": ["药享保"]},
+        "applicability": {"containsAny": ["咨询", "问答", "客户", "销售"]}
+      },
+      "derivedContentPaths": ["$.applicability"]
+    }
+  ],
+  "negativeObjectGroups": [
+    {
+      "key": "missing-source-bundle-strategy",
+      "module": "D3.2",
+      "objectTypes": ["SALES_STRATEGY", "DECISION_RULE"],
+      "evidence": []
+    },
+    {
+      "key": "incomplete-drug-and-disease-lists",
+      "module": "D1.1",
+      "objectTypes": ["LIST_FACT"],
+      "evidence": ["DP-YXB-TRAINING-20260821#page-10", "DP-YXB-TRAINING-20260821#page-13"],
+      "requiredUnresolvedEvidence": ["DP-YXB-TRAINING-20260821#page-10", "DP-YXB-TRAINING-20260821#page-13"],
+      "claimKinds": ["list"]
+    },
+    {
+      "key": "policy-and-channel-background",
+      "module": "D1.1",
+      "objectTypes": ["PRODUCT_FACT"],
+      "evidence": ["DP-YXB-TRAINING-20260821#page-4", "DP-YXB-TRAINING-20260821#page-5"],
+      "requiredUnresolvedEvidence": ["DP-YXB-TRAINING-20260821#page-4", "DP-YXB-TRAINING-20260821#page-5"],
+      "claimKinds": ["fact", "customer_signal", "term"]
+    },
+    {
+      "key": "competitor-snapshot-without-authority",
+      "module": "D1.1",
+      "objectTypes": ["COMPETITOR_FACT", "COMPARISON_SNAPSHOT"],
+      "evidence": ["DP-YXB-TRAINING-20260821#page-6", "DP-YXB-TRAINING-20260821#page-14"],
+      "requiredUnresolvedEvidence": ["DP-YXB-TRAINING-20260821#page-6"],
+      "claimKinds": ["comparison", "fact"]
+    },
+    {
+      "key": "sales-force-value-is-not-strategy",
+      "module": "D3.2",
+      "objectTypes": ["SALES_STRATEGY", "DECISION_RULE"],
+      "evidence": ["DP-YXB-TRAINING-20260821#page-7"],
+      "requiredUnresolvedEvidence": ["DP-YXB-TRAINING-20260821#page-7"],
+      "claimKinds": ["strategy"]
+    },
+    {
+      "key": "product-terms-are-not-top-level",
+      "module": "D4.1",
+      "objectTypes": ["TERM"],
+      "evidence": ["DP-YXB-TRAINING-20260821#page-4", "DP-YXB-TRAINING-20260821#page-11"],
+      "claimKinds": ["term"]
+    }
+  ],
+  "allowedRejectedClaimIds": []
+}

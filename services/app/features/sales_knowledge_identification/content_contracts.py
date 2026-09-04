@@ -8,7 +8,7 @@ from typing import Any
 from .catalog import KNOWLEDGE_MODULES
 
 CONTRACTS_PATH = (
-    Path(__file__).with_name("rules") / "object-content-contracts-v1.4.toml"
+    Path(__file__).with_name("rules") / "object-content-contracts-v1.5.toml"
 )
 
 STRING_FIELDS_BY_OBJECT_TYPE: dict[str, tuple[str, ...]] = {

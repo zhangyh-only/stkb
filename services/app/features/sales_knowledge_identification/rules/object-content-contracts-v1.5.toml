@@ -1,4 +1,4 @@
-version = "object-content-contracts-v1.4"
+version = "object-content-contracts-v1.5"
 
 [[contracts]]
 module = "D1.1"
@@ -208,6 +208,7 @@ negative_example = "这是一份PPT。"
 module = "D5.1"
 object_types = ["SELLING_POINT", "CHECK_UNIT", "TRIGGER_CONDITION"]
 required_fields = ["name", "customerValue", "factReferences", "triggerConditions", "observableChecks"]
+allow_empty_fields = ["triggerConditions"]
 minimum_content_chars = 200
 granularity = "同一客户价值主张、事实依据和触发/检测条件形成对象。"
 inclusion = "由D1事实支撑、能匹配客户条件并可观察验证的卖点或检测点。"
